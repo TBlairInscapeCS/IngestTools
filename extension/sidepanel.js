@@ -184,7 +184,7 @@ function resetRun() {
   $('outRow').classList.add('hidden');
   $('download').classList.add('hidden');
   $('showSheet').classList.add('hidden');
-  $('confMatch').classList.add('hidden');
+  $('replyArea').classList.add('hidden');
   $('capInfo').innerHTML = '';
   ourDlIds.clear();
   // Sheet/email dots keep their state (the sheet stays loaded across
@@ -1516,7 +1516,7 @@ function presentMatches() {
       tabLinksHTML(byTab) + ' - click to switch &amp; match there.';
     wireTabLinks(el);
   });
-  $('confMatch').classList.remove('hidden');
+  refreshReply();
 
   // Delivery path pick: real URLs -> inline download button in this step;
   // label-only/empty links (master-sheet convention) -> open step 4 where
@@ -1681,11 +1681,52 @@ async function presentGuessPicker(cands) {
   });
 }
 
-$('confMatch').addEventListener('click', () => {
-  if (!matched) return;
-  copyText(buildMatchConfirmation(matched, emailSender), 'Confirmation reply');
-});
 $('showSheet').addEventListener('click', showOnSheet);
+
+// ---------- Section 1 reply drafts ----------
+
+// The reply preview + self-check: the best available draft (reconcile
+// confirmation when results exist, else the match confirmation) and a
+// line proving every ID the email cited is claimed in it - the user
+// verifies the draft before it ever gets pasted.
+function refreshReply() {
+  const area = $('replyArea');
+  let text = null;
+  if (lastResults) {
+    const espnIds = new Set();
+    (matched || []).forEach(m => {
+      if (!m.espn) return;
+      [m.id, m.trackingId].filter(Boolean).forEach(v =>
+        espnIds.add(normalizeName(v).replace(/ /g, '')));
+    });
+    text = buildReconConfirmation(lastResults, lastExtras, espnIds, emailSender) ||
+      buildConfirmationEmail(lastResults, emailSender);
+  }
+  if (!text && matched) text = buildMatchConfirmation(matched, emailSender);
+  if (!text) { area.classList.add('hidden'); return; }
+  area.classList.remove('hidden');
+  $('replyPreview').textContent = text;
+  const wanted = [...new Set(extractCodes(latestSegment(emailEl.value)))];
+  const body = normalizeName(text).replace(/ /g, '');
+  const missing = wanted.filter(c => !body.includes(normalizeName(c).replace(/ /g, '')));
+  $('replyCheck').innerHTML =
+    (emailSender ? 'greeting: "Hi ' + esc(emailSender) + ',"' : 'greeting: "Hi," (sender unknown)') +
+    ' · ' + (wanted.length
+      ? (missing.length
+        ? '<span style="color:#ec9a9a">' + missing.length + ' requested ID(s) NOT in reply: ' + missing.map(esc).join(', ') + '</span>'
+        : 'all ' + wanted.length + ' requested ID(s) in reply')
+      : 'no IDs cited in email');
+}
+
+$('copyReply').addEventListener('click', () => {
+  const t = $('replyPreview').textContent;
+  if (t) copyText(t, 'Reply');
+});
+$('copyExcReply').addEventListener('click', () => {
+  const t = lastResults && buildExceptionEmail(lastResults, emailSender);
+  if (t) copyText(t, 'Exception reply');
+  else toast('Nothing to report - no missing or ambiguous results.');
+});
 
 // List a Drive folder's files via the embedded-folder HTML view.
 // Works for "anyone with link" folders without auth; the browser session
@@ -2111,6 +2152,7 @@ function runReconcile() {
   $('manualTools').open = true; // results actions live inside the manual section
   setStage('sdDl', missing.length ? 'warn' : 'ok',
     fileCount + ' files indexed · ' + (missing.length ? missing.length + ' still missing' : 'all requested found'));
+  refreshReply();
   return true;
 }
 
@@ -2658,20 +2700,6 @@ $('runAll').addEventListener('click', async () => {
   toast('Matched ' + matched.length + ' row(s) but found no downloadable files - see the log.');
 });
 
-$('excEmail').addEventListener('click', () => lastResults && copyText(buildExceptionEmail(lastResults, emailSender), 'Exception email'));
-// Confirmation uses the real-world discrepancy template (found / extras /
-// missing) when reconcile data exists; falls back to the simple version.
-$('confEmail').addEventListener('click', () => {
-  if (!lastResults) return;
-  const espnIds = new Set();
-  (matched || []).forEach(m => {
-    if (!m.espn) return;
-    [m.id, m.trackingId].filter(Boolean).forEach(v =>
-      espnIds.add(normalizeName(v).replace(/ /g, '')));
-  });
-  copyText(buildReconConfirmation(lastResults, lastExtras, espnIds, emailSender) ||
-    buildConfirmationEmail(lastResults, emailSender), 'Confirmation email');
-});
 $('dlCsv').addEventListener('click', () => {
   if (!lastResults) return;
   const blob = new Blob([resultsToCsv(lastResults)], { type: 'text/csv' });

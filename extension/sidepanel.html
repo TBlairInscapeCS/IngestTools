@@ -114,15 +114,28 @@
   </div>
   <div class="info" id="inboxList"></div>
   <div class="info" id="emailInfo"></div>
+  <div id="replyArea" class="hidden" style="margin-top:6px">
+    <div class="row">
+      <button id="copyReply" class="primary">Copy reply</button>
+      <button id="copyExcReply">Exception reply</button>
+    </div>
+    <div class="hint" id="replyCheck"></div>
+    <pre id="replyPreview" class="scrollbox mono" style="max-height:14vh;white-space:pre-wrap;font-size:11px;margin-top:4px"></pre>
+  </div>
 </details>
 
 <details class="s2" open>
   <summary>2 · Tracking sheet<span class="ib" data-bubble="b2">?</span><span class="stamp" id="tsSheet"></span><span class="sdot" id="sdSheet"></span></summary>
   <div class="bubble hidden" id="b2">The client tracker - loaded automatically from the email's sheet link, a focused sheet tab, or any open tracker tab (an <b>Airtable tab is read via the app's own copy</b>, which covers every row, not just visible ones). <b>Paste tracker</b> is the manual fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Column mapping auto-detects; adjust under the mapping row if the sheet is unusual.</div>
   <div class="row">
-    <button id="grabSheet">Grab sheet tab</button>
-    <button id="loadSheet">Load file</button>
-    <button id="pasteSheet">Paste tracker</button>
+    <button id="grabSheet" class="primary">Grab sheet tab</button>
+    <details style="display:inline">
+      <summary style="text-transform:none;font-weight:400;display:inline;font-size:10px;color:#8b93a1">other sources</summary>
+      <div class="row">
+        <button id="loadSheet">Load file</button>
+        <button id="pasteSheet">Paste tracker</button>
+      </div>
+    </details>
     <details id="colDetails" style="display:inline">
       <summary style="text-transform:none;font-weight:400;display:inline;font-size:10px;color:#8b93a1">columns</summary>
       <div class="row" id="colPicks">
@@ -154,7 +167,6 @@
     <input type="text" id="jobLabel" placeholder="job folder" size="14">
     <button id="download" class="hidden"></button>
     <button id="showSheet" class="hidden">Show on sheet</button>
-    <button id="confMatch" class="hidden">Copy reply</button>
   </div>
   <div class="scrollbox" id="matchResults"></div>
 </details>
@@ -194,8 +206,6 @@
     </div>
     <div id="outRow" class="row hidden">
       <button id="dlFound">Download found</button>
-      <button id="excEmail">Exception email</button>
-      <button id="confEmail">Confirmation email</button>
       <button id="dlCsv">Results CSV</button>
     </div>
   </details>
