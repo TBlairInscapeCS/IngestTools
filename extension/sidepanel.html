@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ingest Streamlined</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 12px/1.4 -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 10px; color: #d7dbe2; background: #14161a; }
+  h1 { font-size: 13px; margin: 0 8px 8px 0; display: inline; }
+  .topbar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+
+  details { border: 1px solid #2c313b; border-left-width: 3px; border-radius: 6px; margin-bottom: 8px; padding: 7px 9px; background: #1b1e24; }
+  summary { font-size: 11px; font-weight: 700; letter-spacing: .03em; cursor: pointer; }
+  .s1 { border-left-color: #4f9cf9; } .s1 > summary { color: #7fb7fb; }
+  .s2 { border-left-color: #3fbf7f; } .s2 > summary { color: #6ed3a2; }
+  .s3 { border-left-color: #a06cd5; } .s3 > summary { color: #c09ae8; }
+  .s4 { border-left-color: #e8a13d; } .s4 > summary { color: #f0bc6e; }
+
+  textarea { width: 100%; box-sizing: border-box; height: 72px; font: 11px/1.35 ui-monospace, monospace; padding: 5px; border: 1px solid #333a45; border-radius: 4px; resize: vertical; margin-top: 6px; background: #12151a; color: #cfd4dc; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+  button { font-size: 11px; padding: 4px 9px; border: 1px solid #3a414d; border-radius: 4px; background: #242933; color: #d7dbe2; cursor: pointer; }
+  button:hover { background: #2e3541; }
+  button.primary { background: #2f6fd0; border-color: #2f6fd0; color: #fff; }
+  button.primary:hover { background: #3a7dde; }
+  .s4 button.primary { background: #c07d1e; border-color: #c07d1e; }
+  .s4 button.primary:hover { background: #d38e2b; }
+  select, input[type=text] { font-size: 11px; padding: 3px 4px; background: #12151a; color: #d7dbe2; border: 1px solid #333a45; border-radius: 4px; }
+  a { color: #6ea8f0; }
+
+  .hint { color: #8b93a1; font-size: 10px; margin-top: 4px; }
+  .info { font-size: 10px; color: #b8bfca; background: #22262e; border-radius: 4px; padding: 4px 7px; margin-top: 5px; display: none; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; margin-right: 4px; }
+  .FOUND { background: #234a2e; color: #9adfa8; }
+  .POSSIBLE { background: #4d4423; color: #ecd98a; }
+  .AMBIGUOUS { background: #4d3523; color: #ecb98a; }
+  .MISSING { background: #4d2828; color: #ec9a9a; }
+  .DUPLICATE { background: #442a45; color: #d5a5d8; }
+  .BLANK { background: #2e3138; color: #9aa1ad; }
+  .EXTRA { background: #4d3523; color: #ecb98a; }
+  .ID { background: #234a2e; color: #9adfa8; }
+  .ROW { background: #23405a; color: #93c2ec; }
+  .FILE { background: #23424a; color: #8fd0db; }
+  .TITLE { background: #2d4a23; color: #b8e08f; }
+  .BRAND { background: #4d4423; color: #ecd98a; }
+  .warn { background: #4d2828; color: #ec9a9a; }
+  .espn { background: #2a3550; color: #9db5ec; }
+  .GUESS { background: #3a2d4d; color: #cfaef0; }
+
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  td, th { border: 1px solid #2c313b; padding: 3px 5px; text-align: left; font-size: 11px; vertical-align: top; }
+  th { background: #22262e; position: sticky; top: 0; }
+  .scrollbox { max-height: 32vh; overflow: auto; }
+  .mono { font-family: ui-monospace, monospace; }
+  .trunc { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+
+  #toast { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #3a414d; color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 11px; display: none; z-index: 9; }
+  .hidden { display: none !important; }
+  label.col { font-size: 10px; color: #8b93a1; }
+  #manualTools summary { font-size: 10px; font-weight: 400; text-transform: none; color: #8b93a1; letter-spacing: 0; }
+  .stamp { font-size: 9px; font-weight: 400; color: #6b7280; margin-left: 5px; letter-spacing: 0; }
+  .ib { display: inline-block; min-width: 14px; padding: 0 3px; border-radius: 8px; background: #2c313b;
+        color: #8b93a1; font-size: 10px; text-align: center; cursor: pointer; font-weight: 400; margin-left: 4px; }
+  .ib:hover { background: #3a414d; color: #cfd4dc; }
+  .bubble { font-size: 10px; color: #aab1bd; background: #171a1f; border-left: 2px solid #3a414d;
+            padding: 5px 8px; margin: 5px 0 2px; line-height: 1.5; }
+  .bubble b { color: #cfd4dc; }
+  .sdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+          background: #4a515c; margin-left: 6px; vertical-align: 1px; }
+  .sdot.ok { background: #3fbf7f; }
+  .sdot.warn { background: #e8a13d; }
+  .sdot.fail { background: #e05c5c; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Ingest Streamlined</h1>
+  <button id="runAll" class="primary">Run</button>
+  <span class="ib" data-bubble="bRun">?</span>
+  <label class="col">Client <select id="clientSel"></select></label>
+</div>
+<div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then downloads: direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>
+<div class="info" id="clientNote"></div>
+
+<details class="s1" open>
+  <summary>1 · Request email<span class="ib" data-bubble="b1">?</span><span class="stamp" id="tsEmail"></span><span class="sdot" id="sdEmail"></span></summary>
+  <div class="bubble hidden" id="b1">The email saying which creatives to ingest. <b>Check inbox</b> reads unread mail via Graph sign-in (no Outlook tab needed; the icon badge counts fresh requests). <b>Grab</b> reads an open Outlook tab; paste/.eml work too. A new email resets the run.</div>
+  <textarea id="email" placeholder="Paste the request email, or grab it from the open Outlook tab."></textarea>
+  <div class="row">
+    <button id="grabEmail">Grab from Outlook</button>
+    <button id="checkInbox">Check inbox</button>
+    <button id="pasteEmail">Paste email</button>
+    <button id="loadEmail">Load .eml</button>
+    <button id="clearEmail">Clear</button>
+  </div>
+  <div class="info hidden" id="msSetup">
+    Reads your inbox via Microsoft Graph. One-time setup:
+    Entra &rarr; App registrations &rarr; new app (org-only, no redirect URI)
+    &rarr; "Allow public client flows" = Yes &rarr; add delegated <b>Mail.Read</b>.<br>
+    <input id="msClientId" placeholder="Application (client) ID" style="width:55%">
+    <input id="msTenant" placeholder="Tenant domain or ID" style="width:33%">
+    <button id="msSignIn">Sign in</button>
+    <a href="#" id="msUsePsApp" title="Microsoft's first-party Graph PowerShell app - often pre-consented in locked-down tenants">no app access? try the built-in one</a>
+    <span id="msMsg"></span>
+    <div id="msCodeRow" class="hidden">
+      After signing in on the page that opened, paste the code shown - or
+      the full URL if it lands on a dead localhost page:
+      <input id="msCode" placeholder="code or full URL" style="width:60%">
+      <button id="msCodeGo">Exchange</button><br>
+      <a href="#" id="msAltRedirect">redirect_uri error? try the other form</a> ·
+      <a href="#" id="msDevCode">use device code instead</a>
+    </div>
+  </div>
+  <div class="info" id="inboxList"></div>
+  <div class="info" id="emailInfo"></div>
+</details>
+
+<details class="s2" open>
+  <summary>2 · Tracking sheet<span class="ib" data-bubble="b2">?</span><span class="stamp" id="tsSheet"></span><span class="sdot" id="sdSheet"></span></summary>
+  <div class="bubble hidden" id="b2">The client tracker - loaded automatically from the email's sheet link, a focused sheet tab, or any open tracker tab (an <b>Airtable tab is read via the app's own copy</b>, which covers every row, not just visible ones). <b>Paste tracker</b> is the manual fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Column mapping auto-detects; adjust under the mapping row if the sheet is unusual.</div>
+  <div class="row">
+    <button id="grabSheet">Grab sheet tab</button>
+    <button id="loadSheet">Load file</button>
+    <button id="pasteSheet">Paste tracker</button>
+    <details id="colDetails" style="display:inline">
+      <summary style="text-transform:none;font-weight:400;display:inline;font-size:10px;color:#8b93a1">columns</summary>
+      <div class="row" id="colPicks">
+        <label class="col">ID <select id="colId"></select></label>
+        <label class="col">Title <select id="colTitle"></select></label>
+        <label class="col">File name <select id="colFile"></select></label>
+        <label class="col">Link <select id="colLink"></select></label>
+        <label class="col">Access? <select id="colAccess"></select></label>
+        <label class="col">Brand <select id="colBrand"></select></label>
+        <label class="col">ESPN flag <select id="colEspn"></select></label>
+        <label class="col">Date <select id="colDate"></select></label>
+        <label class="col">Hdr <input type="text" id="headerRow" value="1" size="2"></label>
+      </div>
+    </details>
+  </div>
+  <div class="row hidden" id="pasteRow">
+    <textarea id="sheetPaste" placeholder="Paste the tracker rows here, then Load pasted" style="height:56px"></textarea>
+    <button id="pasteSheetLoad">Load pasted</button>
+  </div>
+  <div class="hint" id="colSummary"></div>
+  <div class="info" id="sheetInfo"></div>
+</details>
+
+<details class="s3" open>
+  <summary>3 · Match<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
+  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. Files land in ~/Downloads/Ingest/&lt;job&gt;/.</div>
+  <div class="row">
+    <button id="match" class="primary">Match</button>
+    <input type="text" id="jobLabel" placeholder="job folder" size="14">
+    <button id="download" class="hidden"></button>
+    <button id="showSheet" class="hidden">Show on sheet</button>
+    <button id="confMatch" class="hidden">Copy reply</button>
+  </div>
+  <div class="scrollbox" id="matchResults"></div>
+</details>
+
+<details class="s4" id="sec4">
+  <summary>4 · Download files<span class="ib" data-bubble="b4">?</span><span class="stamp" id="tsCapture"></span><span class="sdot" id="sdDl"></span></summary>
+  <div class="bubble hidden" id="b4">
+    <b>Open pages</b> reads every delivery list open in the browser (ER Spot Deliveries tabs + the focused page) - only what's on screen; flip pages and press again to accumulate.<br>
+    <b>ER search</b> queries Extreme Reach directly: every Inscape TV delivery in the day window, all pages. Optional sender filter reads each delivery's "Trafficked By" (e.g. <i>tatari</i>); with matched IDs loaded it only sender-checks those rows. No page needed open - just be logged into ER.
+  </div>
+  <div class="row">
+    <button id="grabAndDl" class="primary">Download from open pages</button>
+  </div>
+  <div class="row">
+    <input type="text" id="erSender" placeholder="sender (e.g. tatari)" size="14">
+    <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
+    <button id="erSweep">Download from ER search</button>
+  </div>
+  <div class="hint" id="capInfo"></div>
+  <div class="hint" id="dateFilterHint"></div>
+  <div id="counts"></div>
+  <div class="hint" id="missingNote" style="color:#ec9a9a"></div>
+  <div class="scrollbox" id="results"></div>
+  <details id="manualTools">
+    <summary>Manual lists, API &amp; reports</summary>
+    <textarea id="ids" placeholder="Requested tracking IDs"></textarea>
+    <textarea id="files" placeholder="File names"></textarea>
+    <div class="row">
+      <button id="grabFiles">Grab list</button>
+      <button id="loadFiles">Load .csv</button>
+      <button id="clearFiles">Clear</button>
+      <button id="run">Reconcile</button>
+    </div>
+    <div class="row">
+      <input type="password" id="erApiKey" placeholder="ER API key" size="22" autocomplete="off">
+      <button id="erApi">API: fetch &amp; download</button>
+    </div>
+    <div id="outRow" class="row hidden">
+      <button id="dlFound">Download found</button>
+      <button id="excEmail">Exception email</button>
+      <button id="confEmail">Confirmation email</button>
+      <button id="dlCsv">Results CSV</button>
+    </div>
+  </details>
+</details>
+
+<details id="dbgTools">
+  <summary style="font-size:10px;font-weight:400;color:#8b93a1;text-transform:none">Log</summary>
+  <div class="scrollbox" id="dbgLog" style="max-height:20vh"></div>
+  <div class="row">
+    <button id="copyLog">Copy log</button>
+    <button id="clearLog">Clear log</button>
+  </div>
+</details>
+
+<div id="confirmModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:99">
+  <div style="background:#1b1e24;border:1px solid #3a414d;border-radius:6px;padding:14px;max-width:300px">
+    <div id="confirmMsg" style="font-size:12px;line-height:1.5;margin-bottom:10px"></div>
+    <div class="row">
+      <button id="confirmNew" class="primary"></button>
+      <button id="confirmAll">All</button>
+      <button id="confirmCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<input type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx,.eml" class="hidden">
+<script src="engine.js"></script>
+<script src="clients.js"></script>
+<script src="xlsx.js"></script>
+<script src="graph.js"></script>
+<script src="sidepanel.js"></script>
+</body>
+</html>

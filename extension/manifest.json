@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Ingest Streamlined",
+  "version": "0.1.0",
+  "description": "Match request emails to tracking sheets, pull delivered files (Extreme Reach, share lists), and flag what's missing or already ingested.",
+  "permissions": ["sidePanel", "contextMenus", "storage", "scripting", "downloads", "cookies", "clipboardRead", "alarms"],
+  "host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Ingest Reconcile" }
+}

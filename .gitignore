@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+logs/
+*.crdownload
+
+# Internal data dumps — never push (real emails, API responses, client PDFs)
+examples/mail_*.json
+examples/tatari*.json
+examples/*.pdf
+examples/*.app
+examples/*_files/

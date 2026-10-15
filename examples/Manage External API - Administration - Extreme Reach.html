@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<!-- saved from url=(0095)https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#showFolders -->
+<html xmlns="http://www.w3.org/1999/xhtml"><head id="Head1"><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<title>Manage External API - Administration - Extreme Reach</title>
+<meta name="description" content="Welcome to XR Exterme Reach">
+<meta name="keywords" content="extreme reach, video asset, creative library, digital media plan, creative asset management, creative asset dashboard, dynamic creative optimization, talent and rights, creative transcoding, video ad serving,">
+<meta name="google-site-verification" content="B3gfwpOD3fyncmPU7tQ4NjlvmaWr0TY6u-E0K6_z8RQ">
+<meta property="fb:pages" content="76363260981">
+
+
+<link rel="icon" href="https://app.extremereach.com/content/images/common/favicon/favicon.ico" sizes="32x32">
+<link rel="icon" href="https://app.extremereach.com/content/images/common/favicon/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="https://app.extremereach.com/content/images/common/favicon/apple-touch-icon.png"><!-- 180×180 -->
+<link rel="manifest" href="https://app.extremereach.com/content/images/common/favicon/manifest.webmanifest">
+<meta name="theme-color" content="#ffffff">
+
+
+<script type="text/javascript" async="" src="./Manage External API - Administration - Extreme Reach_files/js"></script><script type="text/javascript" async="" src="./Manage External API - Administration - Extreme Reach_files/linkid.js"></script><script async="" src="./Manage External API - Administration - Extreme Reach_files/analytics.js"></script><script async="" src="./Manage External API - Administration - Extreme Reach_files/pendo.js"></script><script type="text/javascript" async="" src="./Manage External API - Administration - Extreme Reach_files/2"></script><script>
+    !function () {
+        if ('PerformanceLongTaskTiming' in window) {
+            var g = window.__tti = { e: [] };
+            g.o = new PerformanceObserver(function (l) { g.e = g.e.concat(l.getEntries()) });
+            g.o.observe({ entryTypes: ['longtask'] })
+        }
+    }();
+</script>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com/">
+<link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+<link href="./Manage External API - Administration - Extreme Reach_files/css2" rel="stylesheet">
+<link href="./Manage External API - Administration - Extreme Reach_files/v6.4.0.css" rel="stylesheet">
+
+
+
+<link href="./Manage External API - Administration - Extreme Reach_files/xr-light-core-legacy-6.0.0.min.css" rel="stylesheet">
+
+
+<script src="./Manage External API - Administration - Extreme Reach_files/base-legacy-6.0.0.min.js" type="text/javascript"></script>
+<script src="./Manage External API - Administration - Extreme Reach_files/shared-6.0.0.min.js" type="text/javascript"></script>
+<script src="./Manage External API - Administration - Extreme Reach_files/scripts-legacy-6.0.0.min.js" type="text/javascript"></script>
+<script src="./Manage External API - Administration - Extreme Reach_files/main-6.0.0.min.js" type="text/javascript"></script>
+
+<script src="./Manage External API - Administration - Extreme Reach_files/date.js" type="text/javascript"></script>
+
+<script src="./Manage External API - Administration - Extreme Reach_files/jquery.ganttView.js" type="text/javascript"></script>
+<link href="./Manage External API - Administration - Extreme Reach_files/jquery.ganttView1.css" rel="stylesheet">
+
+<script src="./Manage External API - Administration - Extreme Reach_files/jquery.loadmask.js" type="text/javascript"></script>
+<link href="./Manage External API - Administration - Extreme Reach_files/jquery.loadmask.css" rel="stylesheet">
+
+<script src="./Manage External API - Administration - Extreme Reach_files/jquery.tokeninput.min.js" type="text/javascript"></script>
+<link href="./Manage External API - Administration - Extreme Reach_files/token-input.css" rel="stylesheet">
+
+<script src="./Manage External API - Administration - Extreme Reach_files/jquery.tablesorter.min.js" type="text/javascript"></script>
+<script src="./Manage External API - Administration - Extreme Reach_files/jquery.autosize-1.17.8.min.js" type="text/javascript"></script>
+
+
+
+
+<script type="text/javascript">
+<!--
+   function loadNotificationAlerts() {
+        var alertUpdateInterval = -1; /* default update interval is OFF */
+        if ($("#notification_panel").length != 0) {
+            $.get("/Notification/Alerts", null,
+                function (data) {
+                    $("#notification_panel").html(data);
+                });
+            if (alertUpdateInterval > 0) {
+                setTimeout('loadNotificationAlerts();', alertUpdateInterval);
+            }
+        }
+    }
+
+    function savePageVisibilityMask(visibilityMask) {
+    }
+
+ //-->
+</script>
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+
+            $("#advancedPanel").hide(0);
+            hidePanel("secretPanel", $("#secureValueExpander"));
+
+            if ($(":radio[value=true]").prop("checked")) {
+                $("#destinationAccess").show();
+            }
+            else {
+                $("#destinationAccess").hide();
+            }
+
+            if ($("#externalApiSubType").val() == "805") {
+                $("#needlessInfo1").hide(0);
+                $("#needlessInfo2").hide(0);
+                $("#needlessInfo3").hide(0);
+                $("#needlessInfo4").hide(0);
+                $("#needlessInfo5").hide(0);
+            }
+            else {
+                $("#needlessInfo1").show(0);
+                $("#needlessInfo2").show(0);
+                $("#needlessInfo3").show(0);
+                $("#needlessInfo4").show(0);
+                $("#needlessInfo5").show(0);
+            }
+
+            if ($("input:checkbox[name='usesSecureKey']").prop("checked") == true) {
+                $("#secureRow").show(0);
+            }
+            else {
+                $("#secureRow").hide(0);
+            }
+
+            $(":radio").click(function () {
+                if (this.value == "true") {
+                    $("#destinationAccess").show(400);
+                }
+                else {
+                    $("#destinationAccess").hide(400);
+                }
+            });
+
+            $("#secureValuePanel").click(function () {
+                if ($("input:checkbox[name='usesSecureKey']").prop("checked") == true) {
+                    togglePanel("secretPanel", $("#secureValueExpander"));
+                }
+            });
+
+            $("#showDestinations").click(function () {
+                togglePanel("destinationPanel", $("#destinationExpander"));
+            });
+
+            $("#selectAllDestinations").click(function () {
+                var checked_status = this.checked;
+                $("input[name='destinationId']").each(function () {
+                    if (this.disabled == false) {
+                        this.checked = checked_status;
+                    }
+                });
+            });
+
+            $("input:checkbox[name='usesSecureKey']").click(function () {
+                if ($(this).prop("checked") == false) {
+                    hidePanel("secretPanel", $("#secureValueExpander"));
+                    $("#secureRow").hide(0);
+                }
+                else {
+                    $("#secureRow").show(0);
+                }
+            });
+
+            $("#externalApiSubType").change(function () {
+                if ($(this).val() == "805") {
+                    $("#needlessInfo1").hide(0);
+                    $("#needlessInfo2").hide(0);
+                    $("#needlessInfo3").hide(0);
+                    $("#needlessInfo4").hide(0);
+                    $("#needlessInfo5").hide(0);
+                }
+                else {
+                    $("#needlessInfo1").show(0);
+                    $("#needlessInfo2").show(0);
+                    $("#needlessInfo3").show(0);
+                    $("#needlessInfo4").show(0);
+                    $("#needlessInfo5").show(0);
+                }
+            });
+
+            if ($("input:checkbox[name='userWindow']").prop("checked") == false) {
+                $("#downloadWindowPanel").hide(0);
+            }
+
+            if ($("input:checkbox[name='useDesinationFolders']").prop("checked") == false) {
+                $("#destinationFolderPanel").hide(0);
+            }
+
+            if ($("input:checkbox[name='useMetadataFolders']").prop("checked") == false) {
+                $("tr[id='downloaderMetadataFolders']").hide(0);
+                $("tr[id='destinationMetadataFolders']").hide(0);
+            }
+
+            $("input:checkbox[name='useDesinationFolders']").click(function () {
+                if ($(this).prop("checked") == true) {
+                    $("#destinationFolderPanel").show(400);
+                }
+                else {
+                    $("#destinationFolderPanel").hide(400);
+                }
+            });
+
+            $("input:checkbox[name='useMetadataFolders']").click(function () {
+                if ($(this).prop("checked") == true) {
+                    $("tr[id='downloaderMetadataFolders']").show();
+                    $("tr[id='downloaderMetadataFolders']").attr("style", "");
+                    $("tr[id='destinationMetadataFolders']").show();
+                    $("tr[id='destinationMetadataFolders']").attr("style", "");
+                }
+                else {
+                    $("tr[id='downloaderMetadataFolders']").hide();
+                    $("tr[id='destinationMetadataFolders']").hide();
+                }
+            });
+
+            $("#showFolders").click(function () {
+                togglePanel("foldersPanel", $("#foldersExpander"));
+            });
+
+            $("#showAdvanced").click(function () {
+                togglePanel("advancedPanel", $("#advancedExpander"));
+            });
+
+            $("#hideFolderHelp").click(function () {
+                $("#folderHelp").hide(101);
+            });
+
+            $("input:checkbox[name='userWindow']").click(function () {
+                if ($(this).prop("checked") == true) {
+                    $("#downloadWindowPanel").show(400);
+                }
+                else {
+                    $("#downloadWindowPanel").hide(400);
+                }
+            });
+
+            $("form").submit(function () {
+                if ($("#downloadFolder").attr("value") == "") {
+                    alert("Please enter a ExternalApi Folder location where deliveries should be stored.");
+                    return false;
+                }
+            });
+        });
+
+        function setActive(isActive) {
+            $("#isActive").val(isActive);
+            $("#setExternalApiActive").submit();
+        }
+
+        function togglePanel(panelId, toggleImage) {
+            visible = ($("#" + panelId + ":visible").length == 1);
+            if (visible) {
+                toggleImage.attr('src', '/Content/images/expand.gif');
+                $("#" + panelId).hide(400);
+            }
+            else {
+                toggleImage.attr('src', '/Content/images/collapse.gif');
+                $("#" + panelId).show(400);
+            }
+        }
+
+        function hidePanel(panelId, toggleImage) {
+            visible = ($("#" + panelId + ":visible").length == 1);
+            if (visible) {
+                toggleImage.attr('src', '/Content/images/expand.gif');
+                $("#" + panelId).hide(400);
+            }
+        }
+    </script>
+<title>
+
+</title><script async="true" type="text/javascript" src="./Manage External API - Administration - Extreme Reach_files/6cd7a4d5b453b12eab5d0c1b23caf297.js"></script><style type="text/css">#lhc_status_container.hide-status,#lhc_status_container.hide-status-delay{display:none!important;}#lhc_status_container * {direction:ltr;text-align:left;;font-family:arial;font-size:12px;box-sizing: content-box;zoom:1;margin:0;padding:0}
+#lhc_status_container .status-icon{text-decoration:none;font-size:12px;font-weight:bold;color:#00B0B9;display:block;padding:10px 10px 10px 35px;background:url('https://extremereachsupport.livehelperchat.com/var/storagetheme/2018y/08/13/1847/2/850548f28f80eef084608df477433a44.png') no-repeat left center}
+#lhc_status_container:hover{}
+#lhc_status_container #offline-icon{background-image:url('https://extremereachsupport.livehelperchat.com/design/defaulttheme/images/icons/user_gray_chat.png')}
+#lhc_status_container{box-sizing: content-box;-webkit-border-top-left-radius: 20px;-moz-border-radius-topleft: 20px;border-top-left-radius: 20px;-webkit-box-shadow: -1px -1px 5px rgba(50, 50, 50, 0.17);border:1px solid #;border-right:0;border-bottom:0;;-moz-box-shadow:-1px -1px 5px rgba(50, 50, 50, 0.17);box-shadow: -1px -1px 5px rgba(50, 50, 50, 0.17);padding:5px 0px 0px 5px;width:190px;font-family:arial;font-size:12px;transition: 1s;position:fixed;bottom:0;right:0;;background-color:#F0F1F3;z-index:2147483647;}@media only screen and (max-width : 640px) {#lhc_need_help_container{display:none;}#lhc_status_container .status-icon{padding:32px 15px 9px 31px;background-position:center center;}#lhc_status_container .lhc-text-status{display:none} #lhc_status_container{width:auto;padding:0;border-radius:0px;bottom:50px;right:5px;left:auto;top:auto;}}
+/** this is the starting item **/#lhc_status_container {    padding: 0;    border: none; border-radius: 0;border-left: 1px solid #ccc;border-right:1px solid #ccc;margin-right:150px;    box-shadow:none;    background:#F0F1F3; width:160px;z-index:101;}#lhc_status_container:hover{    background-color: #f7f7f7;}#lhc_status_container .status-icon {text-decoration: none;font-size: 14px;font-weight: 400;color: #009ca6;display: block;padding: 7px 10px 6px 15px;background-position: right center;}#lhc_status_container #offline-icon {background-image:none;}@media (max-width: 1105px) {    .sticky-footer .live-chat-panel-item {        width:0;    }#lhc_status_container {    position: fixed;    top: auto;    right: 5px;    bottom: 40px;margin:0;width: auto;border: 1px solid #ccc; border-radius: 50px; }#lhc_status_container .status-icon { padding: 7px 42px 7px 12px; margin:0;}}@media only screen and (max-width: 640px) {#lhc_status_container .status-icon { padding: 17px;}}#lhc_questionary_container,#lhc_faq_container,#lhc_chatbox_container{box-shadow: 1px -1px 55px rgba(0, 0, 0, 0.23);}#lhc_need_help_triangle {border-top: 15px solid #284556;}#lhc_faq_container:hover {    background-color: #f7f7f7;}#lhc_need_help_container {    margin-top: -125px!important;}#lhc_need_help_image img {    border-radius: 30px;    background: #fff;}</style></head>
+<body class="er-theme-version-a6 legacy-page er-sidebar-fixed"><div id="lhc_status_container"><a id="online-icon" class="status-icon" href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#" onclick="return lh_inst.lh_openchatWindow()"><span class="lhc-text-status">Live Chat</span></a></div>
+ 
+    <form action="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#" id="__jsAntiForgeryForm" method="POST"><input name="__RequestVerificationToken" type="hidden" value="tmBkwKYitZi3dGLqfZzliJ2IyqG-hgddOJZ03e9kaGckAYPKeTKmJ1fZQhfL6mg5RkwGW2vXL2hXJtnsP4Tpe5_wvbFjA4Gg3x_GC34zxeo_EX8J0"></form>
+
+    <div id="wrapper" class="top-navigation-visible" data-left-navigation-start-state="closed">
+        
+<div class="er-navbar er-navbar-light">
+        <button class="er-navbar-toggler" type="button" aria-label="Toggle navigation" data-cy="er-sidebar-toggle">
+            <i class="fa fas fa-bars"></i>
+        </button>
+
+        <a class="er-navbar-brand" href="https://app.extremereach.com/Login/LandingRedirect" title="Extreme Reach">
+          <img src="./Manage External API - Administration - Extreme Reach_files/xr-logo-lockoff-black-163x34@2x.png" alt="Extreme Reach">
+        </a>
+
+        <span class="er-navbar-divider"></span>
+        <span class="er-navbar-subheading">Administration</span>
+
+<ul class="er-navbar-nav">
+
+<li class="er-navbar-item er-navbar-item-visible-sm er-navbar-question dropdown" data-lhc-support-dropdown="" data-lhc-support-live="true">
+    <a href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#" class="er-navbar-link" role="button" data-toggle="dropdown" title="Chat with an ER employee" data-cy="er-help-button">
+        <i class="fa fas fa-question-circle" role="img"></i>
+    </a>
+    <div class="er-dropdown-menu dropdown-menu dropdown-menu-right">
+        <div><h6 class="dropdown-header">We're always available to help</h6></div>
+        <div class="er-help-popup-content">
+
+            <!-- shows when live chat is available-->
+            <div id="lhc_support_show_link" style="">
+                Need help right away? <br><a href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#" data-cy="er-help-need-help-btn">Click here to chat with an ER employee.</a><br>
+                <hr>
+            </div>
+
+            <p>XR Help Center</p>
+            <p>
+                <span>
+                    <a href="https://adstream.zendesk.com/auth/v2/login/continue_with_sso_tracking?auth_origin=4418916803604%2Ctrue%2Ctrue&amp;brand_id=4418916803604&amp;locale=en-us&amp;remote_auth_id=20360343&amp;return_to=https%3A%2F%2Fhelpcenter.xr.global%2Fhc%2Fen-us&amp;role=end_user&amp;theme=hc" <="" a="">helpcenter.xr.global</a>
+                </span>
+            </p>
+            <hr>
+
+            <p>Global Support</p>
+            <p>
+                <a href="mailto:support@extremereach.com">support@extremereach.com</a><br>
+                <span>
+                    <a href="tel:800-324-5672">800-324-5672</a>&nbsp; /
+                    <a href="tel:+44-(0)-20-3823-6978">+44 (0) 20 3823 6978</a>
+                </span>
+            </p>
+            <hr>
+
+
+                <p>News</p>
+                <p>
+                    <a href="mailto:news@extremereach.com">news@extremereach.com</a><br>
+                    <a href="tel:800-269-1532">800-269-1532</a>
+                </p>
+        </div>
+    </div>
+</li>
+
+
+
+
+
+
+    <!-- this is a hidden item, all dynamic top menu items can appendAfter or prependBefore to this item. -->
+    <li data-topnav-placeholder-item="" style="visibility:hidden !important;width:0;height:0;"></li>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- include this partial to show the modular dropdown on top menus -->
+<li class="er-navbar-item er-navbar-item-visible-sm er-navbar-module-selector dropdown">
+    <a class="er-navbar-link" title="My Apps and Services" role="button" data-toggle="dropdown" data-boundary="viewport" href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#">
+        <i class="fa far fa-th" role="img"></i>
+    </a>
+
+    <div class="er-dropdown-menu dropdown-menu dropdown-menu-right dropdown-menu-scrollable" id="modularSelectDropdown">
+        <div class="dropdown-menu-scrollable-content">
+            <div class="dropdown-menu-modular-cover" data-ignore-clicks="">
+
+
+                    <button type="button" class="btn btn-sm btn-outline-secondary showing-default-cover" data-ignore-clicks="" data-add-cover-photo="">
+                        Add cover photo
+                    </button>
+
+                <!-- show image if image exists, otherwise show the placeholder. Btn text can also change to "Update cover photo" -->
+                    <!-- default image -->
+                    <img src="./Manage External API - Administration - Extreme Reach_files/er-default-hero-image.png" class="img-fluid" data-cover-photo="" data-default-photo="/Content/images/common/er-default-hero-image.png" alt="">
+
+                    <!-- cover photo upload form -->
+                    <form name="coverPhotoUpload">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-add-cover-photo="">
+                            Add cover photo
+                            
+                        </button>
+                        <input type="file" name="coverPhotoFileBrowser" accept="image/*" data-bfi-disabled="">
+                    </form>
+
+            </div>
+
+
+                <div class="dropdown-header">
+                    My Apps and Services
+                </div>
+                    <a class="dropdown-item active" href="https://app.extremereach.com/adm/account/user-settings" data-app="Account" data-status="active" title="Administration of configuration and settings for my organization" target="_top" data-cy="er-module-dropdown-Account">
+                        <i class="dropdown-item-icon er-platform-icon icon-Module-Account far icon-fw" title="This is your default module. To change, go to Edit Preferences."></i>
+                        <span class="dropdown-item-label">
+                            <span class="">
+                               Administration
+                            </span>
+                            
+
+                        </span>
+                        <span class="dropdown-item-description">Administration of configuration and settings for my organization</span>
+                    </a>
+                    <a class="dropdown-item " href="https://app.extremereach.com/adbridge/bco/delivery/index" data-app="BroadcastOps" data-status="active" title="Portal for broadcast operations teams to access spot and traffic deliveries" target="_top" data-cy="er-module-dropdown-BroadcastOps">
+                        <i class="dropdown-item-icon er-platform-icon icon-Module-BroadcastOps far icon-fw" title="This is your default module. To change, go to Edit Preferences."></i>
+                        <span class="dropdown-item-label">
+                            <span class="">
+                               Broadcast Operations
+                            </span>
+                            
+
+                                <i class="fa fa-bookmark dropdown-item-bookmark" data-default-app-module-bookmark=""></i>
+                        </span>
+                        <span class="dropdown-item-description">Portal for broadcast operations teams to access spot and traffic deliveries</span>
+                    </a>
+
+
+        </div>
+    </div>
+</li>
+
+
+<script type="text/template" id="/template/modular/productPreviewModal">
+    <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-marketing-message" role="document">
+            <div class="modal-content">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <iframe src="about:blank" style="border:0;padding:0;margin:0;width:100%;height:100%;"></iframe>
+            </div>
+        </div>
+    </div>
+</script>
+
+<!-- TODO -->
+<script type="text/template" id="/template/modular/defaultModuleSelectionModal">
+    <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content" style="background:#009ca6;color:#fff;">
+                <div class="modal-body" style="padding:25px;">
+                    <h4 style="font-weight:bold;margin-bottom:1em;color:#fff;">Default application module</h4>
+                    <p style="margin-bottom:5px">Select the module below that is most relevant to your daily work. (You can change this later under User Preferences)</p>
+                    <div>
+                            <select name="defaultModuleSelect" class="form-control" style="display:none;">
+                                <option value="-1">-- Select your default module --</option>
+                                    <option value="Account" title="Administration of configuration and settings for my organization">Administration</option>
+                                    <option value="BroadcastOps" title="Portal for broadcast operations teams to access spot and traffic deliveries">Broadcast Operations</option>
+                            </select>
+                            <div>
+                                <div class="dropdown" style="height:65px;">
+                                    <div class="dropdown-menu dropdown-menu-modular-list" style="top:0;display:block;padding:0;width:100%;">
+                                        <div data-app-module-selected>
+                                            <i class="fa fa-chevron-down" style="position:absolute;right:12px;top:25px;color:#bbb;z-index:1"></i>
+                                        </div>
+                                        <div style="display:none;max-height:262px;overflow-y:auto;">
+                                                <div class="dropdown-item" data-app="Account">
+                                                    <i class="dropdown-item-icon er-platform-icon icon-Module-Account icon-fw icon-lg"></i>
+                                                    <h5>
+                                                        Administration
+                                                    </h5>
+                                                    <span>Administration of configuration and settings for my organization</span>
+                                                </div>
+                                                <div class="dropdown-item" data-app="BroadcastOps">
+                                                    <i class="dropdown-item-icon er-platform-icon icon-Module-BroadcastOps icon-fw icon-lg"></i>
+                                                    <h5>
+                                                        Broadcast Operations
+                                                    </h5>
+                                                    <span>Portal for broadcast operations teams to access spot and traffic deliveries</span>
+                                                </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+                    </div>
+                    <div style="margin-top:25px;">
+                        <button type="button" class="btn btn-default" data-button="setDefaultModule"
+                                style="background:transparent;border: 1px solid #fff;border-radius: 0;color: #fff;width:170px;">
+                            Set as default module
+                        </button>
+                        &nbsp; &nbsp;
+                        <button type="button" class="btn btn-link" data-button-okay style="color: #fff;">
+                            Skip
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</script>
+
+
+
+<li class="er-navbar-item er-navbar-item-visible-sm er-navbar-profile dropdown " id="topmenu-user-dropdown" data-cy="er-profile-button">
+    <a href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#" class="er-navbar-profile-link" title="User profile" role="button" data-toggle="dropdown">
+        <span class="er-navbar-image-container er-navbar-image-container__initials-view">
+
+                <span class="er-navbar-profile-initials">CR</span>
+        </span>
+
+        <span class="er-navbar-profile-container">
+            <span>Inscape TV</span>
+                <div class="er-navbar-profile-row">
+                    <span class="er-navbar-profile-username">Chris Roomian</span>
+                    <span class="er-navbar-profile-support-badge">Support</span>
+                </div>
+        </span>
+    </a>
+
+    <div class="er-dropdown-menu dropdown-menu dropdown-menu-right">
+
+
+
+                <a class="dropdown-item" href="https://app.extremereach.com/adm/account/user-settings/user-profile" data-cy="er-profile-settings-btn">My Settings</a>
+
+
+                <a class="dropdown-item" href="https://app.extremereach.com/adm/security/change-password">Change Password</a>
+
+
+            <div class="dropdown-divider"></div>
+
+
+
+
+                <a class="dropdown-item" href="https://app.extremereach.com/Login/LinkedUserLogin?userId=eaab1358-6890-440d-ace4-0762a037cb6e">
+                    Log into Vizio
+                </a>
+                <a class="dropdown-item" href="https://app.extremereach.com/users/login/customerchooser" title="Navigate to the customer chooser page">
+                    More Companies...
+                </a>
+
+
+
+                            <a class="dropdown-item" href="https://app.extremereach.com/Login/Logout" data-clear-session-storage="">
+                <i class="fa fa-sign-out"></i> Logout
+            </a>
+
+
+            <div class="dropdown-divider"></div>
+
+
+
+
+        <a class="dropdown-item" href="https://app.extremereach.com/Home/TermsOfUse" title="Read Terms of Use. Opens in a new window." target="_blank" data-cy="er-profile-terms-btn">
+            Terms Of Use
+        </a>
+
+                    <div data-dev-additional-info="" data-ignore-clicks="">
+                <div>
+                    <span>Customer 126194</span><br>
+
+                </div>
+            </div>
+    </div>
+</li>
+
+</ul>
+</div>
+
+
+
+  
+<nav id="sidebar-menu" class="er-sidebar er-sidebar-left  er-sidebar-dark er-sidebar-collapsed" data-cy="sidebar-menu">
+    <div class="er-sidebar-content">
+        <ul>
+                            <li class="er-sidebar-item" data-sidebar-item-id="10">
+                                <a class="er-sidebar-link   app-feature-link" target="" href="https://app.extremereach.com/adm/users/search" data-alternate-url="">
+                                    <i class="er-sidebar-icon fa fas fa-user" title="Users" role="img"></i>
+                                    <span class="er-sidebar-label">Users</span>
+                                </a>
+                            </li>
+                                <li class="er-sidebar-divider" role="none presentation"></li>
+                            <li class="er-sidebar-item" data-sidebar-item-id="100">
+                                <a class="er-sidebar-link   app-feature-link" target="" href="https://app.extremereach.com/adm/destinations/search" data-alternate-url="">
+                                    <i class="er-sidebar-icon fa fas fa-map-marker" title="Manage Destinations" role="img"></i>
+                                    <span class="er-sidebar-label">Manage Destinations</span>
+                                </a>
+                            </li>
+                        <li class="er-sidebar-item open" data-sidebar-item-id="190">
+                            <a data-sidebar-header="" class="er-sidebar-link active" role="button">
+                                <i class="er-sidebar-icon fa fas fa-film" role="img"></i>
+                                <span class="er-sidebar-label">Content Delivery</span>
+                                <i class="er-sidebar-toggle fas fa-chevron-up" data-sidebar-dropdown-toggle=""></i>
+                            </a>
+                            <div class="er-sidebar-item-dropdown">
+                                <ul>
+                                            <li class="er-sidebar-item" data-sidebar-item-id="510">
+                                                <a class="er-sidebar-link  " target="" href="https://app.extremereach.com/Account/MediaPreferences" data-alternate-url="">
+                                                    <span class="er-sidebar-label">File Format Preferences</span>
+                                                </a>
+                                            </li>
+                                            <li class="er-sidebar-item" data-sidebar-item-id="540">
+                                                <a class="er-sidebar-link  " target="" href="https://app.extremereach.com/Aspera" data-alternate-url="">
+                                                    <span class="er-sidebar-label">Aspera</span>
+                                                </a>
+                                            </li>
+                                            <li class="er-sidebar-item" data-sidebar-item-id="550">
+                                                <a class="er-sidebar-link  " target="" href="https://app.extremereach.com/Cloud" data-alternate-url="">
+                                                    <span class="er-sidebar-label">AWS S3</span>
+                                                </a>
+                                            </li>
+                                            <li class="er-sidebar-item" data-sidebar-item-id="530">
+                                                <a class="er-sidebar-link  " target="" href="https://app.extremereach.com/FTP" data-alternate-url="">
+                                                    <span class="er-sidebar-label">FTP</span>
+                                                </a>
+                                            </li>
+                                            <li class="er-sidebar-item" data-sidebar-item-id="520">
+                                                <a class="er-sidebar-link  " target="" href="https://app.extremereach.com/Downloader" data-alternate-url="">
+                                                    <span class="er-sidebar-label">MDA</span>
+                                                </a>
+                                            </li>
+                                            <li class="er-sidebar-item" data-sidebar-item-id="560">
+                                                <a class="er-sidebar-link active" target="" href="https://app.extremereach.com/ExternalApi" data-alternate-url="">
+                                                    <span class="er-sidebar-label">External API</span>
+                                                </a>
+                                            </li>
+
+                                </ul>
+                            </div>
+                        </li>
+                                <li class="er-sidebar-divider" role="none presentation"></li>
+                            <li class="er-sidebar-item" data-sidebar-item-id="200">
+                                <a class="er-sidebar-link   " target="" href="https://app.extremereach.com/contact/UserContacts" data-alternate-url="">
+                                    <i class="er-sidebar-icon fa fas fa-address-card-o" title="Contacts" role="img"></i>
+                                    <span class="er-sidebar-label">Contacts</span>
+                                </a>
+                            </li>
+                            <li class="er-sidebar-item" data-sidebar-item-id="210">
+                                <a class="er-sidebar-link   app-feature-link" target="" href="https://app.extremereach.com/adm/notification-search" data-alternate-url="">
+                                    <i class="er-sidebar-icon fa fas fa-envelope-o" title="Notifications" role="img"></i>
+                                    <span class="er-sidebar-label">Notifications</span>
+                                </a>
+                            </li>
+                            <li class="er-sidebar-item" data-sidebar-item-id="220">
+                                <a class="er-sidebar-link   " target="" href="https://app.extremereach.com/Invitation/index" data-alternate-url="">
+                                    <i class="er-sidebar-icon fa fas fa-user-plus" title="Network Invitation" role="img"></i>
+                                    <span class="er-sidebar-label">Network Invitation</span>
+                                </a>
+                            </li>
+                            <li class="er-sidebar-item" data-sidebar-item-id="230">
+                                <a class="er-sidebar-link   " target="" href="https://app.extremereach.com/Group/List" data-alternate-url="">
+                                    <i class="er-sidebar-icon fa fas fa-comments-o" title="Discussion" role="img"></i>
+                                    <span class="er-sidebar-label">Discussion</span>
+                                </a>
+                            </li>
+
+        </ul>
+    </div>
+    <div class="er-sidebar-collapsed-showmore" title="Expand menu to view hidden navigation items.">
+        <i class="fa fa-ellipsis-h"></i>
+    </div>
+    <div class="er-sidebar-logo" title="Extreme Reach"></div>
+</nav>
+
+      
+        <div class="content-page">
+            
+    <span class="content-page-bookmark">
+        
+        <a data-landing-page-bookmark="" data-module="Account" data-module-spa-mode="False">
+            <i class="far fa-star" data-selected-title="This is the default landing page for Administration module" data-action-title="Set this as the default landing page for Administration module"></i>
+        </a>
+    </span>
+
+
+        <div class="page-heading">
+            <h1>Manage External API</h1>       
+        </div>
+
+
+                     
+            <div id="content_main" class="content">
+                <!-- TODO: THIS file needs more work - previously MasterErrorsAndNotifications -->
+                
+
+
+
+<div id="errorPanel" class="alert-panel error-panel" style="display: none">
+    <span id="errorPanelText"></span>
+</div>
+
+
+
+
+    <form action="https://app.extremereach.com/ExternalApi/SetActive" id="setExternalApiActive" method="post" name="setExternalApiActive"><input name="__RequestVerificationToken" type="hidden" value="1UK0bRI2huiWxfyKXNasTgAFuJO_GGmrky5uelX_xfgcvffyeFyyXZw3EFwODB1M9bIlzlqwseSVqeSHBDRaP_pPZJm2-BYiLLrkqqZ4viChfVIM0">
+    <input id="externalApiConfigurationId" name="externalApiConfigurationId" type="hidden" value="29548">
+    <input id="isActive" name="isActive" type="hidden" value="False">
+    
+    <div class="errorPanel">
+        <img src="./Manage External API - Administration - Extreme Reach_files/circle_red.gif" alt="Client is INACTIVE">&nbsp;&nbsp;This External API is <b>inactive</b> and is not currently downloading spots for its associated destination(s).&nbsp;&nbsp;&nbsp; <a href="javascript:setActive(true)">Activate this External Api delivery client</a>
+    </div>
+    </form>
+
+    <div style="text-align: right">
+        <a href="https://app.extremereach.com/ExternalApi/Audit/29548">View Audit Log</a>
+    </div>
+
+
+    
+    <div style="text-align: right">
+        <a onclick="return confirm('If you remove this External API config from your account the External Api client will no longer be able to deliver spots.  Are you sure you want to remove this External API client from your account?');" href="https://app.extremereach.com/ExternalApi/Remove/29548?customerId=126194">Remove this External Api Client config from the account</a>
+    </div>
+    
+    <br>
+    <form action="https://app.extremereach.com/ExternalApi/Update" id="updateMediaExternalApi" method="post" name="updateMediaExternalApi"><input name="__RequestVerificationToken" type="hidden" value="7uwWxfWNDJ5Fnx2jeY8MyxOAP00MTQRStGRV-n3ajTeA5-8bFFIN6yL2OyFBoo0LU9C-KbCpc16fYl_9rvZHIjGY1KGAY9UC9HZhC9RYVfUWNsn30">
+    <table border="0" cellspacing="3" width="100%">
+        <colgroup><col width="30%">
+        <col width="30%">
+        <col width="30%">
+        </colgroup><tbody><tr>
+            <th><b>External API Type:</b></th>
+            <td colspan="2"><select id="externalApiSubType" name="externalApiSubType"><option value="806">Facebook API Client</option>
+<option value="801">FreeWheel API Client</option>
+<option value="802">Google API Client</option>
+<option value="807">GoogleCampaignManager API Client</option>
+<option value="805">Signiant API Client</option>
+<option value="809">Sprinklr API Client</option>
+<option value="808">Transperfect API Client</option>
+<option value="810">WideOrbit API Client</option>
+<option selected="selected" value="803">YoSpace API Client</option>
+<option value="804">YouTube API Client</option>
+</select><span class="required_field_indicator">&nbsp;&nbsp;*</span></td>
+        </tr>
+
+        <tr id="needlessInfo1" style="">
+            <th><b>External API Address:</b></th>
+            <td colspan="2"><input id="externalApiAddress" name="externalApiAddress" style="width: 90%" title="ExternalApi Address" type="text" value=""><span class="required_field_indicator">&nbsp;&nbsp;*</span></td>
+        </tr>
+        <tr>
+            <th><b>External API Client Id</b></th>
+            <th id="needlessInfo2" style=""><b>External API User</b></th>
+            <th id="needlessInfo3" style=""><b>External API Password</b></th>
+        </tr>
+        <tr>
+            <td><input id="externalApiClientId" name="externalApiClientId" style="width: 60%" title="ExternalApi ClientId" type="text" value=""><span class="required_field_indicator">&nbsp;&nbsp;*</span></td>
+            <td id="needlessInfo4" style=""><input id="externalApiUser" name="externalApiUser" style="width: 60%" title="ExternalApi User" type="text" value="" class=""><span class="required_field_indicator">&nbsp;&nbsp;*</span></td>
+            <td id="needlessInfo5" style=""><input id="externalApiPassword" name="externalApiPassword" style="width: 60%" title="ExternalApi Password" type="text" value="" class=""><span class="required_field_indicator">&nbsp;&nbsp;*</span></td>
+        </tr>
+
+        <tr>
+            
+            <td><b>Requires Local File Download:</b></td>
+        </tr>
+        <tr>
+            <input id="packagingFileFormatType" name="packagingFileFormatType" type="hidden" value="">
+            <input id="usesSecureKey" name="usesSecureKey" type="hidden" value="False">
+            
+            <td><input id="requiresLocalFileDownload" name="requiresLocalFileDownload" type="checkbox" value="true"><input name="requiresLocalFileDownload" type="hidden" value="false"></td>
+        </tr>
+        <input id="configurationValue" name="configurationValue" type="hidden" value="">
+        
+
+    </tbody></table>
+    <br>
+    <input id="externalApiConfigurationId" name="externalApiConfigurationId" type="hidden" value="29548">
+    <input id="id" name="id" type="hidden" value="29548">
+    <input id="customerId" name="customerId" type="hidden" value="126194">
+    <input id="configurationKey" name="configurationKey" type="hidden" value="">
+    <h2><a href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#showFolders" id="showFolders" name="showFolders">
+        <img src="./Manage External API - Administration - Extreme Reach_files/collapse.gif" id="foldersExpander"></a>&nbsp;&nbsp; Local Delivery Folders &nbsp;&nbsp;</h2>
+    <div class="collapsiblePanel" id="foldersPanel" style="display: block;">
+        <table border="0" cellspacing="3" width="100%">
+            <colgroup><col width="20%">
+            <col width="25%">
+            <col width="25%">
+            </colgroup><tbody><tr>
+                <th></th>
+                <th><b>Audio/SD Video</b></th>
+                <th><b>HD Video</b></th>
+            </tr>
+            <tr>
+                <td>Delivery Folders:</td>
+                <td><input id="sdFolder" name="sdFolder" style="width: 98%" title="Specify the local directory where the Audio/SD Video files should be delivered." type="text" value=""></td>
+                <td><input id="hdFolder" name="hdFolder" style="width: 98%" title="Specify the local directory where the HD Video files should be delivered." type="text" value=""></td>
+            </tr>
+        <tr>
+            <td>&nbsp;</td>
+            <td colspan="2"><span class="smallText">Hint:  You can copy-paste the folder location from Windows Explorer, or similar file system navigation tool</span></td>
+        </tr>
+        </tbody></table> 
+    </div>
+
+    <br>
+
+    <h2><a href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#showDestinations" id="showDestinations" name="showDestinations">
+        <img src="./Manage External API - Administration - Extreme Reach_files/collapse.gif" id="destinationExpander"></a>&nbsp;&nbsp; Destinations</h2>
+    <br>
+    <div id="destinationPanel" style="padding: 3px 3px 3px 3px">
+        
+        <input type="radio" id="isDestinationAccessRestricted" name="isDestinationAccessRestricted" value="false" checked="checked">&nbsp;This External API delivers spots to all destinations in this account
+        <br>
+        <input type="radio" id="isDestinationAccessRestricted" name="isDestinationAccessRestricted" value="true">&nbsp;This External API delivers spots to the following destinations only
+        
+        <div id="destinationAccess" class="collapsiblePanel" style="display: none;">
+            <br>
+
+            
+            <div style="text-align: right">
+                
+                <input type="checkbox" id="selectAllDestinations">
+                        
+    &nbsp;Select/deselect all destinations
+            </div>
+            <br>
+            <table width="100%">
+                <colgroup><col width="33%">
+                <col width="33%">
+                <col width="33%">
+                </colgroup><tbody><tr>
+                        
+                        <td>
+                            <input type="checkbox" id="destinationId" name="destinationId" value="92780" checked="&quot;true&quot;">&nbsp;Inscape TV&nbsp;
+                            
+                        </td>
+                        
+            </tr></tbody></table>
+        </div>
+        
+    </div>
+    <br>
+
+    <br>
+    <h2><a href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#showAdvanced" id="showAdvanced" name="showAdvanced">
+        <img src="./Manage External API - Administration - Extreme Reach_files/expand.gif" id="advancedExpander"></a>&nbsp;&nbsp; Advanced</h2>
+    <div class="collapsiblePanel" id="advancedPanel" style="display: none;">
+        <table border="0" cellspacing="3" width="100%">
+            <colgroup><col width="30%">
+            <col width="70%">
+            </colgroup><tbody><tr>
+                <td colspan="2">&nbsp;</td>
+            </tr>
+            <tr>
+                <td align="right">Administrator email address </td>
+                <td><input id="administratorEmail" name="administratorEmail" size="40" title="Specify the email address of the individual responsible for managing this External Api Site." type="text" value=""> </td>
+            </tr>
+            <tr>
+                <td align="right">Send email notification for errors </td>
+                <td><input id="notifyAdministratorOnError" name="notifyAdministratorOnError" type="checkbox" value="true"><input name="notifyAdministratorOnError" type="hidden" value="false">
+                                            &nbsp;&nbsp;&nbsp;<span class="smallText">Check here to email the administrator when the External API has an error or goes offline</span></td>
+            </tr>
+            <tr>
+                <td valign="top">Use Queued Delivery: </td>
+                <td><input checked="checked" id="useQueuedDelivery" name="useQueuedDelivery" type="checkbox" value="true"><input name="useQueuedDelivery" type="hidden" value="false"> &nbsp;&nbsp;&nbsp;<span class="smallText">Check this box to use async queue for manifest delivery.</span> </td>
+            </tr>
+            <tr>
+                <td align="right">Location/Facility Name </td>
+                <td><input id="installLocation" name="installLocation" size="40" title="Enter the physical location/facility where this External API will make deliveries.  This uniquely identifies this instance and can be helpful during troubleshooting." type="text" value=""> </td>
+            </tr>
+            <tr>
+                <td align="right">Server Name </td>
+                <td><input id="computerName" name="computerName" size="40" title="Enter the name of the server where this External API will make deliveries.  This uniquely identifies this instance and can be helpful during troubleshooting." type="text" value=""> </td>
+            </tr>
+            <tr>
+                <td colspan="2">&nbsp;</td>
+            </tr>
+
+            <tr>
+                <td valign="top">Specify Send Window: </td>
+                <td><input id="useWindow" name="useWindow" type="checkbox" value="true"><input name="useWindow" type="hidden" value="false">
+                                            &nbsp;&nbsp;&nbsp;<span class="smallText">Check this box to send non-priority files during specific hours of the day</span>
+                    <div id="downloadWindowPanel" class="tabPanel">
+                        Send Non-Priority Deliveries Between &nbsp;&nbsp;<select id="windowStart" name="windowStart"><option value="12:00 AM">12:00 AM</option>
+<option value="12:30 AM">12:30 AM</option>
+<option value="01:00 AM">01:00 AM</option>
+<option value="01:30 AM">01:30 AM</option>
+<option value="02:00 AM">02:00 AM</option>
+<option value="02:30 AM">02:30 AM</option>
+<option value="03:00 AM">03:00 AM</option>
+<option value="03:30 AM">03:30 AM</option>
+<option value="04:00 AM">04:00 AM</option>
+<option value="04:30 AM">04:30 AM</option>
+<option value="05:00 AM">05:00 AM</option>
+<option value="05:30 AM">05:30 AM</option>
+<option value="06:00 AM">06:00 AM</option>
+<option value="06:30 AM">06:30 AM</option>
+<option value="07:00 AM">07:00 AM</option>
+<option value="07:30 AM">07:30 AM</option>
+<option value="08:00 AM">08:00 AM</option>
+<option value="08:30 AM">08:30 AM</option>
+<option value="09:00 AM">09:00 AM</option>
+<option value="09:30 AM">09:30 AM</option>
+<option value="10:00 AM">10:00 AM</option>
+<option value="10:30 AM">10:30 AM</option>
+<option value="11:00 AM">11:00 AM</option>
+<option value="11:30 AM">11:30 AM</option>
+<option value="12:00 PM">12:00 PM</option>
+<option value="12:30 PM">12:30 PM</option>
+<option value="01:00 PM">01:00 PM</option>
+<option value="01:30 PM">01:30 PM</option>
+<option value="02:00 PM">02:00 PM</option>
+<option value="02:30 PM">02:30 PM</option>
+<option value="03:00 PM">03:00 PM</option>
+<option value="03:30 PM">03:30 PM</option>
+<option value="04:00 PM">04:00 PM</option>
+<option value="04:30 PM">04:30 PM</option>
+<option value="05:00 PM">05:00 PM</option>
+<option value="05:30 PM">05:30 PM</option>
+<option value="06:00 PM">06:00 PM</option>
+<option value="06:30 PM">06:30 PM</option>
+<option value="07:00 PM">07:00 PM</option>
+<option value="07:30 PM">07:30 PM</option>
+<option value="08:00 PM">08:00 PM</option>
+<option value="08:30 PM">08:30 PM</option>
+<option value="09:00 PM">09:00 PM</option>
+<option value="09:30 PM">09:30 PM</option>
+<option value="10:00 PM">10:00 PM</option>
+<option value="10:30 PM">10:30 PM</option>
+<option value="11:00 PM">11:00 PM</option>
+<option value="11:30 PM">11:30 PM</option>
+</select>
+&nbsp;and&nbsp;<select id="windowEnd" name="windowEnd"><option value="">-- Time --</option>
+<option value="12:00 AM">12:00 AM</option>
+<option value="12:30 AM">12:30 AM</option>
+<option value="01:00 AM">01:00 AM</option>
+<option value="01:30 AM">01:30 AM</option>
+<option value="02:00 AM">02:00 AM</option>
+<option value="02:30 AM">02:30 AM</option>
+<option value="03:00 AM">03:00 AM</option>
+<option value="03:30 AM">03:30 AM</option>
+<option value="04:00 AM">04:00 AM</option>
+<option value="04:30 AM">04:30 AM</option>
+<option value="05:00 AM">05:00 AM</option>
+<option value="05:30 AM">05:30 AM</option>
+<option value="06:00 AM">06:00 AM</option>
+<option value="06:30 AM">06:30 AM</option>
+<option value="07:00 AM">07:00 AM</option>
+<option value="07:30 AM">07:30 AM</option>
+<option value="08:00 AM">08:00 AM</option>
+<option value="08:30 AM">08:30 AM</option>
+<option value="09:00 AM">09:00 AM</option>
+<option value="09:30 AM">09:30 AM</option>
+<option value="10:00 AM">10:00 AM</option>
+<option value="10:30 AM">10:30 AM</option>
+<option value="11:00 AM">11:00 AM</option>
+<option value="11:30 AM">11:30 AM</option>
+<option value="12:00 PM">12:00 PM</option>
+<option value="12:30 PM">12:30 PM</option>
+<option value="01:00 PM">01:00 PM</option>
+<option value="01:30 PM">01:30 PM</option>
+<option value="02:00 PM">02:00 PM</option>
+<option value="02:30 PM">02:30 PM</option>
+<option value="03:00 PM">03:00 PM</option>
+<option value="03:30 PM">03:30 PM</option>
+<option value="04:00 PM">04:00 PM</option>
+<option value="04:30 PM">04:30 PM</option>
+<option value="05:00 PM">05:00 PM</option>
+<option value="05:30 PM">05:30 PM</option>
+<option value="06:00 PM">06:00 PM</option>
+<option value="06:30 PM">06:30 PM</option>
+<option value="07:00 PM">07:00 PM</option>
+<option value="07:30 PM">07:30 PM</option>
+<option value="08:00 PM">08:00 PM</option>
+<option value="08:30 PM">08:30 PM</option>
+<option value="09:00 PM">09:00 PM</option>
+<option value="09:30 PM">09:30 PM</option>
+<option value="10:00 PM">10:00 PM</option>
+<option value="10:30 PM">10:30 PM</option>
+<option value="11:00 PM">11:00 PM</option>
+<option value="11:30 PM">11:30 PM</option>
+</select><br>
+                        <br>
+                        &nbsp;Local Time Zone:&nbsp;<select id="timeZoneOffset" name="timeZoneOffset"><option value="">-- Select Time Zone --</option>
+<option value="-10">(UTC-10:00) Hawaii</option>
+<option value="-9">(UTC-09:00) Alaska</option>
+<option value="-8">(UTC-08:00) Pacific Time (US &amp; Canada)</option>
+<option value="-7">(UTC-07:00) Mountain Time (US &amp; Canada)</option>
+<option value="-6">(UTC-06:00) Central Time (US &amp; Canada)</option>
+<option value="-5">(UTC-05:00) Eastern Time (US &amp; Canada)</option>
+<option value="-4">(UTC-04:00) Atlantic Time (Canada)</option>
+</select>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">&nbsp;</td>
+            </tr>
+
+            
+            <tr>
+                <td valign="top">Multi-ExternalApi Options: </td>
+                <td>
+                    
+                    
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">&nbsp;</td>
+            </tr>
+            
+        </tbody></table>
+    </div>
+
+    <table border="0" cellspacing="3" width="100%">
+        <tbody><tr>
+            <td colspan="2">&nbsp;</td>
+        </tr>
+        <tr>
+            <td align="center" colspan="2">
+                <input type="submit" name="Update" value="Update" class="formbutton">
+            </td>
+        </tr>
+    </tbody></table>
+    </form>
+    <br>
+
+
+            </div>
+        </div>
+		
+    </div>
+  
+
+<div class="growl-notice"></div>
+<div class="videoPopupPlayer" tabindex="-1" id="videoPopupPlayer" role="dialog" aria-labelledby="spot-modal" aria-hidden="true">
+    <div class="videoPopupPlayerModal">
+        <div class="xout" onclick="closePlayerModal();">×</div>
+        <div class="videoPopupPlayerContent" style="padding-bottom: 6px;">
+            <div id="previewPlayer"></div>
+        </div>
+    </div>
+</div>
+
+<div id="overlayWrapper">
+    <div id="videoWrapper" class="overlayContentWrapper shadow-drop-dark"><a href="javascript: closeVideoSpot();" class="overlayClose">CLOSE <span class="close-x">x</span></a><div id="popVideoFrame"><a id="player" href="https://app.extremereach.com/adbridge/adm/ExternalApi/Index/29548?customerId=126194#"></a></div></div>
+</div>
+
+
+
+
+
+
+    <script>
+var LHCChatOptions = {};
+    LHCChatOptions.attr_prefill = new Array();
+    LHCChatOptions.attr_prefill.push({ 'name': 'email', 'value': 'chris.roomian@inscape.tv' });
+    LHCChatOptions.attr_prefill.push({ 'name': 'phone', 'value': '' });
+    LHCChatOptions.attr_prefill.push({ 'name': 'username', 'value': 'Chris Roomian' });
+    LHCChatOptions.attr_prefill.push({ 'name': 'question', 'value': 'Can you help me...' });
+    LHCChatOptions.attr_prefill_admin = new Array();
+    LHCChatOptions.attr_prefill_admin.push({ 'index': '0', 'value': '126194', 'hidden': true });
+    LHCChatOptions.attr_prefill_admin.push({ 'index': '1', 'value': "Inscape TV", 'hidden': true });
+    LHCChatOptions.attr_prefill_admin.push({ 'index': '3', 'value': 'dc6ba9aa-7246-482f-ac3e-164f26a3f505', 'hidden': true });
+    LHCChatOptions.attr_prefill_admin.push({ 'index': '6', 'value': '', 'hidden': true });
+
+    LHCChatOptions.opt = { widget_height: 340, widget_width: 300, popup_height: 520, popup_width: 500, domain: 'extremereach.com' };
+    (function () {
+        var po = document.createElement('script'); po.type = 'text/javascript'; po.async = true;
+        var referrer = (document.referrer) ? encodeURIComponent(document.referrer.substr(document.referrer.indexOf('://') + 1)) : '';
+        var location = (document.location) ? encodeURIComponent(window.location.href.substring(window.location.protocol.length)) : '';
+        po.src = 'https://extremereachsupport.livehelperchat.com/eng/chat/getstatus/(click)/internal/(position)/bottom_right/(ma)/br/(top)/350/(units)/pixels/(leaveamessage)/true/(disable_pro_active)/true/(department)/13/(theme)/2?r=' + referrer + '&l=' + location;
+        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(po, s);
+        })();
+    </script>
+    <script>
+    (function () {
+        // Custom Script
+
+        // determine visibility of show popup link in top menu
+        var sl = document.getElementById('lhc_support_show_link');
+        if (sl) {
+            sl.style.display = '';
+        }
+        // end Custom Script
+    })();
+    </script>
+
+
+
+
+<script src="./Manage External API - Administration - Extreme Reach_files/pendo(1).js"></script>
+
+
+
+    <script>
+        window.erAffiliateLogoUrl = 'https://app.extremereach.com/Content/images/common/xr-logo-lockoff-black-163x34.png';
+        window.erAffiliateLogoAlt = 'Extreme Reach';
+    </script>
+
+
+
+<script>
+if (!window.___UiHelpers.debug) {
+    (function (i, s, o, g, r, a, m) { i['GoogleAnalyticsObject'] = r; i[r] = i[r] || function () { (i[r].q = i[r].q || []).push(arguments); }, i[r].l = 1 * new Date(); a = s.createElement(o), m = s.getElementsByTagName(o)[0]; a.async = 1; a.src = g; m.parentNode.insertBefore(a, m); })(window, document, 'script', '//www.google-analytics.com/analytics.js', 'ga'); ga('create', 'UA-21194370-5', 'auto'); ga('require', 'linkid'); ga('send', 'pageview');
+}
+</script>
+
+
+
+</body></html>
