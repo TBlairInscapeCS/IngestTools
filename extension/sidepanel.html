@@ -43,6 +43,7 @@
   .TITLE { background: #2d4a23; color: #b8e08f; }
   .BRAND { background: #4d4423; color: #ecd98a; }
   .warn { background: #4d2828; color: #ec9a9a; }
+  .ok { background: #234a2e; color: #9adfa8; }
   .espn { background: #2a3550; color: #9db5ec; }
   .GUESS { background: #3a2d4d; color: #cfaef0; }
 
@@ -198,6 +199,18 @@
       <button id="dlCsv">Results CSV</button>
     </div>
   </details>
+</details>
+
+<details class="s5" id="sec5">
+  <summary>5 · Ingest portal<span class="ib" data-bubble="b5">?</span><span class="stamp" id="tsIngest"></span><span class="sdot" id="sdIngest"></span></summary>
+  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check portal</b> verifies the customer name against the playbook and lists queued files. <b>Preview fills</b> shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Push fills</b> writes them into the queue cells and keeps watching for files dropped later. <b>_ticker</b> files get fingerprint=video per playbook. Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click.</div>
+  <div class="row">
+    <button id="ingestCheck">Check portal</button>
+    <button id="ingestPreview">Preview fills</button>
+    <button id="ingestPush" class="primary hidden">Push fills to queue</button>
+  </div>
+  <div class="hint" id="ingestInfo"></div>
+  <div class="scrollbox" id="ingestPreviewBox"></div>
 </details>
 
 <details id="dbgTools">

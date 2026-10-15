@@ -126,7 +126,7 @@ function activeTab() {
 // url/title for every http(s) tab even without the "tabs" permission.
 async function stageTabs() {
   const tabs = await chrome.tabs.query({});
-  const cls = { outlook: [], sheet: [], sharepoint: [], airtable: [], er: [] };
+  const cls = { outlook: [], sheet: [], sharepoint: [], airtable: [], er: [], portal: [] };
   tabs.forEach(t => {
     const u = t.url || '';
     if (/outlook\.(office|live)\.com/i.test(u)) cls.outlook.push(t);
@@ -134,6 +134,7 @@ async function stageTabs() {
     else if (/\.sharepoint\.com|\.sharepoint-df\.com/i.test(u)) cls.sharepoint.push(t);
     else if (/airtable\.com/i.test(u)) cls.airtable.push(t);
     if (/extremereach\.com/i.test(u)) cls.er.push(t);
+    if (/portal\.cognet\.tv/i.test(u)) cls.portal.push(t);
   });
   return cls;
 }
@@ -187,7 +188,8 @@ function resetRun() {
   ourDlIds.clear();
   // Sheet/email dots keep their state (the sheet stays loaded across
   // requests); match/download dots reset with the data they described.
-  ['sdMatch', 'sdDl'].forEach(id => setStage(id));
+  ['sdMatch', 'sdDl', 'sdIngest'].forEach(id => setStage(id));
+  $('ingestInfo').innerHTML = ''; $('ingestPreviewBox').innerHTML = '';
   saveInputs();
 }
 
@@ -2598,6 +2600,220 @@ $('clientSel').addEventListener('change', () => {
   clientSource = client ? 'manual' : '';
   applyErPreset(client);
   renderClientNote();
+});
+
+// ---------- Section 5: ingest portal ----------
+
+// Read-only probe injected into portal.cognet.tv: the customer name off
+// the H2 plus every queued file's current cell values.
+function portalProbe() {
+  const h2 = [...document.querySelectorAll('h2')].find(h => /customer:/i.test(h.textContent));
+  const customer = h2 ? (h2.textContent.match(/customer:\s*([a-z0-9_-]+)/i) || [])[1] || '' : '';
+  const grab = (tr, cls) => { const td = tr.querySelector('td.' + cls); return td ? td.textContent.trim() : ''; };
+  const rows = [...document.querySelectorAll('#fileingest_bulk tbody tr.upload_row')].map(tr => ({
+    name: grab(tr, 'file_name'), type: grab(tr, 'file_type'), title: grab(tr, 'file_title'),
+    reporting: grab(tr, 'file_reporting'), advertiser: grab(tr, 'file_comm_advertiser'),
+    brand: grab(tr, 'file_comm_brand'), vertical: grab(tr, 'file_comm_vertical'),
+    realm: grab(tr, 'file_realm'), fingerprint: grab(tr, 'file_fingerprint'),
+  }));
+  return { customer, rows, isPortal: /cognet\.tv/i.test(location.host) };
+}
+
+// Writes the plan into the portal queue. The portal reads every field off
+// the row's cell TEXT at ingest time - including the 'non-editable'
+// fingerprint cell - so per-row overrides are plain textContent writes.
+// Ticker files (_ticker) force fingerprint=video; non-ticker rows keep
+// whatever the bulk modal set. A MutationObserver re-fills files dropped
+// after the push; tr.dataset.ingestFilled stops our own edits retriggering.
+function portalFill(plan) {
+  window.__ingestFill = plan;
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const rows = plan.rows.map(r => ({ ...r, idN: norm(r.id), titleN: norm(r.title) }));
+  const findRow = stem => {
+    const s = norm(stem);
+    return rows.find(r => r.idN && s.includes(r.idN)) ||
+           rows.find(r => r.titleN.length >= 6 && s.includes(r.titleN)) || null;
+  };
+  const write = (tr, cls, v) => {
+    const td = tr.querySelector('td.' + cls);
+    if (!td) return;
+    if (td.textContent.trim() !== String(v)) {
+      td.textContent = v;
+      // The page sanitizer listens on focusout/blur/change - fire it so our
+      // text gets the same cleanup a typed edit would.
+      ['change', 'blur', 'focusout'].forEach(t => td.dispatchEvent(new Event(t, { bubbles: true })));
+    }
+    td.style.outline = '1px solid #2e7d4f';
+  };
+  const fillRow = tr => {
+    if (tr.dataset.ingestFilled) return;
+    const nameTd = tr.querySelector('td.file_name');
+    if (!nameTd || !nameTd.textContent.trim()) return;
+    const stem = nameTd.textContent.trim().replace(/\.[^.]+$/, '');
+    const ticker = /_ticker|_t$/i.test(stem);
+    const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
+    if (!r) { nameTd.style.outline = '1px solid #b06000'; tr.dataset.ingestFilled = 'miss'; return; }
+    tr.dataset.ingestFilled = 'ok';
+    write(tr, 'file_reporting', r.id + (ticker ? plan.opts.tickerSuffix : ''));
+    if (plan.opts.nameTitle && r.title) write(tr, 'file_title', r.title);
+    if (plan.opts.advertiser && r.brand) {
+      write(tr, 'file_comm_advertiser', r.brand);
+      write(tr, 'file_comm_brand', r.brand);
+      write(tr, 'file_comm_vertical', r.brand);
+    }
+    if (ticker) write(tr, 'file_fingerprint', 'video');
+  };
+  const sweep = () => document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').forEach(fillRow);
+  // A fresh push clears fill flags so re-dropped/renamed files re-evaluate.
+  document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').forEach(tr => delete tr.dataset.ingestFilled);
+  if (!window.__ingestObserver) {
+    const body = document.querySelector('#fileingest_bulk tbody') || document.getElementById('fileingest_bulk');
+    window.__ingestObserver = new MutationObserver(sweep);
+    if (body) window.__ingestObserver.observe(body, { childList: true, subtree: true });
+  }
+  sweep();
+  return { queued: document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').length };
+}
+
+// Plan rows from the committed match table + the playbook's ingest block.
+// reporting = the sheet's Tracking ID (distinct from Title for Horizon);
+// adv/brand/vert = the sheet's Brand column; fingerprint decided per file
+// at fill time (_ticker -> video).
+function ingestPlan() {
+  const ing = (client && client.ingest) || {};
+  return {
+    rows: (matched || [])
+      .filter(m => m.matchType !== 'ROW (out of range)' && (m.trackingId || m.id))
+      .map(m => ({
+        id: String(m.trackingId || m.id).trim(),
+        title: String(m.title || '').trim(),
+        brand: String(m.brand || '').trim(),
+        espn: !!m.espn,
+      })),
+    opts: {
+      advertiser: !!ing.advertiser,
+      nameTitle: !!ing.nameTitle,
+      tickerSuffix: ing.tickerSuffix || '_ticker',
+      cidMap: ing.cidMap,
+    },
+  };
+}
+
+function ingestColName(key) {
+  const i = currentCols()[key];
+  return i >= 0 && sheet ? String(sheet.headers[i] || '').trim() : '';
+}
+
+// Preview: what WOULD be written, with column provenance - the user
+// approves the mapping before Push touches the page.
+function renderIngestPreview() {
+  const plan = ingestPlan();
+  if (!plan.rows.length) {
+    $('ingestPreviewBox').innerHTML = '<div class="hint">no committed matches yet - run Match first</div>';
+    return;
+  }
+  const ing = (client && client.ingest) || {};
+  const lines = [
+    "Reporting ID ← '" + (ingestColName('id') || '?') + "' col" + (plan.opts.tickerSuffix ? " (+" + plan.opts.tickerSuffix + " on _ticker files)" : ''),
+    plan.opts.nameTitle ? "Title ← '" + (ingestColName('title') || '?') + "' col" : 'Title — playbook leaves default',
+    plan.opts.advertiser ? "Advertiser/Brand/Vertical ← '" + (ingestColName('brand') || '?') + "' col" : 'Advertiser/Brand/Vertical — playbook leaves default',
+    'Fingerprint — video on _ticker files, otherwise untouched',
+    'Realm · Type · Retention — never touched',
+  ];
+  let html = '<div class="hint">' + lines.map(esc).join('<br>') + '</div>';
+  html += '<table><tr><th>ID</th><th>Title</th><th>Brand→Adv/Vert</th><th></th></tr>' +
+    plan.rows.map(r =>
+      '<tr><td>' + esc(r.id) + '</td><td>' + esc(r.title).slice(0, 40) + '</td><td>' + esc(r.brand) + '</td><td>' +
+      (r.espn ? '<span class="chip espn">ESPN</span>' : '') + '</td></tr>').join('') +
+    '</table>';
+  if (plan.rows.some(r => r.espn))
+    html += '<div class="hint">ESPN-flagged rows expect a <b>_ticker</b> file in the drop (fingerprint=video auto-set).</div>';
+  $('ingestPreviewBox').innerHTML = html;
+  $('ingestPush').classList.toggle('hidden', !plan.rows.length);
+}
+
+// Verify: after the probe, line each queued file up against the plan and
+// show actual vs expected.
+function renderIngestVerify(probe) {
+  const plan = ingestPlan();
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const findRow = stem => {
+    const s = norm(stem);
+    return plan.rows.find(r => s.includes(norm(r.id))) ||
+           plan.rows.find(r => norm(r.title).length >= 6 && s.includes(norm(r.title))) || null;
+  };
+  let ok = 0, diff = 0, miss = 0;
+  const html = '<table><tr><th>File</th><th>Reporting</th><th>Title</th><th>Adv</th><th>FP</th><th></th></tr>' +
+    probe.rows.map(q => {
+      const stem = q.name.replace(/\.[^.]+$/, '');
+      const ticker = /_ticker|_t$/i.test(stem);
+      const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
+      if (!r) { miss++; return '<tr><td>' + esc(q.name) + '</td><td colspan="4"></td><td class="warn">no match</td></tr>'; }
+      const wantRep = r.id + (ticker ? plan.opts.tickerSuffix : '');
+      const wantTitle = plan.opts.nameTitle && r.title ? r.title : q.title;
+      const wantFp = ticker ? 'video' : q.fingerprint;
+      const bad = [];
+      if (q.reporting !== wantRep) bad.push('rep');
+      if (q.title !== wantTitle) bad.push('title');
+      if (q.fingerprint !== wantFp) bad.push('fp');
+      bad.length ? diff++ : ok++;
+      return '<tr><td>' + esc(q.name) + '</td><td>' + esc(q.reporting) + '</td><td>' + esc(q.title).slice(0, 30) + '</td><td>' +
+        esc(q.advertiser) + '</td><td>' + esc(q.fingerprint) + '</td><td>' +
+        (bad.length ? '<span class="chip warn">' + bad.join(' ') + '</span>' : '<span class="chip ok">ok</span>') + '</td></tr>';
+    }).join('') + '</table>';
+  $('ingestPreviewBox').innerHTML = html;
+  return { ok, diff, miss };
+}
+
+async function portalTab() {
+  const cls = await stageTabs();
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return pickTab(cls.portal, active && active.id);
+}
+
+$('ingestCheck').addEventListener('click', async () => {
+  const tab = await portalTab();
+  if (!tab) { toast('No portal.cognet.tv tab open'); setStage('sdIngest', 'warn', 'no portal tab open'); return; }
+  const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalProbe });
+  const p = res && res.result;
+  if (!p || !p.isPortal) { toast('Could not read the portal page'); setStage('sdIngest', 'fail', 'portal probe failed'); return; }
+  const cidMap = (client && client.ingest && client.ingest.cidMap) || '';
+  const cids = [].concat(cidMap).map(String);
+  const custOk = !cids.length || cids.includes(p.customer);
+  stamp('tsIngest');
+  const cidTxt = cids.length
+    ? (custOk ? ' customer "' + p.customer + '" matches cidMap ✓' : ' customer "' + p.customer + '" ≠ cidMap ' + cids.join('/'))
+    : ' customer "' + p.customer + '"';
+  $('ingestInfo').innerHTML = esc(cidTxt) + ' · ' + p.rows.length + ' file(s) queued';
+  setStage('sdIngest', custOk ? 'ok' : 'warn',
+    'customer "' + p.customer + '"' + (custOk ? ' matches cidMap' : ' does NOT match cidMap ' + cids.join('/')) + ' · ' + p.rows.length + ' queued');
+  if (p.rows.length) renderIngestVerify(p);
+  else $('ingestPreviewBox').innerHTML = '<div class="hint">queue empty - drop videos, then Check again</div>';
+});
+
+$('ingestPreview').addEventListener('click', renderIngestPreview);
+
+$('ingestPush').addEventListener('click', async () => {
+  const plan = ingestPlan();
+  if (!plan.rows.length) { toast('No committed matches - run Match first'); return; }
+  const tab = await portalTab();
+  if (!tab) { toast('No portal.cognet.tv tab open'); setStage('sdIngest', 'warn', 'no portal tab open'); return; }
+  const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalFill, args: [plan] });
+  const n = (res && res.result && res.result.queued) || 0;
+  const [pr] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalProbe });
+  const p = pr && pr.result;
+  stamp('tsIngest');
+  if (p && p.rows.length) {
+    const v = renderIngestVerify(p);
+    setStage('sdIngest', v.diff || v.miss ? 'warn' : 'ok',
+      v.ok + ' row(s) verified · ' + v.diff + ' differ · ' + v.miss + ' unmatched — watching for new drops');
+    $('ingestInfo').textContent = 'fills pushed — new files dropped into the queue auto-fill; ' +
+      v.ok + ' ok · ' + v.diff + ' differ · ' + v.miss + ' unmatched';
+  } else {
+    setStage('sdIngest', 'warn', 'plan armed (' + plan.rows.length + ' rows) — queue still empty, will fill on drop');
+    $('ingestInfo').textContent = 'plan armed for ' + plan.rows.length + ' row(s) — drop the videos, fills apply automatically';
+  }
+  dbg('ingest push', { rows: plan.rows.length, queued: n });
 });
 
 chrome.storage.local.get(['pendingIds', 'pendingFiles', 'emailText', 'idsText', 'filesText', 'capturedByName', 'erApiKey', 'erSender', 'erDays'], data => {
