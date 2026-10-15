@@ -513,6 +513,31 @@ function grabExtremeReach() {
   return { files, hasMore: !!document.querySelector('a[title="Go to next page"]') };
 }
 
+// Inside a SharePoint document library (modern AllItems view): file rows
+// render as heroField spans - no anchors - but the ?id= param is the
+// folder's server-relative path, so a file's download URL is just
+// folder + filename + ?download=1. Grid is virtualized: scroll + re-grab
+// accumulates via the merge dedupe.
+function grabSharePointDocs() {
+  // heroField spans only - header cells carry title attrs too and would
+  // leak "Modified"/"New" into the file list.
+  const cells = [...document.querySelectorAll('[data-id="heroField"]')];
+  if (!cells.length) return { files: [] };
+  const folder = (location.href.match(/[?&]id=([^&]+)/) ||
+                  location.href.match(/[?&]RootFolder=([^&]+)/i) || [])[1];
+  // Fallback: strip /Forms/AllItems.aspx off the URL for the library root.
+  const base = folder ? decodeURIComponent(folder).replace(/\/+$/, '')
+    : (location.href.match(/(https?:\/\/[^/]+\/sites\/[^?]+?)\/Forms\//i) || [])[1];
+  const files = cells.map(sp => {
+    const name = (sp.getAttribute('title') || sp.textContent || '').trim();
+    return {
+      name, line: name,
+      url: base ? location.origin + encodeURI(base) + '/' + encodeURIComponent(name) + '?download=1' : '',
+    };
+  }).filter(f => f.name);
+  return { files, hasMore: true }; // virtualized - more rows may sit below the fold
+}
+
 // Inside any page: collect filename-like strings with their enclosing line
 // (so the panel can pull dates off the same line), plus download links.
 function grabFileNames() {
@@ -1919,7 +1944,8 @@ async function capturePage(tab) {
   tab = tab || await activeTab();
   if (!tab || !/^https?:/.test(tab.url || '')) { toast('Focus a normal web page first.'); return false; }
   lastCapTab = tab;
-  const func = /extremereach\.com/i.test(tab.url || '') ? grabExtremeReach : grabFileNames;
+  const isSpLib = /sharepoint/i.test(tab.url || '') && /AllItems\.aspx|\/Forms\//i.test(tab.url || '');
+  const func = /extremereach\.com/i.test(tab.url || '') ? grabExtremeReach : isSpLib ? grabSharePointDocs : grabFileNames;
   try {
     const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func });
     const result = res.result || {};
@@ -1935,7 +1961,7 @@ async function capturePage(tab) {
     let filterBypassed = false;
     if (!kept.length && dropped.length) { kept = entries; dropped = []; filterBypassed = true; }
     const { newNames, linked, total } = mergeCaptured(kept);
-    dbg('capture', { page: /extremereach\.com/i.test(tab.url || '') ? 'extremereach' : 'generic', kept: newNames.length, linked, total, hasMore: !!result.hasMore,
+    dbg('capture', { page: /extremereach\.com/i.test(tab.url || '') ? 'extremereach' : isSpLib ? 'sharepoint-lib' : 'generic', kept: newNames.length, linked, total, hasMore: !!result.hasMore,
       urlsHeld: Object.keys(capturedByName).length,
       sample: newNames.slice(0, 5) });
     stamp('tsCapture');
@@ -1972,6 +1998,9 @@ async function captureTabs() {
   const cands = [];
   if (active && /^https?:/.test(active.url || '')) cands.push(active);
   cls.er.forEach(t => { if (!cands.some(c => c.id === t.id)) cands.push(t); });
+  // SharePoint doc-library views are file sources (not tracker workbooks).
+  cls.sharepoint.filter(t => /AllItems\.aspx|\/Forms\//i.test(t.url || ''))
+    .forEach(t => { if (!cands.some(c => c.id === t.id)) cands.push(t); });
   if (!cands.length) { toast('Focus a web page (or open a delivery list) first.'); return false; }
   let got = false;
   for (const t of cands) got = (await capturePage(t)) || got;
