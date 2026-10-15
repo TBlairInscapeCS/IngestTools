@@ -2740,11 +2740,13 @@ function portalFill(plan) {
     const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
     if (!r) { nameTd.style.outline = '1px solid #b06000'; tr.dataset.ingestFilled = 'miss'; return; }
     tr.dataset.ingestFilled = 'ok';
-    // The ticker marker in the name is sacred: _ticker stays _ticker, _t
-    // stays _t (Comscore) - the file's own marker IS the reporting id.
-    // Only fields behind the name get filled.
-    write(tr, 'file_reporting', ticker ? stem : r.id);
-    if (plan.opts.nameTitle && r.title) write(tr, 'file_title', r.title);
+    // The ticker marker is preserved, the value behind it corrected:
+    // CODE_t -> RealID_t, CODE_ticker -> RealID_ticker. Never stripped,
+    // never doubled (marker appended only when the value lacks it).
+    const marker = ticker ? (stem.match(/_ticker$|_t$/i) || stem.match(/_ticker|_t$/i))[0] : '';
+    const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
+    write(tr, 'file_reporting', ticker ? withMarker(r.id) : r.id);
+    if (plan.opts.nameTitle && r.title) write(tr, 'file_title', ticker ? withMarker(r.title) : r.title);
     if (plan.opts.advertiser && r.brand) {
       write(tr, 'file_comm_advertiser', r.brand);
       write(tr, 'file_comm_brand', r.brand);
@@ -2842,8 +2844,10 @@ function renderIngestVerify(probe) {
       const ticker = /_ticker|_t$/i.test(stem);
       const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
       if (!r) { miss++; return '<tr><td>' + esc(q.name) + '</td><td colspan="4"></td><td class="warn">no match</td></tr>'; }
-      const wantRep = ticker ? stem : r.id;
-      const wantTitle = plan.opts.nameTitle && r.title ? r.title : q.title;
+      const marker = ticker ? (stem.match(/_ticker$|_t$/i) || stem.match(/_ticker|_t$/i))[0] : '';
+      const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
+      const wantRep = ticker ? withMarker(r.id) : r.id;
+      const wantTitle = plan.opts.nameTitle && r.title ? (ticker ? withMarker(r.title) : r.title) : q.title;
       const wantFp = ticker ? 'video' : q.fingerprint;
       const bad = [];
       if (q.reporting !== wantRep) bad.push('rep');
