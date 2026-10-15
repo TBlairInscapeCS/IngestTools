@@ -2740,7 +2740,16 @@ function portalFill(plan) {
     const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
     if (!r) { nameTd.style.outline = '1px solid #b06000'; tr.dataset.ingestFilled = 'miss'; return; }
     tr.dataset.ingestFilled = 'ok';
-    write(tr, 'file_reporting', r.id + (ticker ? plan.opts.tickerSuffix : ''));
+    // _ticker is sacred: a filename already carrying the marker keeps its
+    // stem verbatim (no rebuild = no doubled suffix, no dropped name
+    // parts). Only when the convention differs (Comscore _t vs _ticker
+    // files) is the reporting id built as code + playbook suffix.
+    const sfx = String(plan.opts.tickerSuffix || '_ticker').toLowerCase();
+    const rid = r.id.toLowerCase();
+    const rep = ticker
+      ? (stem.toLowerCase().endsWith(sfx) ? stem : rid.endsWith(sfx) ? r.id : r.id + plan.opts.tickerSuffix)
+      : r.id;
+    write(tr, 'file_reporting', rep);
     if (plan.opts.nameTitle && r.title) write(tr, 'file_title', r.title);
     if (plan.opts.advertiser && r.brand) {
       write(tr, 'file_comm_advertiser', r.brand);
@@ -2839,7 +2848,10 @@ function renderIngestVerify(probe) {
       const ticker = /_ticker|_t$/i.test(stem);
       const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
       if (!r) { miss++; return '<tr><td>' + esc(q.name) + '</td><td colspan="4"></td><td class="warn">no match</td></tr>'; }
-      const wantRep = r.id + (ticker ? plan.opts.tickerSuffix : '');
+      const sfx = String(plan.opts.tickerSuffix || '_ticker').toLowerCase();
+      const wantRep = ticker
+        ? (stem.toLowerCase().endsWith(sfx) ? stem : r.id.toLowerCase().endsWith(sfx) ? r.id : r.id + plan.opts.tickerSuffix)
+        : r.id;
       const wantTitle = plan.opts.nameTitle && r.title ? r.title : q.title;
       const wantFp = ticker ? 'video' : q.fingerprint;
       const bad = [];
