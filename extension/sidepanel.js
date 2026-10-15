@@ -1706,16 +1706,34 @@ function pickQuickLinkAsset(assets, m) {
 
 // Rewrite share links into direct-download URLs where the pattern is known.
 function directUrl(url) {
+  // Google Drive single-file view links -> the same uc export form folders
+  // use. Folder links are resolved file-by-file upstream (driveFolderId).
+  const df = String(url || '').match(/drive\.google\.com\/file\/d\/([\w-]+)/i);
+  if (df) return driveDownloadUrl(df[1]);
   if (/dropbox\.com/i.test(url)) {
     if (/[?&]dl=0/.test(url)) return url.replace(/dl=0/, 'dl=1');
     if (!/[?&]dl=1/.test(url)) return url + (url.includes('?') ? '&' : '?') + 'dl=1';
   }
-  // SharePoint file links open the viewer (an HTML page) - download=1 forces
-  // the binary stream, same as Dropbox's dl=1.
-  if (/\.sharepoint(-df)?\.com/i.test(url) && !/[?&]download=1/i.test(url)) {
+  // SharePoint/OneDrive links open the viewer (an HTML page) - download=1
+  // forces the binary stream, same as Dropbox's dl=1. Works on :v: share
+  // links and /sites/... file paths; folder links are flagged, not queued.
+  if (/\.sharepoint(-df)?\.com|1drv\.ms|onedrive\.live\.com/i.test(url) && !/[?&]download=1/i.test(url)) {
     return url + (url.includes('?') ? '&' : '?') + 'download=1';
   }
   return url;
+}
+
+// What a link cell actually points at. Folder views and viewer-only
+// platforms can't become a binary by URL rewriting - flagging them with a
+// real instruction beats downloading an HTML page onto disk.
+function linkShape(url) {
+  const u = String(url || '');
+  if (driveFolderId(u)) return 'drive-folder';
+  if (/\.sharepoint(-df)?\.com/i.test(u) && (/\/:f:\/s\//i.test(u) || /AllItems\.aspx|\/Forms\//i.test(u)))
+    return 'sp-folder';
+  if (/wetransfer\.com|\bwe\.tl\b|hightail\.com|frame\.io|\bf\.io\b|aspera|signiant|app\.box\.com|box\.com\/s\//i.test(u))
+    return 'viewer';
+  return 'file';
 }
 
 // Direct-download path for matched rows carrying real URLs (Drive folder,
@@ -1795,7 +1813,17 @@ async function downloadLinked() {
       problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): link cell is label text "' +
         String(m.link).slice(0, 60) + '" - re-grab via the live Google Sheet (xlsx keeps embedded URLs) or the delivery email/page');
     } else {
-      jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, downloadName(m)), url: directUrl(m.link) });
+      const shape = linkShape(m.link);
+      if (shape === 'sp-folder') {
+        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): SharePoint folder link - open the folder, copy the file link (or download the folder manually)');
+      } else if (shape === 'viewer') {
+        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): link is a ' +
+          (m.link.match(/wetransfer|\bwe\.tl\b/i) ? 'WeTransfer' : m.link.match(/frame\.io|\bf\.io\b/i) ? 'Frame.io' :
+           m.link.match(/hightail/i) ? 'Hightail' : m.link.match(/box\.com/i) ? 'Box' : 'viewer') +
+          ' page - open it and download there (these links often expire)');
+      } else {
+        jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, downloadName(m)), url: directUrl(m.link) });
+      }
     }
   }
 
@@ -2164,6 +2192,12 @@ async function downloadFound() {
       // Captured names can lack an extension (ER rows are "Ad-ID + title") -
       // append .mp4 so the watcher treats the file as media. ffmpeg probes
       // content, so a wrong container guess is harmless.
+      const shape = linkShape(url);
+      if (shape === 'viewer' || shape === 'sp-folder') {
+        noUrl.push(r.matched + ' (' + (shape === 'sp-folder' ? 'SharePoint folder - open it' : 'viewer link - open the page') + ')');
+        return;
+      }
+      if (!e.apiAuth) url = directUrl(url);
       const fname = /\.(mp4|mov|mxf|mpg|mpeg|avi|wmv|webm|mkv|ts|m2ts|mp3|wav|aac|srt|vtt)$/i.test(expected)
         ? expected : expected + '.mp4';
       jobs.push({
