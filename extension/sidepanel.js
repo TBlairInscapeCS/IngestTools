@@ -1710,6 +1710,11 @@ function directUrl(url) {
     if (/[?&]dl=0/.test(url)) return url.replace(/dl=0/, 'dl=1');
     if (!/[?&]dl=1/.test(url)) return url + (url.includes('?') ? '&' : '?') + 'dl=1';
   }
+  // SharePoint file links open the viewer (an HTML page) - download=1 forces
+  // the binary stream, same as Dropbox's dl=1.
+  if (/\.sharepoint(-df)?\.com/i.test(url) && !/[?&]download=1/i.test(url)) {
+    return url + (url.includes('?') ? '&' : '?') + 'download=1';
+  }
   return url;
 }
 
@@ -1803,7 +1808,7 @@ async function downloadLinked() {
   dbg('linked download queued', { files: jobs.map(j => j.file), problems: problems.length });
   flushLog(true);
 
-  dlTotal = jobs.length; dlDone = 0; dlFailed = 0;
+  dlTotal = jobs.length; dlDone = 0; dlFailed = 0; htmlRejects = [];
   updateDlStatus();
   for (const j of jobs) {
     try {
@@ -1835,10 +1840,28 @@ function updateDlStatus() {
   if (dlTotal) d.textContent = 'Downloads: ' + dlDone + '/' + dlTotal + ' complete' + (dlFailed ? ', ' + dlFailed + ' failed' : '');
 }
 
-chrome.downloads.onChanged.addListener(delta => {
+// Downloads that came back as HTML (auth walls, SharePoint viewer wrappers,
+// expired links) are deleted off disk and counted as failures - a .html file
+// is never a successfully delivered asset.
+let htmlRejects = [];
+chrome.downloads.onChanged.addListener(async delta => {
   if (!delta.state || !ourDlIds.has(delta.id)) return;
-  if (delta.state.current === 'complete') dlDone++;
-  else if (delta.state.current === 'interrupted') dlFailed++;
+  if (delta.state.current === 'complete') {
+    const [item] = await chrome.downloads.search({ id: delta.id });
+    ourDlIds.delete(delta.id);
+    const fname = (item && item.filename || '').toLowerCase();
+    const mime = (item && item.mime || '').toLowerCase();
+    if (/\.html?$/.test(fname) || /text\/html|application\/xhtml/.test(mime)) {
+      try { await chrome.downloads.removeFile(delta.id); } catch (e) {}
+      chrome.downloads.erase({ id: delta.id });
+      dlFailed++;
+      htmlRejects.push(fname.split('/').pop() || 'file');
+      $('missingNote').innerHTML = 'rejected HTML download(s): ' +
+        htmlRejects.map(esc).join(', ') +
+        ' — link likely leads to a viewer/auth page, not media';
+      dbg('html download rejected', { file: fname.split('/').pop(), mime });
+    } else dlDone++;
+  } else if (delta.state.current === 'interrupted') { ourDlIds.delete(delta.id); dlFailed++; }
   updateDlStatus();
 });
 
@@ -2203,7 +2226,7 @@ async function downloadFound() {
   }
   if (!fresh.length) { setStage('sdDl', 'warn', skipped ? 'all matches already downloaded' : 'no downloadable links captured'); toast((skipped ? 'All ' + skipped + ' match(es) already downloaded this session' : 'No downloadable links captured') + (noUrl.length ? ' - ' + noUrl.length + ' matched by name only' : '') + '.'); return false; }
   const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
-  dlTotal = fresh.length; dlDone = 0; dlFailed = 0;
+  dlTotal = fresh.length; dlDone = 0; dlFailed = 0; htmlRejects = [];
   updateDlStatus();
   for (const j of fresh) {
     queuedUrls.add(j.dkey || j.url);
