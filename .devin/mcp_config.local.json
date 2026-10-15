@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--categoryExtensions", "--autoConnect"],
+      "env": {
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
+    }
+  }
+}

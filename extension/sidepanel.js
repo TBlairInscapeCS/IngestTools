@@ -14,6 +14,7 @@ let matchedFor = '';       // email text at match time - drift = stale results
 let lastResults = null;    // reconcile() output
 let emailDates = new Set();
 let emailSubject = '';
+let emailSender = '';      // sender first name for reply greetings
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -445,7 +446,16 @@ function grabEmailText() {
     });
     text = best;
   }
-  return { text: text.slice(0, 80000), subject };
+  // Sender display name off the reading-pane header - best effort; the
+  // reply greeting falls back to a bare "Hi," when it's unreadable.
+  let sender = '';
+  const sndEl = document.querySelector(
+    '[aria-label*="sender" i], [data-testid*="sender" i], ' +
+    '[class*="PersonaDetails" i] [class*="primaryText" i], ' +
+    '[role="article"] [title*="@"]'
+  );
+  if (sndEl) sender = (sndEl.innerText || sndEl.getAttribute('title') || sndEl.getAttribute('aria-label') || '').trim();
+  return { text: text.slice(0, 80000), subject, sender };
 }
 
 // Inside Outlook: Yangaroo "ADVERTISING DELIVERY" notifications carry a
@@ -646,17 +656,20 @@ async function grabEmailFrom(tab) {
     yr = yres.result || {};
   } catch (e) { /* delivery-link scrape is optional */ }
   yangaroo = (yr.spots && yr.spots.length) ? yr : null;
-  setEmailText(text, (res.result && res.result.subject) || '');
+  setEmailText(text, (res.result && res.result.subject) || '', (res.result && res.result.sender) || '');
   return true;
 }
 
 // Email intake shared by the Outlook grab, clipboard paste, and .eml load.
 // Anything that arrives as plain text loses the delivery-page anchor
 // scrape - callers null yangaroo themselves.
-function setEmailText(text, subject) {
+function setEmailText(text, subject, sender) {
   if (text !== emailEl.value) resetRun(); // new request = fresh run state
   emailEl.value = text;
   emailSubject = subject || '';
+  // Reply greeting: explicit sender name wins (Outlook DOM / .eml From:),
+  // else parse a leading From: line (Graph inbox / pasted headers).
+  emailSender = sender || senderFirstName(text) || '';
   detectedAdvertiser = extractAdvertiser(emailSubject);
   applyClient(detectClient({ emailText: text, subject: emailSubject }), 'email');
   stamp('tsEmail');
@@ -695,7 +708,7 @@ emailEl.addEventListener('drop', e => {
   r.onload = () => {
     const eml = /\.eml$/i.test(f.name) ? parseEml(r.result) : { subject: '', body: r.result };
     yangaroo = null;
-    setEmailText(String(eml.body || '').trim(), eml.subject);
+    setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from));
     toast('Loaded ' + f.name + '.');
   };
   r.readAsText(f);
@@ -1182,7 +1195,7 @@ $('fileInput').addEventListener('change', e => {
     r.onload = () => {
       const eml = /\.eml$/i.test(f.name) ? parseEml(r.result) : { subject: '', body: r.result };
       yangaroo = null;
-      setEmailText(String(eml.body || '').trim(), eml.subject);
+      setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from));
       toast('Loaded ' + f.name + '.');
     };
     r.readAsText(f);
@@ -1670,7 +1683,7 @@ async function presentGuessPicker(cands) {
 
 $('confMatch').addEventListener('click', () => {
   if (!matched) return;
-  copyText(buildMatchConfirmation(matched), 'Confirmation reply');
+  copyText(buildMatchConfirmation(matched, emailSender), 'Confirmation reply');
 });
 $('showSheet').addEventListener('click', showOnSheet);
 
@@ -2645,7 +2658,7 @@ $('runAll').addEventListener('click', async () => {
   toast('Matched ' + matched.length + ' row(s) but found no downloadable files - see the log.');
 });
 
-$('excEmail').addEventListener('click', () => lastResults && copyText(buildExceptionEmail(lastResults), 'Exception email'));
+$('excEmail').addEventListener('click', () => lastResults && copyText(buildExceptionEmail(lastResults, emailSender), 'Exception email'));
 // Confirmation uses the real-world discrepancy template (found / extras /
 // missing) when reconcile data exists; falls back to the simple version.
 $('confEmail').addEventListener('click', () => {
@@ -2656,8 +2669,8 @@ $('confEmail').addEventListener('click', () => {
     [m.id, m.trackingId].filter(Boolean).forEach(v =>
       espnIds.add(normalizeName(v).replace(/ /g, '')));
   });
-  copyText(buildReconConfirmation(lastResults, lastExtras, espnIds) ||
-    buildConfirmationEmail(lastResults), 'Confirmation email');
+  copyText(buildReconConfirmation(lastResults, lastExtras, espnIds, emailSender) ||
+    buildConfirmationEmail(lastResults, emailSender), 'Confirmation email');
 });
 $('dlCsv').addEventListener('click', () => {
   if (!lastResults) return;

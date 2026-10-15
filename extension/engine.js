@@ -216,7 +216,27 @@ function detectHeaderRow(rows) {
 
 // ---------- Email drafts ----------
 
-function buildExceptionEmail(results) {
+// Sender's first name for reply greetings: accepts raw email text (picks
+// the first From: line) or a bare display name/address. "Anthony Cruz
+// <a@b>" -> "Anthony"; "Cruz, Anthony" -> "Anthony"; bare addresses and
+// empty input yield '' (nothing to greet).
+function senderFirstName(text) {
+  let s = String(text || '');
+  const m = s.match(/^from:\s*(.+)$/im);
+  if (m) s = m[1];
+  else if (s.length > 60 || /\r?\n/.test(s) || !/[A-ZÀ-Þ]/.test(s)) return ''; // body text, not a name
+  s = s.replace(/<[^>]*>/g, '').replace(/"/g, '').replace(/\s*\(.*?\)\s*/g, ' ').trim();
+  if (!s || /^[^\s]+@[^\s]+$/.test(s)) return '';
+  let w = s.includes(',') ? s.split(',')[1] : s;
+  const tok = (String(w || '').trim().match(/[A-Za-zÀ-ÿ'-]+/) || [])[0] || '';
+  return tok ? tok[0].toUpperCase() + tok.slice(1) : '';
+}
+
+function greet(sender) {
+  return 'Hi' + (sender ? ' ' + sender : '') + ',';
+}
+
+function buildExceptionEmail(results, sender) {
   const missing = [], possible = [], ambiguous = [], dupes = [];
   for (const r of results) {
     if (r.status === 'MISSING') missing.push(r.id);
@@ -229,7 +249,7 @@ function buildExceptionEmail(results) {
     return null;
   }
   const lines = [
-    'Hi,', '',
+    greet(sender), '',
     'Thanks for sending these over. While processing the request I ran into a few issues - could you take a look?', '',
   ];
   if (missing.length) {
@@ -328,7 +348,7 @@ const CONF_COUNT = [
 // "I've ingested those creatives ... under the following IDs:" + titles.
 // Phrasing rotates per request (seeded by the ID list) so replies don't
 // read like copy-paste.
-function buildMatchConfirmation(matched) {
+function buildMatchConfirmation(matched, sender) {
   const items = [];
   let nEspn = 0;
   matched
@@ -342,7 +362,7 @@ function buildMatchConfirmation(matched) {
   if (!items.length) return null;
   const seed = hashStr(items.join('|'));
   const intro = pick(CONF_INTRO[nEspn === 0 ? 'none' : nEspn === 1 ? 'one' : 'many'], seed);
-  const lines = ['Hi,', '', intro];
+  const lines = [greet(sender), '', intro];
   items.forEach(t => lines.push(t));
   lines.push('', pick(CONF_SHEET, seed >> 3), '', 'Thanks,');
   return lines.join('\n');
@@ -352,7 +372,7 @@ function buildMatchConfirmation(matched) {
 // and the request disagree: found IDs, then extras ("in the folder but not
 // listed") and missing ("not in the linked folder") called out explicitly.
 // espnIds: Set of normalized IDs that need a <id>_ticker entry.
-function buildReconConfirmation(results, extras, espnIds) {
+function buildReconConfirmation(results, extras, espnIds, sender) {
   const found = results.filter(r => r.status === 'FOUND').map(r => r.id);
   const missing = results.filter(r => r.status === 'MISSING').map(r => r.id);
   const requested = results.filter(r => r.status !== 'BLANK' && r.status !== 'DUPLICATE').length;
@@ -363,7 +383,7 @@ function buildReconConfirmation(results, extras, espnIds) {
     .filter(id => espnIds && espnIds.has(normalizeName(id).replace(/ /g, '')))
     .map(id => id + '_ticker');
   const seed = hashStr(found.join('|') + '::' + extras.join('|') + '::' + missing.join('|'));
-  const lines = ['Hi,', '',
+  const lines = [greet(sender), '',
     pick(CONF_COUNT, seed)(ingested, requested) +
     (tickers.length ? ' and ticker versions' : '') +
     ' to appear in the commercial reports:'];
@@ -380,12 +400,12 @@ function buildReconConfirmation(results, extras, espnIds) {
   return lines.join('\n');
 }
 
-function buildConfirmationEmail(results) {
+function buildConfirmationEmail(results, sender) {
   const found = results.filter(r => r.status === 'FOUND');
   const reviewed = results.filter(r => r.status === 'POSSIBLE MATCH' || r.status === 'AMBIGUOUS');
   if (!found.length && !reviewed.length) return null;
   const lines = [
-    'Hi,', '',
+    greet(sender), '',
     'Confirming receipt - we have the files and are processing the following tracking IDs:', '',
   ];
   found.forEach(r => lines.push('  - ' + r.id));
@@ -451,6 +471,7 @@ function parseEml(text) {
   const headers = text.slice(0, i);
   let body = text.slice(i);
   const subject = mimeWord((headers.match(/^subject:\s*([^\r\n]+(?:\r?\n[ \t][^\r\n]*)*)/im) || [])[1] || '');
+  const from = mimeWord((headers.match(/^from:\s*([^\r\n]+)/im) || [])[1] || '');
   const ct = (headers.match(/^content-type:\s*([^\r\n;]+)/im) || [])[1] || '';
   if (/multipart/i.test(ct)) {
     const b = (headers.match(/boundary="?([^"\r\n;]+)"?/i) || [])[1];
@@ -467,7 +488,7 @@ function parseEml(text) {
     body = stripHtml(body);
   }
   if (/quoted-printable/i.test(headers)) body = qpDecode(body);
-  return { subject: subject.trim(), body: body.trim() };
+  return { subject: subject.trim(), body: body.trim(), from: from.trim() };
 }
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
