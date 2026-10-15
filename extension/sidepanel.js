@@ -2985,3 +2985,57 @@ msLoad().then(() => {
   if (MS.tenant) $('msTenant').value = MS.tenant;
   if (MS.refreshToken) checkInbox(true);
 });
+
+// ---------- Panel settings (which optional modules show) ----------
+
+const UI_OPTS = [
+  ['graph', 'opt-graph'], ['emailExtra', 'opt-emailExtra'], ['excReply', 'opt-excReply'],
+  ['colMap', 'opt-colMap'], ['erSweep', 'opt-erSweep'], ['manual', 'opt-manual'],
+  ['log', 'opt-log'], ['hints', 'opt-hints'],
+];
+
+function applyUiOpts(o) {
+  UI_OPTS.forEach(([k, cbId]) => {
+    const on = o[k] !== false;
+    document.querySelectorAll('[data-opt="' + k + '"]')
+      .forEach(el => el.classList.toggle('opt-off', !on));
+    const cb = $(cbId);
+    if (cb) cb.checked = on;
+  });
+  document.body.classList.toggle('opt-off-hints', o.hints === false);
+}
+
+chrome.storage.local.get('uiOpts', d => applyUiOpts(d.uiOpts || {}));
+
+$('settingsGear').addEventListener('click', e => {
+  e.stopPropagation();
+  const p = $('settingsPanel');
+  p.classList.toggle('hidden');
+  $('settingsGear').setAttribute('aria-expanded', String(!p.classList.contains('hidden')));
+});
+$('settingsPanel').addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => {
+  $('settingsPanel').classList.add('hidden');
+  $('settingsGear').setAttribute('aria-expanded', 'false');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    $('settingsPanel').classList.add('hidden');
+    $('settingsGear').setAttribute('aria-expanded', 'false');
+  }
+});
+UI_OPTS.forEach(([k, cbId]) => {
+  $(cbId).addEventListener('change', () => {
+    chrome.storage.local.get('uiOpts', d => {
+      const o = d.uiOpts || {};
+      o[k] = $(cbId).checked;
+      chrome.storage.local.set({ uiOpts: o });
+      applyUiOpts(o);
+    });
+  });
+});
+$('settingsReset').addEventListener('click', e => {
+  e.preventDefault();
+  chrome.storage.local.remove('uiOpts');
+  applyUiOpts({});
+});

@@ -7,7 +7,8 @@
   :root { color-scheme: dark; }
   body { font: 12px/1.4 -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 10px; color: #d7dbe2; background: #14161a; }
   h1 { font-size: 13px; margin: 0 8px 8px 0; display: inline; }
-  .topbar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .topbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+            position: sticky; top: 0; z-index: 8; margin: -10px -10px 8px; padding: 10px; background: #14161a; }
 
   details { border: 1px solid #2c313b; border-left-width: 3px; border-radius: 6px; margin-bottom: 8px; padding: 7px 9px; background: #1b1e24; }
   summary { font-size: 11px; font-weight: 700; letter-spacing: .03em; cursor: pointer; }
@@ -70,6 +71,18 @@
   .sdot.ok { background: #3fbf7f; }
   .sdot.warn { background: #e8a13d; }
   .sdot.fail { background: #e05c5c; }
+
+  button:focus-visible, summary:focus-visible, a:focus-visible,
+  select:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid #4f9cf9; outline-offset: 1px; }
+  #settingsGear { margin-left: auto; }
+  #settingsPanel { position: fixed; top: 44px; right: 8px; z-index: 50; width: 210px;
+    background: #22262e; border: 1px solid #3a414d; border-radius: 6px; padding: 10px 12px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.45); font-size: 11px; }
+  #settingsPanel .opt { display: block; margin: 5px 0; color: #cfd4dc; font-weight: 400; cursor: pointer; }
+  #settingsPanel .opt input { margin-right: 6px; vertical-align: -1px; }
+  [data-opt].opt-off { display: none !important; }
+  body.opt-off-hints .ib, body.opt-off-hints .bubble { display: none !important; }
 </style>
 </head>
 <body>
@@ -79,6 +92,19 @@
   <button id="runAll" class="primary">Run</button>
   <span class="ib" data-bubble="bRun">?</span>
   <label class="col">Client <select id="clientSel"></select></label>
+  <button id="settingsGear" title="Choose which tools show" aria-expanded="false">&#9881; Settings</button>
+</div>
+<div id="settingsPanel" class="hidden" role="dialog" aria-label="Panel settings">
+  <div style="font-weight:700;margin-bottom:4px">Show in panel</div>
+  <label class="opt"><input type="checkbox" id="opt-graph"> Inbox check (Graph)</label>
+  <label class="opt"><input type="checkbox" id="opt-emailExtra"> Extra email inputs</label>
+  <label class="opt"><input type="checkbox" id="opt-excReply"> Exception reply</label>
+  <label class="opt"><input type="checkbox" id="opt-colMap"> Column mapping</label>
+  <label class="opt"><input type="checkbox" id="opt-erSweep"> ER search sweep</label>
+  <label class="opt"><input type="checkbox" id="opt-manual"> Manual lists &amp; API</label>
+  <label class="opt"><input type="checkbox" id="opt-log"> Log panel</label>
+  <label class="opt"><input type="checkbox" id="opt-hints"> Help ? bubbles</label>
+  <div class="row"><a href="#" id="settingsReset">reset to defaults</a></div>
 </div>
 <div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then downloads: direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>
 <div class="info" id="clientNote"></div>
@@ -89,12 +115,12 @@
   <textarea id="email" placeholder="Paste the request email, or grab it from the open Outlook tab."></textarea>
   <div class="row">
     <button id="grabEmail">Grab from Outlook</button>
-    <button id="checkInbox">Check inbox</button>
-    <button id="pasteEmail">Paste email</button>
-    <button id="loadEmail">Load .eml</button>
+    <button id="checkInbox" data-opt="graph">Check inbox</button>
+    <button id="pasteEmail" data-opt="emailExtra">Paste email</button>
+    <button id="loadEmail" data-opt="emailExtra">Load .eml</button>
     <button id="clearEmail">Clear</button>
   </div>
-  <div class="info hidden" id="msSetup">
+  <div class="info hidden" id="msSetup" data-opt="graph">
     Reads your inbox via Microsoft Graph. One-time setup:
     Entra &rarr; App registrations &rarr; new app (org-only, no redirect URI)
     &rarr; "Allow public client flows" = Yes &rarr; add delegated <b>Mail.Read</b>.<br>
@@ -112,12 +138,12 @@
       <a href="#" id="msDevCode">use device code instead</a>
     </div>
   </div>
-  <div class="info" id="inboxList"></div>
+  <div class="info" id="inboxList" data-opt="graph"></div>
   <div class="info" id="emailInfo"></div>
   <div id="replyArea" class="hidden" style="margin-top:6px">
     <div class="row">
       <button id="copyReply" class="primary">Copy reply</button>
-      <button id="copyExcReply">Exception reply</button>
+      <button id="copyExcReply" data-opt="excReply">Exception reply</button>
     </div>
     <div class="hint" id="replyCheck"></div>
     <pre id="replyPreview" class="scrollbox mono" style="max-height:14vh;white-space:pre-wrap;font-size:11px;margin-top:4px"></pre>
@@ -136,7 +162,7 @@
         <button id="pasteSheet">Paste tracker</button>
       </div>
     </details>
-    <details id="colDetails" style="display:inline">
+    <details id="colDetails" style="display:inline" data-opt="colMap">
       <summary style="text-transform:none;font-weight:400;display:inline;font-size:10px;color:#8b93a1">columns</summary>
       <div class="row" id="colPicks">
         <label class="col">ID <select id="colId"></select></label>
@@ -180,7 +206,7 @@
   <div class="row">
     <button id="grabAndDl" class="primary">Download from open pages</button>
   </div>
-  <div class="row">
+  <div class="row" data-opt="erSweep">
     <input type="text" id="erSender" placeholder="sender (e.g. tatari)" size="14">
     <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
     <button id="erSweep">Download from ER search</button>
@@ -190,7 +216,7 @@
   <div id="counts"></div>
   <div class="hint" id="missingNote" style="color:#ec9a9a"></div>
   <div class="scrollbox" id="results"></div>
-  <details id="manualTools">
+  <details id="manualTools" data-opt="manual">
     <summary>Manual lists, API &amp; reports</summary>
     <textarea id="ids" placeholder="Requested tracking IDs"></textarea>
     <textarea id="files" placeholder="File names"></textarea>
@@ -223,7 +249,7 @@
   <div class="scrollbox" id="ingestPreviewBox"></div>
 </details>
 
-<details id="dbgTools">
+<details id="dbgTools" data-opt="log">
   <summary style="font-size:10px;font-weight:400;color:#8b93a1;text-transform:none">Log</summary>
   <div class="scrollbox" id="dbgLog" style="max-height:20vh"></div>
   <div class="row">
