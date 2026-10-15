@@ -221,15 +221,40 @@ function detectHeaderRow(rows) {
 // <a@b>" -> "Anthony"; "Cruz, Anthony" -> "Anthony"; bare addresses and
 // empty input yield '' (nothing to greet).
 function senderFirstName(text) {
+  const first = s => {
+    const tok = (String(s || '').trim().match(/[A-Za-zÀ-ÿ'-]+/) || [])[0] || '';
+    return tok ? tok[0].toUpperCase() + tok.slice(1) : '';
+  };
   let s = String(text || '');
   const m = s.match(/^from:\s*(.+)$/im);
-  if (m) s = m[1];
-  else if (s.length > 60 || /\r?\n/.test(s) || !/[A-ZÀ-Þ]/.test(s)) return ''; // body text, not a name
-  s = s.replace(/<[^>]*>/g, '').replace(/"/g, '').replace(/\s*\(.*?\)\s*/g, ' ').trim();
-  if (!s || /^[^\s]+@[^\s]+$/.test(s)) return '';
-  let w = s.includes(',') ? s.split(',')[1] : s;
-  const tok = (String(w || '').trim().match(/[A-Za-zÀ-ÿ'-]+/) || [])[0] || '';
-  return tok ? tok[0].toUpperCase() + tok.slice(1) : '';
+  if (m) {
+    s = m[1].replace(/<[^>]*>/g, '').replace(/"/g, '')
+      .replace(/\s*\(.*?\)\s*/g, ' ').trim();
+    if (s.includes(',')) s = s.split(',')[1]; // "Cruz, Anthony"
+    const n = first(s);
+    if (n && !/^[^\s]+@/.test(s)) return n;
+  } else if (s.length <= 60 && !/\r?\n/.test(s) && /[A-ZÀ-Þ]/.test(s)) {
+    return first(s); // bare display name passed directly
+  }
+  // Signature: the sender's sign-off sits at the tail of the FIRST message
+  // segment (earlier replies are quoted below it and aren't the sender).
+  const head = s.split(/\r?\n(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i)[0];
+  const tail = head.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-6);
+  const SIGNOFF = /^(thank you|best regards|warm regards|kind regards|best wishes|respectfully|sincerely|thanks|best|regards|cheers|talk soon|see you|thx|ty|appreciated),?\s*(.*)$/i;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const sm = tail[i].match(SIGNOFF);
+    if (!sm) continue;
+    const sameLine = first(sm[2] && sm[2].replace(/^[,\s]+/, ''));
+    if (sameLine) return sameLine;
+    if (i + 1 < tail.length) {
+      const n = first(tail[i + 1]);
+      // a name-ish line: starts with a capital, no address/url/digits
+      if (n && /^[A-ZÀ-Þ]/.test(tail[i + 1]) && tail[i + 1].length < 40 && !/[@:\/\d]/.test(tail[i + 1]))
+        return n;
+    }
+    return '';
+  }
+  return '';
 }
 
 function greet(sender) {
