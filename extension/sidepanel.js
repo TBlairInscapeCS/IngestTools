@@ -2681,13 +2681,17 @@ function portalFill(plan) {
 // at fill time (_ticker -> video).
 function ingestPlan() {
   const ing = (client && client.ingest) || {};
+  // Portal field rule (same as ingestFileName): letters/digits/dash/dot/
+  // underscore/space survive; every other character is removed, not
+  // replaced - "Kohl's" -> "Kohls", "Spot: Summer" -> "Spot Summer".
+  const clean = s => String(s || '').replace(/[^\w.\- ]+/g, '').replace(/\s+/g, ' ').trim();
   return {
     rows: (matched || [])
       .filter(m => m.matchType !== 'ROW (out of range)' && (m.trackingId || m.id))
       .map(m => ({
-        id: String(m.trackingId || m.id).trim(),
-        title: String(m.title || '').trim(),
-        brand: String(m.brand || '').trim(),
+        id: clean(m.trackingId || m.id),
+        title: clean(m.title),
+        brand: clean(m.brand),
         espn: !!m.espn,
       })),
     opts: {
