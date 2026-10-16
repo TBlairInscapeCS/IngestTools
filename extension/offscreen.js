@@ -1,8 +1,9 @@
 // MV3 service workers can't play audio - this offscreen document owns the
 // AudioContext and plays the new-request chime on demand. The chime is a
 // service-bell "order's up" double ding: inharmonic sine partials with a
-// sharp attack and fast decay, ~1.6s total. 'stop' cuts it early (e.g.
-// the user opened the panel).
+// sharp attack, fast decay, hot gain (0.9 peak) so it reads at normal
+// system volume, ~1.6s total. 'stop' cuts it early (e.g. the user opened
+// the panel).
 let ac = null, nodes = [];
 
 function stopAll() {
@@ -13,7 +14,7 @@ function stopAll() {
 function ding(when) {
   const g = ac.createGain();
   g.gain.setValueAtTime(0.0001, when);
-  g.gain.exponentialRampToValueAtTime(0.45, when + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.9, when + 0.006);
   g.gain.exponentialRampToValueAtTime(0.0001, when + 1.1);
   g.connect(ac.destination);
   // Bell partials - inharmonic ratios make it metal, not a beep.
