@@ -18,6 +18,8 @@ let emailSender = '';      // sender first name for reply greetings
 let emailDate = '';        // sent timestamp for the Jira ticket header
 let emailGraphId = '';     // Graph message id when the email came via inbox
 let emailFromAddr = '';    // sender address of the Graph-loaded email
+let emailFolderName = '';  // Outlook folder the loaded email was filed into
+let folderMap = {};        // folderId -> displayName (rules-based client map)
 let reqSenders = {};       // learned request senders (addr -> n, dom:x -> n)
 let selfAddr = '';         // user's own address - self-mail isn't a request
 let selfDomain = '';       // own domain - never learned as a sender domain
@@ -196,7 +198,7 @@ function resetRun() {
   // Request-specific draft/proof state must not bleed into the next job:
   // a dirty reply kept last request's text, a staged Jira run could post
   // the wrong ticket's comment, and stale records/dates attach wrongly.
-  replyDirty = false; emailDate = ''; emailGraphId = ''; emailFromAddr = '';
+  replyDirty = false; emailDate = ''; emailGraphId = ''; emailFromAddr = ''; emailFolderName = '';
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
   $('jiraPreview').value = ''; $('jiraStatus').innerHTML = '';
@@ -364,7 +366,7 @@ function applyClient(c, via) {
   const agencyOf = x => x.name.split(' / ')[0].split(' ')[0];
   const refine = (base, cand) => {
     const agency = agencyOf(base);
-    const hit = detectClient({ emailText: emailEl.value, subject: emailSubject });
+    const hit = detectClient({ emailText: emailEl.value, subject: emailSubject, folderName: emailFolderName });
     if (hit && !hit.umbrella && hit.name.indexOf(agency) === 0) return hit;
     if (cand && !cand.umbrella && cand.name.indexOf(agency) === 0) return cand;
     return base;
@@ -720,7 +722,7 @@ function setEmailText(text, subject, sender, date, graphId) {
   emailDate = String(date || '').trim() ||
     ((text.match(/^(?:sent|date|received):\s*(.+)$/im) || [])[1] || '').trim().slice(0, 90);
   detectedAdvertiser = extractAdvertiser(emailSubject);
-  applyClient(detectClient({ emailText: text, subject: emailSubject }), 'email');
+  applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
   stamp('tsEmail');
   onEmailChange();
   saveInputs();
@@ -948,14 +950,17 @@ function renderInbox(msgs, quiet) {
     cands.map((c, i) => {
       const from = (c.m.from && c.m.from.emailAddress && c.m.from.emailAddress.name) || '';
       const when = String(c.m.receivedDateTime || '').replace('T', ' ').slice(5, 16);
+      const folder = folderMap[c.m.parentFolderId] || '';
       return '<div><a href="#" data-ib="' + i + '"><b>load</b></a> ' +
-        esc(c.m.subject || '(no subject)') + ' <i>' + esc(from) + ' · ' + esc(when) + '</i></div>';
+        esc(c.m.subject || '(no subject)') + ' <i>' + esc(from) + ' · ' + esc(when) +
+        (folder ? ' · <b>' + esc(folder) + '</b>' : '') + '</i></div>';
     }).join('');
   el.querySelectorAll('a[data-ib]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
     const c = cands[parseInt(a.dataset.ib, 10)];
     const from = c.m.from && c.m.from.emailAddress;
     yangaroo = null;
+    emailFolderName = folderMap[c.m.parentFolderId] || '';
     setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
       '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
       String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
@@ -986,6 +991,29 @@ function noteConfirmedSender(addr) {
   chrome.storage.local.set({ reqSenders });
 }
 chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; });
+// Folder map powers the client tagging on inbox candidates; refresh weekly
+// (the folder tree rarely changes).
+chrome.storage.local.get(['msFolderMap', 'msFolderMapAt'], d => {
+  folderMap = d.msFolderMap || {};
+  const stale = !d.msFolderMapAt || Date.now() - d.msFolderMapAt > 7 * 864e5;
+  if (stale && MS.refreshToken)
+    graphFolderMap().then(m => {
+      folderMap = m;
+      chrome.storage.local.set({ msFolderMapAt: Date.now() });
+    }).catch(() => {});
+});
+// Sent-template learning: once a day, scan Sent Items for template replies
+// and learn every sender on those threads (real confirmed requests).
+chrome.storage.local.get('lastLearnAt', d => {
+  const due = !d.lastLearnAt || Date.now() - d.lastLearnAt > 864e5;
+  if (!due || !MS.refreshToken) return;
+  const since = new Date(Date.now() - 7 * 864e5).toISOString();
+  graphLearnedSenders(since).then(r => {
+    (r.senders || []).forEach(noteConfirmedSender);
+    chrome.storage.local.set({ lastLearnAt: Date.now() });
+    dbg('sender learning', { senders: (r.senders || []).length, scanned: r.scanned });
+  }).catch(e => dbg('sender learning fail', { err: String(e) }));
+});
 chrome.storage.local.get(['msSelfDomain', 'msSelfAddr'], d => {
   selfDomain = d.msSelfDomain || '';
   selfAddr = d.msSelfAddr || '';
@@ -1005,7 +1033,7 @@ emailEl.addEventListener('input', () => { stamp('tsEmail'); onEmailChange(); sav
 
 function onEmailChange() {
   const text = emailEl.value;
-  if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject }), 'email');
+  if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
   // The request is the newest message only - older replies in a pasted
   // thread carry already-confirmed codes that must not re-extract.
   const req = latestSegment(text);

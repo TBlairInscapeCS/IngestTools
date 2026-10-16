@@ -549,10 +549,14 @@ const REQ_INTENT_POD = /\bPOD\b/;
 // ("spots fingerprinted for Inscape tracking", "MAX ACR Metadata Tracker").
 // Only server destinations are safe body signals - "backfill" alone
 // can't reject since an initial request can legitimately ask for
-// backfill spots. Fires before every positive tier so trusted senders
-// can't push channel mail through.
-const CHANNEL_SUBJ = /fingerprint|inscape\s+grid|grid\s+review|ad[-\s]?detection|detections?\b|\bkantar\b|\bcomscore\b|\bsimulmedia\b|\bacr\b/i;
+// backfill spots. Channel vocabulary only drops UNKNOWN senders: known
+// customers and learned senders do title file deliveries "for
+// fingerprinting" (Optimum, Viant, EMX share folders of spots).
+const CHANNEL_SUBJ = /fingerprint|inscape\s+grid|grid\s+review|ad[-\s]?detection|detections?\b|\bacr\b/i;
 const CHANNEL_BODY = /s3:\/\/|sftp:\/\//i;
+// "<creatives|commercials|spots|files> for fingerprinting/detections" =
+// file deliveries feeding that pipeline, not channel ops themselves.
+const FILE_FOR_FP = /\b(?:creatives?|commercials?|spots?|files?|clips?|ads?)\s+for\s+(?:re-?)?(?:finger|detect)\w*/i;
 
 // Code-shaped tokens that survive detection scrutiny: URLs stripped first
 // (SafeLinks/Mimecast tracking params tokenize into fake codes), then
@@ -602,10 +606,6 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   // subject describes the old thread, so replies score on body alone.
   const isReply = /^\s*re\s*:/i.test(s);
   const b = firstSegment(body);
-  // Channel/fingerprinting-side mail stays out even when the sender is
-  // trusted or the words "ingest"/"creative" appear in it.
-  if (CHANNEL_SUBJ.test(s) || CHANNEL_BODY.test(b.slice(0, 2000))) return false;
-  if (!isReply && CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
   const weak = detectCodes(b).length >= 1 ||
     /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
       .test((isReply ? '' : s) + ' ' + b.slice(0, 2000));
@@ -613,6 +613,12 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   const learned = senders &&
     ((senders[a.toLowerCase()] || 0) >= 1 ||
      (senders['dom:' + (a.split('@')[1] || '').toLowerCase()] || 0) >= 3);
+  // Server destinations are never file-ingest asks, trusted or not.
+  if (CHANNEL_BODY.test(b.slice(0, 2000))) return false;
+  // Channel vocabulary only vets unknown senders - real file-ingest
+  // customers title deliveries "for fingerprinting" all the time.
+  if (!known && !learned && CHANNEL_SUBJ.test(s) && !FILE_FOR_FP.test(s)) return false;
+  if (!isReply && CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
   if (known || learned) return weak;
   return looksLikeRequest(isReply ? '' : s, b);
 }

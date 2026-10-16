@@ -48,6 +48,7 @@ var CLIENTS = [
     name: 'InMarket',
     detect: {
       sheetIds: ['1f8gES1wBV9gMLDsmmJXuW81uP_DuLJ6E1_79_HYy25U'],
+      subjects: [/inmarket\s*[x\/|]\s*inscape|inscape\s*[x\/|]\s*inmarket/i],
       keywords: [/inmarket/i],
       domains: [/inmarket\.com/i],
     },
@@ -177,7 +178,7 @@ var CLIENTS = [
     umbrella: true,  // sheet proves the agency; email keywords refine the brand
     detect: {
       sheetIds: ['1zPD9LkK_SzWYDhGYRKAwR-eWLIkS-SENRkNvWFdZugQ'],
-      subjects: [/ingest(ion)? request|\| horizon media \|/i],
+      subjects: [/ingest(ion)? request|\| horizon media \||inscape pod|creative tracking|inscape creative ingestion/i],
       keywords: [/horizon ?next/i],
       domains: [/horizon-next\.com|horizonmedia\.com/i],
     },
@@ -267,6 +268,7 @@ var CLIENTS = [
     id: 'chief-media',
     name: 'Chief Media',
     detect: {
+      subjects: [/creatives? added/i],
       keywords: [/chief media/i],
       domains: [/chiefmedia\.com/i],
     },
@@ -303,7 +305,11 @@ var CLIENTS = [
   {
     id: 'cuebiq',
     name: 'Cuebiq',
-    detect: { keywords: [/cuebiq/i], domains: [/cuebiq\.com/i] },
+    detect: {
+      subjects: [/creatives to ingest/i],
+      keywords: [/cuebiq/i],
+      domains: [/cuebiq\.com/i],
+    },
     delivery: 'links',
     note: 'Email carries the inline ID list (mixed formats incl. VIA_#####) + a tracking-doc link; files are in the linked doc/drive.',
     ingest: { fingerprint: 'both' },
@@ -326,7 +332,11 @@ var CLIENTS = [
   {
     id: 'digitalremedy',
     name: 'DigitalRemedy',
-    detect: { keywords: [/digital ?remedy/i] },
+    detect: {
+      subjects: [/new commercial ingestion request/i],
+      keywords: [/digital ?remedy/i],
+      domains: [/digitalremedy\.com/i],
+    },
     delivery: 'other',
     ingest: {
       fingerprint: 'both',
@@ -405,6 +415,7 @@ var CLIENTS = [
     detect: {
       sheetIds: ['D3D24E07-DB92-4F40-813F-707E5A1F1D38'],
       keywords: [/\bemx\b/i],
+      domains: [/emxdigital\.com/i],
     },
     delivery: 'sharepoint',
     note: 'Tracker is SharePoint Excel (enginedrive.sharepoint.com).',
@@ -431,7 +442,11 @@ var CLIENTS = [
   {
     id: 'lwd',
     name: 'LWD Direct',
-    detect: { keywords: [/\blwd\b|lw ?direct/i] },
+    detect: {
+      subjects: [/lwd vizio|acr links/i],
+      keywords: [/\blwd\b|lw ?direct/i],
+      domains: [/lwdirect\.com|attentionarc\.com/i],
+    },
     delivery: 'extreme-reach',
     ingest: {
       fingerprint: 'both', advertiser: true, nameTitle: true,
@@ -483,6 +498,7 @@ var CLIENTS = [
     name: 'Tatari',
     detect: {
       sheetIds: ['1qVjlD7WJky6f5s7MJNwROLkIpynEdnAKIbhQeDrAvJ8'],
+      subjects: [/tatari creatives/i],
       keywords: [/tatari/i],
       domains: [/tatari\.tv|tatari\.com/i],
     },
@@ -555,7 +571,185 @@ var CLIENTS = [
     delivery: 'extreme-reach',
     note: 'Files arrive via Extreme Reach - open Spot Deliveries, Grab file list, Reconcile, then Download found files.',
   },
+  // ---- File-ingest clients recovered from mailbox folder rules ----
+  // Domains/subjects below were mined from the Customers/* folder corpus;
+  // folder names map back through CLIENT_FOLDERS.
+  {
+    id: 'millenia3',
+    name: 'Millenia3',
+    detect: {
+      subjects: [/inscape ingest\b/i],
+      keywords: [/millenia ?3/i],
+      domains: [/millenia3\.com/i],
+    },
+    delivery: 'links',
+    note: '"Inscape Ingest - <show>" requests; network promos trafficked as spot files.',
+  },
+  {
+    id: 'itn',
+    name: 'ITN Networks',
+    detect: {
+      subjects: [/itn networks isci codes/i],
+      keywords: [/itn networks/i],
+      domains: [/itnnetworks\.com/i],
+    },
+    delivery: 'links',
+    note: '"ITN Networks ISCI codes" mails carry the code list inline.',
+  },
+  {
+    id: 'adimpact',
+    name: 'AdImpact',
+    detect: {
+      subjects: [/adimpact|creatives? for ingestion/i],
+      keywords: [/adimpact/i],
+      domains: [/adimpact\.com/i],
+    },
+    delivery: 'links',
+    note: '"Ingest & Assign Creatives to AdImpact" / "Creatives for Ingestion" requests.',
+  },
+  {
+    id: 'cadent',
+    name: 'Cadent',
+    detect: {
+      subjects: [/commercial ingestion request/i],
+      keywords: [/cadent/i],
+      domains: [/cadent\.tv/i],
+    },
+    delivery: 'links',
+    note: '"Commercial Ingestion Request" and "New Files for Download" notices.',
+  },
+  {
+    id: 'marketcast',
+    name: 'MarketCast',
+    detect: {
+      subjects: [/ingest(ion)? request/i],
+      keywords: [/marketcast|deductive|genius ?digital/i],
+      domains: [/marketcast\.com/i],
+    },
+    delivery: 'links',
+    note: '"Lifetime IAWL Content Ingestion Request" / "Ingest Request: <brand>" - mixed with Content Feed backfill ops.',
+  },
+  {
+    id: 'greenlight',
+    name: 'Greenlight',
+    detect: {
+      subjects: [/new creatives from greenlight|greenlight creative ingestion/i],
+      keywords: [/greenlight/i],
+      domains: [/greenlight\.me/i],
+    },
+    delivery: 'links',
+  },
+  {
+    id: 'broadbeam',
+    name: 'Broadbeam Media',
+    detect: {
+      subjects: [/broadbeam/i],
+      keywords: [/broadbeam/i],
+      domains: [/broadbeammedia\.com/i],
+    },
+    delivery: 'links',
+    note: '"Broadbeam Media + Inscape - TV commercials for <brand>" requests.',
+  },
+  {
+    id: 'optimum-a4',
+    name: 'Optimum / a4 / Altice',
+    detect: {
+      subjects: [/creatives for (re-?)?fingerprinting/i],
+      keywords: [/a4media|altice|optimum/i],
+      domains: [/optimum\.media|a4media\.com/i],
+    },
+    delivery: 'links',
+    note: '"<Client> - Creatives for Fingerprinting" - file deliveries despite the fingerprinting subject.',
+  },
+  {
+    id: 'pga-tour',
+    name: 'PGA Tour',
+    detect: {
+      subjects: [/vizio \/\/ pga|pga ?t/i],
+      keywords: [/pga ?tour/i],
+      domains: [/pgatourhq\.com/i],
+    },
+    delivery: 'links',
+  },
+  {
+    id: 'havas',
+    name: 'Havas Edge',
+    inactive: true,  // last requests seen 2022
+    detect: {
+      subjects: [/media files for inscape/i],
+      keywords: [/havas/i],
+      domains: [/havasedge\.com/i],
+    },
+    delivery: 'links',
+  },
+  {
+    id: 'comcast-notify',
+    name: 'Comcast delivery notice',
+    detect: {
+      subjects: [/broadcast delivery notification|delivery notification/i],
+      domains: [/comcastaddelivery\.com/i],
+    },
+    delivery: 'links',
+    note: 'Delivery confirmation like the ER notice - a heads-up the owning agency will send the request.',
+  },
+  {
+    id: 'cbs-notify',
+    name: 'CBS delivery notice',
+    detect: {
+      subjects: [/inscape delivery from cbs/i],
+      domains: [/cbs\.com/i],
+    },
+    delivery: 'links',
+    note: 'Scheduled "Inscape Delivery From CBS" feed notices - confirmations, not request triggers.',
+  },
 ];
+
+// Outlook folder rules file customer mail before it reaches the inbox -
+// the folder name is the user's own client classification. Mapped to
+// playbook ids so a loaded candidate can auto-detect its client.
+var CLIENT_FOLDERS = {
+  'Horizon Media': 'horizon-next',
+  'Icon Media': 'icon-media',
+  'InMarket': 'inmarket',
+  'Tatari': 'tatari',
+  'Chief Media': 'chief-media',
+  'Comscore': 'comscore',
+  'Kantar': 'kantar',
+  'Millenia3': 'millenia3',
+  'ITN Networks': 'itn',
+  'LWD': 'lwd',
+  'DigitalRemedy': 'digitalremedy',
+  'Cuebiq': 'cuebiq',
+  'DataPlusMath/LiveRamp': 'dataplusmath',
+  'EMX Digital': 'emx',
+  'MarketCast/Deductive/GeniusDigital': 'marketcast',
+  'Marketing Evolution': 'marketing-evolution',
+  'MediaIQ': 'mediaiq',
+  'Madhive': null,
+  'Optimum/A4media/Altice': 'optimum-a4',
+  'PGA Tour': 'pga-tour',
+  'Simulmedia': null,
+  'Sony': 'sony',
+  'Viant': 'viant',
+  'VideoAmp': 'videoamp',
+  'Warner/Turner(Discovery)': 'wbd-usn',
+  'AdImpact': 'adimpact',
+  'Airtable': 'ae-media',
+  'Amobee': 'amobee',
+  'Broadbeam': 'broadbeam',
+  'Cadent': 'cadent',
+  'CBS': 'cbs-notify',
+  'Greenlight': 'greenlight',
+  'Havas Edge': 'havas',
+  'iSpot': null,
+  'Gameopedia': null,
+  'Yahoo': null,
+  'The Trade Desk': null,
+  'Extreme Reach': 'er-notify',
+  'Comcast': 'comcast-notify',
+  'Experian': null,
+  'Periscope': null,
+};
 
 function detectClient(sig) {
   sig = sig || {};
@@ -578,7 +772,15 @@ function detectClient(sig) {
     for (const c of CLIENTS) {
       if ((d(c).keywords || []).some(re => re.test(text))) return c;
     }
-    // 4. sender/cc domains - weakest signal, shared across advertisers
+  }
+  // 4. mail folder name - the user's own rules classified the sender
+  //    (agency-level: brand keywords above still refine the umbrella)
+  if (sig.folderName && CLIENT_FOLDERS[sig.folderName]) {
+    const c = CLIENTS.find(x => x.id === CLIENT_FOLDERS[sig.folderName]);
+    if (c) return c;
+  }
+  // 5. sender/cc domains - weakest signal, shared across advertisers
+  if (text.trim()) {
     for (const c of CLIENTS) {
       if ((d(c).domains || []).some(re => re.test(text))) return c;
     }

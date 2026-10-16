@@ -137,15 +137,18 @@ async function msAccessToken() {
   return MS.accessToken;
 }
 
-// Unread inbox messages, newest first, with bodies. null when not signed
-// in; throws on API errors.
+// Unread messages across ALL mail folders, newest first, with bodies.
+// Outlook rules file customer requests into Customers/* and delivery
+// folders before they reach the inbox - an inbox-only scan misses the
+// real requests. parentFolderId lets callers tag the folder/client.
+// null when not signed in; throws on API errors.
 async function graphUnread(top) {
   const tok = await msAccessToken();
   if (!tok) return null;
-  const url = 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages' +
+  const url = 'https://graph.microsoft.com/v1.0/me/messages' +
     '?$filter=' + encodeURIComponent('isRead eq false') +
     '&$top=' + (top || 25) +
-    '&$select=id,subject,from,receivedDateTime,body' +
+    '&$select=id,subject,from,receivedDateTime,body,parentFolderId' +
     '&$count=true';
   const r = await fetch(url, {
     headers: { Authorization: 'Bearer ' + tok, ConsistencyLevel: 'eventual' },
@@ -154,6 +157,66 @@ async function graphUnread(top) {
   const v = (await r.json()).value || [];
   v.sort((a, b) => String(b.receivedDateTime).localeCompare(String(a.receivedDateTime)));
   return v;
+}
+
+// folderId -> displayName for every folder (incl. Customers/*
+// grandchildren). Cached in storage - the tree rarely changes.
+async function graphFolderMap() {
+  const map = {};
+  const top = (await graphFetch('/me/mailFolders?$top=100&$select=id,displayName,childFolderCount')).value || [];
+  for (const f of top) {
+    map[f.id] = f.displayName;
+    if (!f.childFolderCount) continue;
+    const kids = (await graphFetch('/me/mailFolders/' + f.id +
+      '/childFolders?$top=100&$select=id,displayName,childFolderCount')).value || [];
+    for (const k of kids) {
+      map[k.id] = k.displayName;
+      if (!k.childFolderCount) continue;
+      const g = (await graphFetch('/me/mailFolders/' + k.id +
+        '/childFolders?$top=100&$select=id,displayName')).value || [];
+      g.forEach(x => { map[x.id] = x.displayName; });
+    }
+  }
+  chrome.storage.local.set({ msFolderMap: map });
+  return map;
+}
+
+// The reply template - "I've ingested those creatives ... under the
+// following IDs:". A sent mail matching it confirms the thread was a
+// real request; the thread's external senders become learned senders.
+const REQ_REPLY_TMPL = /i'?ve ingested|under the following ids|commercial reports under/i;
+
+// Sender addresses on threads that got a template reply. Scans recent
+// Sent Items for the template, then pulls each thread's senders. Returns
+// { senders: [...], scanned: n } so callers can learn them all.
+async function graphLearnedSenders(sinceIso) {
+  const q = '/me/mailFolders/sentitems/messages?$top=50' +
+    '&$select=subject,conversationId,body,receivedDateTime' +
+    (sinceIso ? '&$filter=' + encodeURIComponent('receivedDateTime ge ' + sinceIso) : '');
+  const sent = (await graphFetch(q)).value || [];
+  const convIds = [...new Set(sent
+    .filter(m => REQ_REPLY_TMPL.test(stripTags((m.body && m.body.content) || '')))
+    .map(m => m.conversationId)
+    .filter(Boolean))];
+  const senders = [];
+  for (const cid of convIds.slice(0, 30)) {
+    try {
+      const t = await graphFetch('/me/messages?$filter=' +
+        encodeURIComponent("conversationId eq '" + cid + "'") +
+        '&$select=from&$top=15');
+      (t.value || []).forEach(m => {
+        const a = m.from && m.from.emailAddress && m.from.emailAddress.address;
+        if (a) senders.push(a.toLowerCase());
+      });
+    } catch (e) { /* skip dead threads */ }
+  }
+  return { senders, scanned: sent.length };
+}
+
+// Minimal tag strip for body sniffing (engine's stripHtml isn't loaded
+// here on purpose - graph.js stays dependency-free).
+function stripTags(h) {
+  return String(h || '').replace(/<[^>]+>/g, ' ');
 }
 
 // Shared authenticated call; throws with status so callers can tell a
