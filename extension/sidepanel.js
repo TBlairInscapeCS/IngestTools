@@ -849,6 +849,13 @@ $('msDevCode').addEventListener('click', async e => {
 
 $('checkInbox').addEventListener('click', () => checkInbox(false));
 
+// Verify the notification + siren path without waiting for a real request.
+$('testAlert').addEventListener('click', async e => {
+  e.preventDefault();
+  const r = await chrome.runtime.sendMessage({ type: 'test-alert' });
+  if (r !== true) toast('Alert test failed: ' + r);
+});
+
 // No Entra app access? Microsoft's own Graph PowerShell client is a
 // first-party public app that supports device-code sign-in and is often
 // pre-consented where user app registration is locked down. If the
