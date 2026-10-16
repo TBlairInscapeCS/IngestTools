@@ -36,6 +36,8 @@ TICKER_IMAGE = Path("/Users/tim.blair/Devin/ticker.png")
 POLL_SECONDS = 15
 LOG_PORT = 8770
 MEDIA_EXTS = {".mp4", ".mov", ".mpg", ".mxf"}
+# Finished ingests are filed under ~/Documents/Customer Content/<Client>/.
+ARCHIVE_ROOT = Path.home() / "Documents" / "Customer Content"
 # -----------------------------------------------------------------------------
 
 
@@ -243,6 +245,87 @@ def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bo
     return False, "espn_ticker.sh failed: " + " | ".join(tail)
 
 
+def client_folder(client_name: str):
+    """Map a playbook name to its Customer Content folder. Prefix match
+    either way: 'Horizon Next' -> Horizon, 'ITN' -> ITN Networks. No folder
+    is ever created - an unmatched client leaves files in place."""
+    if not ARCHIVE_ROOT.exists():
+        return None
+    first = norm_stem((client_name or "").split(" / ")[0].split(" (")[0])
+    if len(first) < 3:
+        return None
+    best = None
+    for d in ARCHIVE_ROOT.iterdir():
+        if not d.is_dir():
+            continue
+        dn = norm_stem(d.name)
+        if dn and (dn.startswith(first) or first.startswith(dn)):
+            if best is None or len(dn) > len(norm_stem(best.name)):
+                best = d
+    return best
+
+
+def uniquified(dest: Path) -> Path:
+    if not dest.exists():
+        return dest
+    n = 1
+    while True:
+        c = dest.with_name(f"{dest.stem} ({n}){dest.suffix}")
+        if not c.exists():
+            return c
+        n += 1
+
+
+def archive_done(job_dir: Path, manifest: dict, state: dict, report: dict, client: dict):
+    """Every entry resolved -> move this job's media (originals + ticker
+    outputs) into Customer Content/<Client>/. Marker names stay in state so
+    later passes report 'archived' instead of 'missing'."""
+    dest_dir = client_folder(client.get("name", ""))
+    if dest_dir is None:
+        report["archive"] = "no Customer Content folder matches client " + repr(client.get("name"))
+        return False
+    suffix = client.get("tickerSuffix") or "_ticker"
+    moved = []
+    archived = state.setdefault("archived", {})
+    # Work from the report's resolved filenames - a zip entry's real media
+    # is its extracted member (downloaded_as/zip_extracted), not the
+    # archive, which stays behind in Ingest/ as the raw source.
+    for st in report.get("files", []):
+        name = st.get("file", "")
+        if not name:
+            continue
+        cands = []
+        da = st.get("downloaded_as")
+        if da and Path(da).suffix.lower() in MEDIA_EXTS:
+            p = job_dir / da
+            if p.exists():
+                cands.append(p)
+            for suf in {suffix, "_ticker"}:
+                t = job_dir / (Path(da).stem + suf + ".mp4")
+                if t.exists() and t not in cands:
+                    cands.append(t)
+        for mem in st.get("zip_extracted") or []:
+            p = job_dir / mem
+            if p.exists() and p not in cands:
+                cands.append(p)
+        if st.get("espn_output"):
+            p = job_dir / st["espn_output"]
+            if p.exists() and p not in cands:
+                cands.append(p)
+        for f in cands:
+            try:
+                f.replace(uniquified(dest_dir / f.name))
+                moved.append(f.name)
+            except Exception as e:
+                log(f"archive move failed {f.name}: {e}")
+        archived[name] = dest_dir.name
+    report["archive"] = f"moved {len(moved)} file(s) -> {dest_dir}"
+    if moved:
+        notify("Ingest watcher", f"Archived {len(moved)} file(s) to Customer Content/{dest_dir.name}")
+        log(f"archived {moved} -> {dest_dir}")
+    return True
+
+
 def process_job(manifest_path: Path):
     job_dir = manifest_path.parent
     try:
@@ -305,6 +388,10 @@ def process_job(manifest_path: Path):
         if local is None:
             if name in state.get("rejected", []):
                 status["status"] = "rejected (moved to _rejected/)"
+                report["files"].append(status)
+                continue
+            if name in state.get("archived", {}):
+                status["status"] = "archived -> Customer Content/" + state["archived"][name]
                 report["files"].append(status)
                 continue
             any_partial = list(job_dir.glob("*.crdownload"))
@@ -428,6 +515,15 @@ def process_job(manifest_path: Path):
         changed = True
         report["files"].append(status)
 
+    # All entries resolved -> file the job's media under Customer Content.
+    # Rejected/espn_failed count as resolved (the row is settled either
+    # way); only still-missing or still-downloading files hold the job.
+    if report["files"] and not state.get("archived_all") and all(
+            s.get("status") not in ("missing", "downloading") for s in report["files"]):
+        if archive_done(job_dir, manifest, state, report, client):
+            state["archived_all"] = True
+            changed = True
+
     write_report(manifest_path, report)
     if changed:
         save_state(manifest_path, state)
@@ -493,6 +589,8 @@ def pending_expectations():
             if not name:
                 continue
             if name in state.get("rejected", []) or name in state.get("unzipped", []):
+                continue
+            if state.get("archived_all") or name in state.get("archived", {}):
                 continue
             if find_downloaded(job_dir, name) is not None:
                 continue
