@@ -822,6 +822,24 @@ $('grabEmail').addEventListener('click', async () => {
 $('clearEmail').addEventListener('click', () => { emailEl.value = ''; emailDate = ''; onEmailChange(); saveInputs(); });
 $('clearAll').addEventListener('click', clearAll);
 
+// Inbox-offline chip: msAccessToken flags msAuthDown when the refresh
+// token dies - background poll can flag it while the panel is closed,
+// so listen to storage rather than local call results.
+chrome.storage.local.get('msAuthDown', d => setMsStatus(!!d.msAuthDown));
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area === 'local' && 'msAuthDown' in ch) setMsStatus(!!ch.msAuthDown.newValue);
+});
+function setMsStatus(down) {
+  $('msStatus').classList.toggle('hidden', !down);
+}
+$('msStatus').addEventListener('click', e => {
+  e.preventDefault();
+  $('sec1').open = true;
+  $('msSetup').classList.remove('hidden');
+  $('msSetup').style.display = 'block';
+  $('msSignIn').focus();
+});
+
 // One-click email intake without an Outlook tab: clipboard or a saved
 // .eml file (Outlook desktop exports them; web users keep grab/paste).
 $('pasteEmail').addEventListener('click', async () => {
@@ -2672,7 +2690,8 @@ function runReconcile() {
     // page) land on the next pass; downloaded files dedupe away.
     const d2 = Math.min((parseInt($('erDays').value, 10) || 14) * 2, 90);
     $('missingNote').innerHTML = '<b>' + missing.length + ' not found</b> - grab the next page or ' +
-      '<a href="#" id="widenSweep">sweep ' + d2 + ' days</a>: ' +
+      '<a href="#" id="widenSweep">sweep ' + d2 + ' days</a> · ' +
+      '<a href="#" id="watchBatch">watch for arrival</a>: ' +
       missing.slice(0, 8).map(esc).join(', ') + (missing.length > 8 ? ' +' + (missing.length - 8) : '');
     const ws = $('widenSweep');
     if (ws) ws.addEventListener('click', e => {
@@ -2680,6 +2699,29 @@ function runReconcile() {
       $('erDays').value = d2;
       chrome.storage.local.set({ erDays: String(d2) });
       sweepAndDownload();
+    });
+    const wb = $('watchBatch');
+    if (wb) wb.addEventListener('click', e => {
+      e.preventDefault();
+      // Delivery notices (ER, Comcast manifests, Yangaroo) carry ISCI
+      // codes in their bodies - the poll scans every unread mail, so a
+      // watched code appearing there IS the arrival signal. One alert
+      // per batch, then the batch un-arms itself.
+      const batch = {
+        codes: missing.map(c => c.toUpperCase()),
+        clientName: client ? client.name : '',
+        advertiser: extractAdvertiser(emailSubject) || '',
+        addedAt: Date.now(),
+      };
+      chrome.storage.local.get('watchedBatches', d => {
+        const live = (d.watchedBatches || [])
+          .filter(b => Date.now() - (b.addedAt || 0) < 14 * 864e5 &&
+            !b.codes.every(c => batch.codes.includes(c)));
+        live.push(batch);
+        chrome.storage.local.set({ watchedBatches: live.slice(-10) });
+      });
+      wb.outerHTML = '<b>watching ' + missing.length + ' file(s) - alert on arrival</b>';
+      dbg('watch armed', { codes: missing.length, client: batch.clientName });
     });
   } else {
     $('missingNote').innerHTML = '';

@@ -132,7 +132,7 @@ def load_state(manifest_path: Path) -> dict:
             return json.loads(f.read_text())
         except Exception:
             pass
-    return {"notified": [], "done": [], "failed": []}
+    return {"notified": [], "done": [], "failed": [], "rejected": []}
 
 
 def save_state(manifest_path: Path, state: dict):
@@ -145,6 +145,22 @@ def write_report(manifest_path: Path, report: dict):
     stem = manifest_path.stem
     name = "report.json" if stem == "manifest" else f"{stem}-report.json"
     (manifest_path.parent / name).write_text(json.dumps(report, indent=2))
+
+
+def sniff_bad_media(path: Path) -> str:
+    """Real spots are MBs. A "video" that is actually an HTML/XML error
+    page, or implausibly tiny, is a bad download (portal preview links,
+    expired URLs) - reject it so it can't be ingested by accident."""
+    try:
+        if path.stat().st_size < 64 * 1024:
+            return "suspiciously small"
+        with open(path, "rb") as f:
+            head = f.read(512).lstrip()
+        if head[:1] == b"<":
+            return "html payload (portal/error page, not video)"
+    except Exception:
+        pass
+    return ""
 
 
 def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bool, str]:
@@ -192,6 +208,10 @@ def process_job(manifest_path: Path):
 
         local = find_downloaded(job_dir, name)
         if local is None:
+            if name in state.get("rejected", []):
+                status["status"] = "rejected (moved to _rejected/)"
+                report["files"].append(status)
+                continue
             any_partial = list(job_dir.glob("*.crdownload"))
             status["status"] = "downloading" if any_partial else "missing"
             if not any_partial and name not in state["notified"]:
@@ -209,6 +229,23 @@ def process_job(manifest_path: Path):
                 state["notified"].append(name)
                 changed = True
                 notify("Ingest watcher", f"{local.name}: non-media file - the link may be a portal page, not a direct download.")
+            report["files"].append(status)
+            continue
+
+        bad = sniff_bad_media(local)
+        if bad:
+            rej = job_dir / "_rejected"
+            try:
+                rej.mkdir(exist_ok=True)
+                local.rename(rej / local.name)
+            except Exception:
+                pass
+            state.setdefault("rejected", []).append(name)
+            status["status"] = "rejected: " + bad
+            if name not in state["notified"]:
+                state["notified"].append(name)
+                notify("Ingest watcher", f"{local.name}: rejected ({bad}) - not a real video.")
+            changed = True
             report["files"].append(status)
             continue
 

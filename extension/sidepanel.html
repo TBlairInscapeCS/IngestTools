@@ -98,6 +98,7 @@
   <button id="runAll" class="primary">Run</button>
   <span class="ib" data-bubble="bRun">?</span>
   <label class="col">Client <select id="clientSel"></select></label>
+  <a href="#" id="msStatus" class="hidden" title="" style="color:#ec9a9a;font-weight:700">inbox offline - click to sign in</a>
   <button id="clearAll" title="Wipe the email, tracker, match, downloads and drafts - sign-ins and settings stay">Clear all</button>
   <button id="settingsGear" title="Choose which tools show" aria-expanded="false">&#9881; Settings</button>
 </div>
@@ -119,7 +120,7 @@
 <div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then downloads: direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>
 <div class="info" id="clientNote"></div>
 
-<details class="s1" open>
+<details class="s1" open id="sec1">
   <summary>1 · Read the request<span class="ib" data-bubble="b1">?</span><span class="stamp" id="tsEmail"></span><span class="sdot" id="sdEmail"></span></summary>
   <div class="sub">Pull the request mail - inbox list, Outlook tab, paste or .eml. Detects the client, auto-pulls its tracker, and pre-parses delivery links.</div>
   <div class="bubble hidden" id="b1">The email saying which creatives to ingest. <b>Check inbox</b> reads unread mail via Graph sign-in (no Outlook tab needed; the icon badge counts fresh requests). <b>Grab</b> reads an open Outlook tab; paste/.eml work too. A new email resets the run.</div>

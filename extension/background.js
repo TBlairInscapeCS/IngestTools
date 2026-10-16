@@ -54,6 +54,22 @@ async function alertNewRequest(c) {
   chrome.runtime.sendMessage({ play: true });
 }
 
+// A watched batch's files showed up in delivery mail - same urgency as a
+// new request, but the message says what arrived and what to do next.
+async function alertDeliveryArrived(b, n) {
+  await ensureOffscreen();
+  const name = [b.clientName, b.advertiser].filter(Boolean).join(' - ') || 'watched batch';
+  await chrome.notifications.create('arrived-' + (b.addedAt || Date.now()), {
+    type: 'basic',
+    iconUrl: 'icon128.png',
+    title: 'Delivery arrived: ' + name,
+    message: n + ' of ' + b.codes.length + ' watched file(s) just appeared in delivery mail - re-run the sweep.',
+    requireInteraction: true,
+    priority: 2,
+  });
+  chrome.runtime.sendMessage({ play: true });
+}
+
 chrome.alarms.onAlarm.addListener(async a => {
   if (a.name !== 'inboxPoll') return;
   try {
@@ -62,8 +78,8 @@ chrome.alarms.onAlarm.addListener(async a => {
     const msgs = await graphUnread(25);
     // Dedupe across service-worker restarts via storage - each message id
     // alerts once, ever. reqSenders = learned request senders.
-    const { notifiedIds = [], reqSenders = {}, msSelfAddr = '', erBatchAt = 0 } =
-      await chrome.storage.local.get(['notifiedIds', 'reqSenders', 'msSelfAddr', 'erBatchAt']);
+    const { notifiedIds = [], reqSenders = {}, msSelfAddr = '', erBatchAt = 0, watchedBatches = [] } =
+      await chrome.storage.local.get(['notifiedIds', 'reqSenders', 'msSelfAddr', 'erBatchAt', 'watchedBatches']);
     const selfAddr = msSelfAddr || '';
     if (!selfAddr) await graphSelfDomain().catch(() => '');
     const batchFresh = Date.now() - erBatchAt > 4 * 864e5;
@@ -88,6 +104,27 @@ chrome.alarms.onAlarm.addListener(async a => {
     for (const m of fresh) { await alertNewRequest(m); seen.add(m.id); }
     if (fresh.length)
       await chrome.storage.local.set({ notifiedIds: [...seen].slice(-200) });
+    // Watched batches: the panel arms missing IDs after an empty sweep;
+    // when a watched ISCI shows up in ANY unread mail's body (ER notice,
+    // Comcast manifest, Yangaroo "New Media"), that's the arrival signal.
+    // Notify once per batch, then un-arm.
+    const live = watchedBatches.filter(b => Date.now() - (b.addedAt || 0) < 14 * 864e5);
+    if (live.length) {
+      const hits = new Map();
+      for (const m of msgs || []) {
+        const codes = new Set(detectCodes(
+          stripHtml((m.body && m.body.content) || '')).map(c => c.toUpperCase()));
+        if (!codes.size) continue;
+        live.forEach((b, i) => {
+          const n = b.codes.filter(c => codes.has(c)).length;
+          if (n) hits.set(i, (hits.get(i) || 0) + n);
+        });
+      }
+      for (const [i, n] of hits) await alertDeliveryArrived(live[i], n);
+      if (hits.size || live.length !== watchedBatches.length)
+        await chrome.storage.local.set({
+          watchedBatches: live.filter((_, i) => !hits.has(i)) });
+    }
   } catch (e) { /* offline / token expired - try next interval */ }
 });
 

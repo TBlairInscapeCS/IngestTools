@@ -132,8 +132,16 @@ async function msAccessToken() {
     refresh_token: MS.refreshToken,
     scope: 'Mail.Read offline_access',
   });
-  if (!d.access_token) return null;
+  if (!d.access_token) {
+    // Refresh token exists but the refresh failed = dead credentials
+    // (invalid_grant, revoked consent). Flag it so the panel shows a
+    // "sign in" chip instead of a silently empty inbox.
+    chrome.storage.local.set({ msAuthDown: Date.now(),
+      msAuthErr: String(d.error || 'refresh failed').slice(0, 120) });
+    return null;
+  }
   msStoreTokens(d);
+  chrome.storage.local.remove(['msAuthDown', 'msAuthErr']);
   return MS.accessToken;
 }
 
