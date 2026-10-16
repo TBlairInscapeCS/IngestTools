@@ -3316,15 +3316,18 @@ async function postJiraComment(issue, wanted, st, proof) {
     (proof.records.length < wanted.length ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '');
 }
 
-// One-button flow: verify -> collect proofs (records JSON + screenshot) ->
-// refuse to post with zero proof unless the user explicitly overrides.
-let postWithoutProof = false;
+// Staged Jira run: "Verify & draft Jira" verifies, gathers proofs, finds
+// the weekly ticket and prints the exact comment - nothing writes to Jira
+// until "Post to Jira" approves the staged run.
+let pendingJira = null, draftWithoutProof = false;
 $('postJira').addEventListener('click', async () => {
   const epic = jiraEpicFor();
   if (!epic) return toast('No Jira epic mapped for this client - tell Devin the epic key.');
   const wanted = ingestReportIds();
   if (!wanted.length) return toast('No matched rows - run Match first.');
   const st = $('jiraStatus');
+  $('jiraApprove').classList.add('hidden');
+  pendingJira = null;
   try {
     const records = await runVerify(wanted);
     let shotUrl = null, shotErr = null;
@@ -3334,14 +3337,14 @@ $('postJira').addEventListener('click', async () => {
     } catch (e) { shotErr = e; dbg('screenshot failed', e.message); }
 
     const proof = { records, shotBlob: shotUrl ? await (await fetch(shotUrl)).blob() : null };
-    if (!records.length && !proof.shotBlob && !postWithoutProof) {
-      postWithoutProof = true;
+    if (!records.length && !proof.shotBlob && !draftWithoutProof) {
+      draftWithoutProof = true;
       st.innerHTML = '<span style="color:#ec9a9a"><b>No proof captured</b> - 0 records found' +
         (shotErr ? ' and screenshot failed (' + esc(shotErr.message) + ')' : '') +
-        '.</span> Click <b>Verify &amp; post Jira</b> again to post anyway.';
+        '.</span> Click <b>Verify &amp; draft Jira</b> again to draft anyway.';
       return;
     }
-    postWithoutProof = false;
+    draftWithoutProof = false;
 
     // Keep the same artifacts locally - the job folder gets the proofs too.
     const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
@@ -3357,29 +3360,49 @@ $('postJira').addEventListener('click', async () => {
 
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
     const { issue, newest } = await jiraWeeklyTicket(epic);
-    if (issue) return await postJiraComment(issue, wanted, st, proof);
-    // No weekly ticket yet - offer to create it, cloning the naming
-    // convention of the newest sibling task.
-    const epi = await jiraFetch('/rest/api/3/issue/' + epic + '?fields=summary');
-    const name = weeklyTicketName(newest, epi.fields.summary);
-    st.innerHTML = 'No weekly task yet under ' + esc(epic) +
-      ' - <a href="#" id="jiraCreate"><b>create it</b></a> (' + esc(name) + ')';
-    $('jiraCreate').addEventListener('click', async ev => {
-      ev.preventDefault();
-      try {
-        st.textContent = 'Creating weekly ticket…';
-        const created = await jiraFetch('/rest/api/3/issue', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fields: {
-            project: { key: epic.split('-')[0] },
-            summary: name,
-            issuetype: { name: 'Task' },
-            parent: { key: epic },
-          } }),
-        });
-        await postJiraComment({ key: created.key }, wanted, st, proof);
-      } catch (e2) { st.textContent = 'Jira: ' + e2.message; }
+    let createName = null;
+    if (!issue) {
+      const epi = await jiraFetch('/rest/api/3/issue/' + epic + '?fields=summary');
+      createName = weeklyTicketName(newest, epi.fields.summary);
+    }
+    pendingJira = { epic, wanted, proof, issue, createName };
+    $('jiraPreview').textContent = buildJiraTicket();
+    $('jiraBox').classList.remove('hidden');
+    $('jiraApprove').classList.remove('hidden');
+    st.innerHTML = '<b>Staged - review the comment below.</b> Target: ' +
+      (issue
+        ? '<a href="' + JIRA_BASE + '/browse/' + issue.key + '" target="_blank"><b>' + issue.key + '</b></a>'
+        : '<span style="color:#ec9a9a">will create weekly task "' + esc(createName) + '" under ' + esc(epic) + '</span>') +
+      ' · attaching ' + [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
+        proof.shotBlob ? 'screenshot' : null].filter(Boolean).join(' + ') +
+      (proof.records.length < wanted.length
+        ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '');
+  } catch (e) {
+    st.textContent = 'Jira: ' + e.message;
+  }
+});
+
+// Approval: the only path that writes to Jira. Consumes the staged run so a
+// double-click can't post twice.
+$('jiraApprove').addEventListener('click', async () => {
+  const p = pendingJira;
+  if (!p) return;
+  pendingJira = null;
+  $('jiraApprove').classList.add('hidden');
+  const st = $('jiraStatus');
+  try {
+    if (p.issue) return await postJiraComment(p.issue, p.wanted, st, p.proof);
+    st.textContent = 'Creating weekly ticket…';
+    const created = await jiraFetch('/rest/api/3/issue', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: {
+        project: { key: p.epic.split('-')[0] },
+        summary: p.createName,
+        issuetype: { name: 'Task' },
+        parent: { key: p.epic },
+      } }),
     });
+    await postJiraComment({ key: created.key }, p.wanted, st, p.proof);
   } catch (e) {
     st.textContent = 'Jira: ' + e.message;
   }
