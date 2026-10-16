@@ -2720,7 +2720,8 @@ function runReconcile() {
         live.push(batch);
         chrome.storage.local.set({ watchedBatches: live.slice(-10) });
       });
-      wb.outerHTML = '<b>watching ' + missing.length + ' file(s) - alert on arrival</b>';
+      wb.outerHTML = '<b>watching ' + missing.length + ' file(s) - alert on arrival' +
+        (erApiKey ? ' (mail + ER API)' : ' (mail scan)') + '</b>';
       dbg('watch armed', { codes: missing.length, client: batch.clientName });
     });
   } else {

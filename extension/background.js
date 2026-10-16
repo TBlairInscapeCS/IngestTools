@@ -30,6 +30,48 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 // the offscreen audio doc - the badge counts what's outstanding. Silent
 // no-op until the user signs in from the panel.
 chrome.alarms.create('inboxPoll', { periodInMinutes: 1 });
+// Watched-batch ER polling - independent of the mail scan. Deliveries
+// that land with no notice email (the SeaWorld case) still trip the
+// 'arrived' alert via the API.
+chrome.alarms.create('erWatch', { periodInMinutes: 30 });
+
+const ER_API = 'https://api.extremereach.com';
+
+// Every 30 min: for each armed batch, ask /deliveries?AdId= for its
+// codes. Any hit = the files arrived. Capped at 25 queries/run across
+// batches and 15 codes/batch - enough signal, polite on the API.
+async function erWatchTick() {
+  const { watchedBatches = [], erApiKey } =
+    await chrome.storage.local.get(['watchedBatches', 'erApiKey']);
+  if (!erApiKey) return;
+  const live = watchedBatches.filter(b => Date.now() - (b.addedAt || 0) < 14 * 864e5);
+  if (!live.length) return;
+  const hits = new Map();
+  let budget = 25;
+  outer:
+  for (let bi = 0; bi < live.length; bi++) {
+    const b = live[bi];
+    let n = 0;
+    for (const code of b.codes.slice(0, 15)) {
+      if (budget-- <= 0) break outer;
+      try {
+        const r = await fetch(ER_API + '/deliveries?AdId=' +
+          encodeURIComponent(code) + '&format=json',
+          { headers: { 'X-ApiKey': erApiKey, Accept: 'application/json' } });
+        if (r.status === 401) break outer; // dead key - stop the pass
+        if (!r.ok) continue;
+        const d = await r.json();
+        const list = d.Deliveries || d.deliveries || (Array.isArray(d) ? d : []);
+        if (list.length) n++;
+      } catch (e) { break outer; }
+    }
+    if (n) hits.set(bi, n);
+  }
+  for (const [bi, n] of hits) await alertDeliveryArrived(live[bi], n);
+  if (hits.size || live.length !== watchedBatches.length)
+    await chrome.storage.local.set({
+      watchedBatches: live.filter((_, i) => !hits.has(i)) });
+}
 
 let offscreenReadyResolve = null;
 async function ensureOffscreen() {
@@ -80,6 +122,7 @@ async function alertDeliveryArrived(b, n) {
 }
 
 chrome.alarms.onAlarm.addListener(async a => {
+  if (a.name === 'erWatch') { await erWatchTick().catch(() => {}); return; }
   if (a.name !== 'inboxPoll') return;
   try {
     await msLoad();
