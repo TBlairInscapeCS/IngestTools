@@ -257,14 +257,30 @@ def process_job(manifest_path: Path):
 
     # Loose zips no manifest entry names (scooped select-all archives,
     # manual drops): unpack once, pair members onto pending rows so the
-    # entry loop finds them this same pass.
-    expected_names = [e.get("file", "") for e in manifest.get("files", []) if e.get("file")]
+    # entry loop finds them this same pass. Extraction dedup is tracked
+    # in a shared dir-level dotfile - in the flat layout several manifests
+    # share job_dir and must not re-unzip each other's archives.
+    uzf = job_dir / ".unzipped.json"
+    try:
+        udone = set(json.loads(uzf.read_text()))
+    except Exception:
+        udone = set()
+    sibling_expected = set()
+    for mp in job_dir.glob("*.json"):
+        if MANIFEST_RE.match(mp.name):
+            try:
+                sibling_expected.update(
+                    e.get("file", "") for e in json.loads(mp.read_text()).get("files", [])
+                    if e.get("file"))
+            except Exception:
+                pass
+    uz_changed = False
     for zp in job_dir.glob("*.zip"):
-        if zp.name in expected_names or zp.name in state.get("unzipped", []):
+        if zp.name in sibling_expected or zp.name in udone:
             continue
         try:
             members = unzip_media(zp, job_dir)
-            pair_members(members, expected_names, job_dir)
+            pair_members(members, list(sibling_expected), job_dir)
         except Exception:
             members = []
             try:
@@ -273,11 +289,13 @@ def process_job(manifest_path: Path):
                 zp.rename(rej / zp.name)
             except Exception:
                 pass
-        state.setdefault("unzipped", []).append(zp.name)
-        changed = True
+        udone.add(zp.name)
+        uz_changed = True
         notify("Ingest watcher",
                f"{zp.name}: unpacked {len(members)} media file(s)" if members
                else f"{zp.name}: no usable media inside")
+    if uz_changed:
+        uzf.write_text(json.dumps(sorted(udone)))
 
     for entry in manifest.get("files", []):
         name = entry.get("file", "")
@@ -452,10 +470,16 @@ SCOOP_WINDOW = 6 * 3600
 _seen_dl = set()
 
 
+def all_manifests():
+    """Flat layout keeps manifests at Ingest/ top level; legacy job dirs
+    kept them one level deep. Support both."""
+    return sorted(list(WATCH_DIR.glob("*.json")) + list(WATCH_DIR.glob("*/*.json")))
+
+
 def pending_expectations():
     """job_dir -> list of manifest filenames that still have no local file."""
     jobs = {}
-    for manifest in sorted(WATCH_DIR.glob("*/*.json")):
+    for manifest in all_manifests():
         if not MANIFEST_RE.match(manifest.name):
             continue
         try:
@@ -539,7 +563,7 @@ def run_once():
         return
     relocate_debug_logs()
     scoop_downloads()
-    for manifest in sorted(WATCH_DIR.glob("*/*.json")):
+    for manifest in all_manifests():
         if MANIFEST_RE.match(manifest.name):
             process_job(manifest)
 

@@ -822,6 +822,10 @@ function detectClient(sig) {
 // requires advertiser/brand metadata - the useful identity is normally
 // the agency, not the brand.
 function extractAdvertiser(subject) {
+  return cleanAdvertiser(extractAdvertiserRaw(subject));
+}
+
+function extractAdvertiserRaw(subject) {
   const s = String(subject || '').replace(/^\s*(re|fw|fwd|\[external\])\s*:\s*/gi, '').trim();
   let m = s.match(/^(.*?)\s*Spot Delivery Notification/i);
   if (m && m[1].trim()) return m[1].trim();
@@ -847,6 +851,15 @@ function extractAdvertiser(subject) {
       s.match(/^(.*?)\s*inscape\s+(?:creative\s+)?ingest(?:ion)?(?:\s+request)?\s*$/i);
   if (m && m[1].trim()) return m[1].replace(/[\s|–—-]+$/, '').replace(/\s+x\s*$/i, '').trim();
   return '';
+}
+
+// UI chrome that leaks into grabbed subjects ("Navigation pane | Horizon
+// Media | ...") must not become a job-folder advertiser.
+const ADVERTISER_NOISE = /^(?:navigation|reading|preview|side)\s*pane$|sidebar|untitled/i;
+
+function cleanAdvertiser(s) {
+  s = String(s || '').trim();
+  return ADVERTISER_NOISE.test(s) ? '' : s;
 }
 
 // One-line summary of the ingest block for the client note.

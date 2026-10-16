@@ -176,11 +176,11 @@ function emailSheetRefs() {
   return refs;
 }
 
-// Job naming: ~/Downloads/Ingest/<date>-<client>-<label>/ - the client
-// name is always in the path so every batch self-identifies and lands in
-// its own folder (a reused label can no longer pile batches together and
-// get Chrome-uniquified manifests the watcher can't see). The label box
-// is an optional suffix; advertiser falls in when the box is empty.
+// Job naming: flat ~/Downloads/Ingest/ layout - media lands at the top
+// level, per-job metadata is <date>-<client>-<label>-manifest.json (the
+// client name stays in the slug so every batch still self-identifies and
+// manifests can't collide). The label box is an optional suffix;
+// advertiser falls in when the box is empty.
 function jobSlugBase() {
   const d = extractDates(emailEl.value)[0] || new Date().toISOString().slice(0, 10);
   const cl = client ? client.name.split(' (')[0].split(' / ')[0].replace(/[^\w]+/g, '') : 'job';
@@ -1158,8 +1158,7 @@ function renderInbox(msgs, quiet) {
     toast('Email loaded from inbox.');
   }));
   // One-click delivery download: every spot's direct link (Yangaroo or
-  // Comcast cad-api) queues into Ingest/<date>-<client>-<brand>/ without
-  // ever opening the email.
+  // Comcast cad-api) queues into Ingest/ without ever opening the email.
   el.querySelectorAll('a[data-ydl]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
     const c = cands[parseInt(a.dataset.ydl, 10)];
@@ -1174,11 +1173,11 @@ function renderInbox(msgs, quiet) {
     let n = 0;
     c.dl.forEach(s => {
       const nm = ((s.id || 'spot').replace(/[^\w.-]+/g, '_')) + '.mp4';
-      chrome.downloads.download({ url: s.url, filename: 'Ingest/' + job + '/' + nm,
+      chrome.downloads.download({ url: s.url, filename: 'Ingest/' + nm,
         conflictAction: 'uniquify' }).then(id => ourDlIds.add(id)).catch(() => {});
       n++;
     });
-    toast('Queued ' + n + ' spot(s) to Ingest/' + job + '/.');
+    toast('Queued ' + n + ' spot(s) to Ingest/.');
     dbg('delivery dl', { job, spots: n, order: (c.yd && c.yd.orderId) || '' });
   }));
   // Quiet background polls announce only genuinely new candidates.
@@ -2511,7 +2510,7 @@ async function downloadLinked() {
     try {
       const id = await chrome.downloads.download({
         url: j.url,
-        filename: 'Ingest/' + job + '/' + j.file,
+        filename: 'Ingest/' + j.file,
         conflictAction: 'uniquify',
       });
       if (id != null) ourDlIds.add(id);
@@ -2519,11 +2518,11 @@ async function downloadLinked() {
   }
   const blob = new Blob([buildManifest(job, jobs, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/' + job + '-manifest.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/' + job);
+  setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/');
   const nEspnJobs = jobs.filter(j => j.needs_espn).length;
-  toast('Queued ' + jobs.length + ' download(s) + manifest to ~/Downloads/Ingest/' + job + '/' +
+  toast('Queued ' + jobs.length + ' download(s) + manifest to ~/Downloads/Ingest/' +
     (nEspnJobs ? ' — ' + nEspnJobs + ' ESPN ticker version(s) auto-build on arrival' : '') +
     (problems.length ? ' — ' + problems.length + ' row(s) skipped' : ''));
   if (problems.length) {
@@ -2984,16 +2983,16 @@ async function downloadFound() {
   for (const j of fresh) {
     queuedUrls.add(j.dkey || j.url);
     try {
-      const id = await chrome.downloads.download({ url: j.url, filename: 'Ingest/' + job + '/' + j.file, conflictAction: 'uniquify' });
+      const id = await chrome.downloads.download({ url: j.url, filename: 'Ingest/' + j.file, conflictAction: 'uniquify' });
       if (id != null) ourDlIds.add(id);
     } catch (e) { dlFailed++; updateDlStatus(); }
   }
   const blob = new Blob([buildManifest(job, fresh, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/' + job + '-manifest.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   dbg('download found queued', { files: fresh.map(j => j.file), urls: fresh.map(j => j.url) });
-  setStage('sdDl', 'ok', fresh.length + ' file(s) queued to Ingest/' + job);
+  setStage('sdDl', 'ok', fresh.length + ' file(s) queued to Ingest/');
   flushLog(true);
   const nEspnFresh = fresh.filter(j => j.needs_espn).length;
   toast('Queued ' + fresh.length + ' file(s)' +
@@ -3775,9 +3774,9 @@ $('saveRecords').addEventListener('click', async () => {
   }, null, 2);
   const blob = new Blob([payload], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/' + job + '-ingest-records.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-ingest-records.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  toast('Saved ' + job + '-ingest-records.json to Ingest/' + job + '/ - attach it to the ticket.');
+  toast('Saved ' + job + '-ingest-records.json to Ingest/ - attach it to the ticket.');
 });
 
 function buildJiraTicket() {
@@ -3816,8 +3815,8 @@ $('shotPortal').addEventListener('click', async () => {
   try {
     const dataUrl = await capturePortalShot();
     const job = jobSlug();
-    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '/' + job + '-ingest-screenshot.png' });
-    toast('Screenshot saved to Ingest/' + job + '/');
+    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '-ingest-screenshot.png' });
+    toast('Screenshot saved to Ingest/');
   } catch (e) {
     dbg('screenshot failed', e.message);
     toast('Screenshot failed: ' + e.message);
@@ -4017,11 +4016,11 @@ $('postJira').addEventListener('click', async () => {
       const blob = new Blob([JSON.stringify({ job, realm: ingestRealm(),
         queried_at: new Date().toISOString(), records }, null, 2)], { type: 'application/json' });
       const u = URL.createObjectURL(blob);
-      chrome.downloads.download({ url: u, filename: 'Ingest/' + job + '/' + job + '-ingest-records.json' });
+      chrome.downloads.download({ url: u, filename: 'Ingest/' + job + '-ingest-records.json' });
       setTimeout(() => URL.revokeObjectURL(u), 30000);
     }
     if (shotUrl)
-      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/' + job + '/' + job + '-ingest-screenshot.png' });
+      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/' + job + '-ingest-screenshot.png' });
 
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
     const { issue, newest } = await jiraWeeklyTicket(epic);
