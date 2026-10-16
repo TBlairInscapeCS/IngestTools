@@ -766,6 +766,7 @@ emailEl.addEventListener('drop', e => {
 let inboxSeen = new Set(); // Graph message ids already surfaced
 
 let msPkceCtx = null; // {verifier, redirect} while an interactive sign-in is open
+let msWantWrite = false; // write call 403'd - next sign-in asks Mail.ReadWrite
 
 // Primary: interactive auth-code + PKCE. Tenants that block the device-
 // code flow via Conditional Access usually still allow a plain browser
@@ -783,7 +784,7 @@ $('msSignIn').addEventListener('click', async () => {
   try {
     const pk = await msPkce();
     msPkceCtx = { verifier: pk.verifier, redirect };
-    window.open(msAuthorizeUrl(pk.challenge, redirect), '_blank');
+    window.open(msAuthorizeUrl(pk.challenge, redirect, msWantWrite ? MS_SCOPE_WRITE : MS_SCOPE), '_blank');
     $('msCodeRow').classList.remove('hidden');
     msg.textContent = ' sign in on the page that opened, then paste the code (or full URL) below.';
   } catch (e) { msg.textContent = ' failed: ' + e.message; }
@@ -792,6 +793,17 @@ $('msSignIn').addEventListener('click', async () => {
 $('msCodeGo').addEventListener('click', async () => {
   const raw = $('msCode').value.trim();
   if (!raw || !msPkceCtx) return toast('Paste the code from the sign-in page.');
+  // A failed sign-in still redirects - the URL carries error/error_
+  // description. Surface the real Microsoft error instead of trying to
+  // exchange garbage.
+  const em = raw.match(/[?&]error=([^&\s]+)/);
+  if (em) {
+    const dm = raw.match(/[?&]error_description=([^&\s]+)/);
+    $('msMsg').textContent = ' sign-in failed: ' + decodeURIComponent(em[1]) +
+      (dm ? ' - ' + decodeURIComponent(dm[1]).replace(/\+/g, ' ').slice(0, 200) : '');
+    dbg('ms auth error', { error: em[1], desc: dm ? decodeURIComponent(dm[1]).replace(/\+/g, ' ').slice(0, 300) : '' });
+    return;
+  }
   const m = raw.match(/[?&]code=([^&\s]+)/);
   const code = m ? decodeURIComponent(m[1]) : raw;
   const msg = $('msMsg');
@@ -822,7 +834,7 @@ $('msDevCode').addEventListener('click', async e => {
   const msg = $('msMsg');
   try {
     msg.textContent = ' requesting code…';
-    const d = await msDeviceCode();
+    const d = await msDeviceCode(msWantWrite ? MS_SCOPE_WRITE : MS_SCOPE);
     msg.innerHTML = ' go to <a href="' + esc(d.verification_uri) + '" target="_blank">' +
       esc(d.verification_uri) + '</a> and enter <b>' + esc(d.user_code) + '</b>';
     window.open(d.verification_uri, '_blank');
@@ -1842,7 +1854,17 @@ $('draftReplyOut').addEventListener('click', async () => {
   try {
     await graphReplyDraft(emailGraphId, t);
     toast('Reply draft created - review and send it in Outlook.');
-  } catch (e) { toast('Reply draft failed: ' + e.message); }
+  } catch (e) {
+    toast('Reply draft failed: ' + e.message);
+    // Consent gap: the next Sign in asks for Mail.ReadWrite on top of the
+    // already-approved Mail.Read.
+    if (/403|401|re-consent|readwrite/i.test(String(e.message))) {
+      msWantWrite = true;
+      $('msSetup').classList.remove('hidden');
+      $('msSetup').style.display = 'block';
+      $('msMsg').textContent = ' write access needs one more consent - hit Sign in again.';
+    }
+  }
 });
 $('copyExcReply').addEventListener('click', () => {
   const t = lastResults && buildExceptionEmail(lastResults, emailSender);

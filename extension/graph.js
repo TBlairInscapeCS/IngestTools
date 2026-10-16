@@ -8,10 +8,13 @@
 // for the unread-count badge alarm. Keep it to fetch + chrome.storage.
 
 const MS = { clientId: '', tenant: '', refreshToken: '', accessToken: '', accessExp: 0 };
-// New sign-ins request read+write (reply drafts, mark-read). Existing
-// Mail.Read refresh tokens keep working for reads; write calls then 403
-// and the UI tells the user to re-consent.
-const MS_SCOPE = 'Mail.Read Mail.ReadWrite offline_access';
+// Sign-in requests only Mail.Read - that's the scope admin consent already
+// covers, and v2 consent is all-or-nothing: asking Mail.ReadWrite up front
+// re-triggers the whole admin-approval flow. Write scope is incremental:
+// the side panel re-runs sign-in with MS_SCOPE_WRITE only when a write
+// call 403s.
+const MS_SCOPE = 'Mail.Read offline_access';
+const MS_SCOPE_WRITE = 'Mail.Read Mail.ReadWrite offline_access';
 
 async function msLoad() {
   const s = await chrome.storage.local.get(['msClientId', 'msTenant', 'msRefreshToken']);
@@ -60,12 +63,12 @@ async function msPkce() {
   return { verifier, challenge: b64(new Uint8Array(hash)) };
 }
 
-function msAuthorizeUrl(challenge, redirect) {
+function msAuthorizeUrl(challenge, redirect, scope) {
   return msEndpoint('authorize') + '?' + new URLSearchParams({
     client_id: MS.clientId,
     response_type: 'code',
     redirect_uri: redirect,
-    scope: MS_SCOPE,
+    scope: scope || MS_SCOPE,
     response_mode: 'query',
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -87,10 +90,10 @@ async function msExchangeCode(code, verifier, redirect) {
 
 // Step 1 of sign-in: ask Microsoft for a user code. Returns the device-
 // code response ({user_code, verification_uri, device_code, interval}).
-async function msDeviceCode() {
+async function msDeviceCode(scope) {
   const d = await msPost('devicecode', {
     client_id: MS.clientId,
-    scope: MS_SCOPE,
+    scope: scope || MS_SCOPE,
   });
   if (d.error) throw new Error(d.error_description || d.error);
   return d;
