@@ -12,6 +12,8 @@ let sheet = null;          // { headers, rows } data rows (header excluded)
 let matched = null;        // rows matched by the request email
 let matchedFor = '';       // email text at match time - drift = stale results
 let lastResults = null;    // reconcile() output
+let specFails = null;      // watcher's spec rejects: null=unchecked, []=none
+let specFailsJob = '';     // job slug the specFails list belongs to
 let emailDates = new Set();
 let emailSubject = '';
 let emailSender = '';      // sender first name for reply greetings
@@ -233,6 +235,7 @@ function esc(s) {
 // survives reloads unless actively cleared).
 function resetRun() {
   matched = null; matchedFor = ''; lastResults = null; lastExtras = [];
+  specFails = null; specFailsJob = '';
   yangaroo = null;
   idsEl.value = ''; filesEl.value = '';
   capturedByName = {}; queuedUrls.clear(); lastCapTab = null;
@@ -2210,11 +2213,33 @@ function dlChannelName() {
 // Manual draft variants - the escape hatch for when the run state doesn't
 // match reality (files ARE delivered but the sweep/page couldn't see
 // them). Sources IDs from matched rows first, email codes second.
+// The watcher ffprobes each landed file; failures land here so the reply
+// can cite them. Returns true when the list changed (draft should rebuild).
+async function checkSpecFails() {
+  const job = jobSlug();
+  let list = null;
+  try {
+    const r = await fetch('http://127.0.0.1:8770/spec-failures?job=' + encodeURIComponent(job));
+    list = ((await r.json()) || {}).failures || [];
+  } catch (e) { list = null; }
+  if (list === null) return false;      // watcher not reachable - keep stale
+  const changed = specFailsJob !== job ||
+    JSON.stringify(list.map(f => f.id)) !== JSON.stringify((specFails || []).map(f => f.id));
+  specFails = list; specFailsJob = job;
+  return changed;
+}
+
 function manualReply(kind) {
   const rows = (matched || []).filter(m => m.matchType !== 'ROW (out of range)');
   const ids = rows.length
     ? rows.map(m => m.trackingId || m.title || m.id).filter(Boolean)
     : [...new Set(extractCodes(latestSegment(emailEl.value)))];
+  if (kind === 'specfail') {
+    // Refetch - the watcher may have probed more files since last check.
+    checkSpecFails().then(changed => { if (changed) refreshReply(true); });
+    const failIds = new Set((specFails || []).map(f => f.id));
+    return buildSpecFailReply(specFails || [], ids.filter(i => !failIds.has(i)), emailSender);
+  }
   if (kind === 'missing')
     return buildNotAvailableReply(
       (ids.length ? ids : ['(request)', '(request)']).map(id => ({ id, status: 'MISSING' })),
@@ -2234,15 +2259,20 @@ function refreshReply(force) {
     text = manualReply(kind);
     if (!text) toast('Nothing to draft - no IDs or rows to cite.');
   } else if (lastResults) {
+    // Spec rejects trump other drafts - a bad file is the actionable news.
+    // Refetch quietly; a change rebuilds the preview unless user edited.
+    checkSpecFails().then(changed => { if (changed) refreshReply(true); });
     const espnIds = new Set();
     (matched || []).forEach(m => {
       if (!m.espn) return;
       [m.id, m.trackingId].filter(Boolean).forEach(v =>
         espnIds.add(normalizeName(v).replace(/ /g, '')));
     });
+    const okIds = lastResults.filter(r => r.status === 'FOUND').map(r => r.id);
     // All-missing must NOT fall through to the "I've ingested" draft -
     // nothing was downloaded, the reply says so instead.
-    text = buildNotAvailableReply(lastResults, dlChannelName(), emailSender) ||
+    text = buildSpecFailReply(specFails || [], okIds, emailSender) ||
+      buildNotAvailableReply(lastResults, dlChannelName(), emailSender) ||
       buildReconConfirmation(lastResults, espnIds, emailSender) ||
       buildConfirmationEmail(lastResults, emailSender);
   }
@@ -2994,6 +3024,7 @@ async function downloadFound() {
   const url = URL.createObjectURL(blob);
   await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+  specFails = null; specFailsJob = ''; checkSpecFails();
   dbg('download found queued', { files: fresh.map(j => j.file), urls: fresh.map(j => j.url) });
   setStage('sdDl', 'ok', fresh.length + ' file(s) queued to Ingest/');
   flushLog(true);

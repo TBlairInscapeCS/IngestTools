@@ -50,6 +50,10 @@ FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
 ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
                             # New-Ingest un-gray lag is ~20s per the user)
+# Minimum ingest file spec - duration floor is the confirmed rule from the
+# agency-facing rejection email ("minimum duration requirement of ten
+# seconds"); missing video/audio streams can't fingerprint at all.
+MIN_DURATION = 10.0
 # -----------------------------------------------------------------------------
 
 
@@ -87,6 +91,9 @@ def start_log_server():
             if u.path == "/ingest-files":
                 files = job_media_files((q.get("job") or [""])[0])
                 self._send(200, json.dumps({"files": files}).encode(), "application/json")
+            elif u.path == "/spec-failures":
+                self._send(200, json.dumps({"failures": spec_failures((q.get("job") or [""])[0])}).encode(),
+                           "application/json")
             elif u.path == "/ingest-file":
                 p = resolve_job_file((q.get("job") or [""])[0], (q.get("name") or [""])[0])
                 if not p:
@@ -200,12 +207,11 @@ def write_report(manifest_path: Path, report: dict):
 
 
 def sniff_bad_media(path: Path) -> str:
-    """Real spots are MBs. A "video" that is actually an HTML/XML error
-    page, or implausibly tiny, is a bad download (portal preview links,
-    expired URLs) - reject it so it can't be ingested by accident."""
+    """A "video" that is actually an HTML/XML error page is a bad download
+    (portal preview links, expired URLs) - reject it so it can't be
+    ingested by accident. Size is no longer judged here: ffprobe gives
+    the real verdict (spec fail vs unreadable)."""
     try:
-        if path.stat().st_size < 64 * 1024:
-            return "suspiciously small"
         with open(path, "rb") as f:
             head = f.read(512).lstrip()
         if head[:1] == b"<":
@@ -264,6 +270,36 @@ def pair_members(members: list[str], expected: list[str], job_dir: Path):
                 except Exception:
                     pass
             break
+
+
+def probe_spec(path: Path) -> dict:
+    """ffprobe facts + spec violations for a downloaded file."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_format", "-show_streams", str(path)],
+            capture_output=True, text=True, timeout=120)
+        d = json.loads(r.stdout or "{}")
+    except Exception as e:
+        return {"info": {}, "fails": [], "error": str(e)[:80]}
+    vids = [s for s in d.get("streams", []) if s.get("codec_type") == "video"]
+    auds = [s for s in d.get("streams", []) if s.get("codec_type") == "audio"]
+    try:
+        dur = float((d.get("format") or {}).get("duration") or 0)
+    except Exception:
+        dur = 0
+    fails = []
+    if not vids:
+        fails.append("no video stream")
+    if not auds:
+        fails.append("no audio stream")
+    if dur and dur < MIN_DURATION:
+        fails.append(f"{dur:.1f}s under {MIN_DURATION:.0f}s minimum duration")
+    info = {"duration": round(dur, 2),
+            "video": vids and f"{vids[0].get('codec_name')} "
+                     f"{vids[0].get('width')}x{vids[0].get('height')}",
+            "audio": bool(auds)}
+    return {"info": info, "fails": fails}
 
 
 def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bool, str]:
@@ -331,12 +367,16 @@ def ingest_realm(client: dict) -> str:
     return FI_ALIASES.get(n, n)
 
 
-def reporting_ids(manifest: dict, client: dict) -> list[str]:
+def reporting_ids(manifest: dict, client: dict, skip=frozenset()) -> list[str]:
     """Reporting IDs exactly as pushed to the portal: bare tracking id per
-    row, plus id+ticker suffix for rows flagged for an ESPN version."""
+    row, plus id+ticker suffix for rows flagged for an ESPN version.
+    Rejected files (bad payload, spec fail) never reach the portal - their
+    IDs can't hold the archive gate."""
     suffix = client.get("tickerSuffix") or "_ticker"
     ids = []
     for e in manifest.get("files", []):
+        if e.get("file") in skip:
+            continue
         rid = e.get("tracking_id") or Path(e.get("file", "")).stem.split()[0]
         if not rid:
             continue
@@ -396,7 +436,7 @@ def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
     if marker.exists():
         return True
     realm = ingest_realm(client)
-    wanted = reporting_ids(manifest, client)
+    wanted = reporting_ids(manifest, client, skip=frozenset(state.get("rejected", [])))
     if not realm or not wanted:
         return True  # nothing verifiable - settle-and-move as before
     now = time.time()
@@ -549,7 +589,8 @@ def process_job(manifest_path: Path):
         local = find_downloaded(job_dir, name)
         if local is None:
             if name in state.get("rejected", []):
-                status["status"] = "rejected (moved to _rejected/)"
+                sf = (state.get("specfail") or {}).get(name)
+                status["status"] = ("spec_fail: " + "; ".join(sf)) if sf else "rejected (moved to _rejected/)"
                 report["files"].append(status)
                 continue
             if name in state.get("archived", {}):
@@ -648,6 +689,52 @@ def process_job(manifest_path: Path):
             changed = True
             report["files"].append(status)
             continue
+
+        # Minimum ingest spec (ffprobe once, cached): under-10s creatives,
+        # missing video/audio - quarantine like a bad payload so it can't
+        # reach the ingest queue, and surface it for the spec-fail reply.
+        if name not in state.get("probed", {}):
+            state.setdefault("probed", {})[name] = probe_spec(local)
+            changed = True
+        pr = state["probed"][name] or {}
+        if not pr.get("info"):
+            # ffprobe couldn't parse it at all - bad download, not a spec
+            # question. Tiny junk keeps the old label for familiarity.
+            reason = ("suspiciously small" if local.stat().st_size < 64 * 1024
+                      else "unreadable media (ffprobe: " + str(pr.get("error", "no streams"))[:60] + ")")
+            rej = job_dir / "_rejected"
+            try:
+                rej.mkdir(exist_ok=True)
+                local.rename(rej / local.name)
+            except Exception:
+                pass
+            state.setdefault("rejected", []).append(name)
+            status["status"] = "rejected: " + reason
+            if name not in state["notified"]:
+                state["notified"].append(name)
+                notify("Ingest watcher", f"{local.name}: rejected ({reason}) - not a real video.")
+            changed = True
+            report["files"].append(status)
+            continue
+        if pr.get("fails"):
+            rej = job_dir / "_rejected"
+            try:
+                rej.mkdir(exist_ok=True)
+                local.rename(rej / local.name)
+            except Exception:
+                pass
+            state.setdefault("rejected", []).append(name)
+            state.setdefault("specfail", {})[name] = pr["fails"]
+            status["status"] = "spec_fail: " + "; ".join(pr["fails"])
+            status["spec"] = pr.get("info")
+            if name not in state["notified"]:
+                state["notified"].append(name)
+                notify("Ingest watcher",
+                       f"{local.name}: fails ingest spec ({'; '.join(pr['fails'])}) - moved to _rejected/.")
+            changed = True
+            report["files"].append(status)
+            continue
+        status["spec"] = pr["info"]
 
         if not entry.get("needs_espn"):
             status["status"] = "downloaded"
@@ -758,6 +845,23 @@ def job_media_files(slug: str) -> list[str]:
     return [e["file"] for e in m.get("files", [])
             if e.get("file") and Path(e["file"]).suffix.lower() in MEDIA_EXTS
             and (mp.parent / e["file"]).exists()]
+
+
+def spec_failures(slug: str) -> list[dict]:
+    """Spec-rejected files for a job, with the ffprobe facts - the panel
+    drafts the 'does not meet our requirements' reply off this."""
+    mp, m = find_manifest_for_job(slug)
+    if not m:
+        return []
+    state = load_state(mp)
+    out = []
+    for name, fails in (state.get("specfail") or {}).items():
+        e = next((x for x in m.get("files", []) if x.get("file") == name), {})
+        out.append({"file": name,
+                    "id": e.get("tracking_id") or Path(name).stem.split()[0],
+                    "fails": fails,
+                    "info": (state.get("probed", {}).get(name) or {}).get("info") or {}})
+    return out
 
 
 def resolve_job_file(slug: str, name: str):
