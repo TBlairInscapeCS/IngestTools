@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -58,12 +59,48 @@ def start_log_server():
         def _cors(self, code=204):
             self.send_response(code)
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            # Chrome Private Network Access: https page -> http://127.0.0.1
+            # needs this on the preflight and the response.
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
 
+        def _send(self, code, body, ctype):
+            self.send_response(code)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_OPTIONS(self):
             self._cors()
+
+        # The extension's portal tab streams job files from here into the
+        # page's file picker - "Feed files to portal" in step 5.
+        def do_GET(self):
+            u = urllib.parse.urlparse(self.path)
+            q = urllib.parse.parse_qs(u.query)
+            if u.path == "/ingest-files":
+                files = job_media_files((q.get("job") or [""])[0])
+                self._send(200, json.dumps({"files": files}).encode(), "application/json")
+            elif u.path == "/ingest-file":
+                p = resolve_job_file((q.get("job") or [""])[0], (q.get("name") or [""])[0])
+                if not p:
+                    self._cors(404)
+                    return
+                self.send_response(200)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(p.stat().st_size))
+                self.end_headers()
+                with open(p, "rb") as f:
+                    shutil.copyfileobj(f, self.wfile)
+            else:
+                self._cors(404)
 
         def do_POST(self):
             if self.path != "/ingest-log":
@@ -370,6 +407,13 @@ def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
             state["portal_status"] = statuses
         except Exception as e:
             log(f"portal check failed ({realm}): {e}")
+    failed = [k for k, v in statuses.items()
+              if v and ((v.get("status") or "").startswith("INGEST_FAILED")
+                        or (v.get("result") or "") == "fail")]
+    if failed and not state.get("portal_alerted"):
+        state["portal_alerted"] = True
+        notify("Ingest watcher",
+               f"Portal ingest: {len(failed)} failed ({', '.join(failed[:4])}) - review in portal")
     report["portal"] = {
         "realm": realm,
         "statuses": {k: ((v.get("status") or "?") +
@@ -377,8 +421,7 @@ def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
                          (" %.0f%%" % v["pct"] if v.get("pct") is not None else ""))
                         if v else "no record"
                      for k, v in statuses.items()},
-        "failed": [k for k, v in statuses.items()
-                   if v and (v.get("status") or "").startswith("INGEST_FAILED")],
+        "failed": failed,
     }
     pending = [k for k, v in statuses.items() if not portal_terminal(v)]
     if pending:
@@ -689,6 +732,44 @@ def all_manifests():
     """Flat layout keeps manifests at Ingest/ top level; legacy job dirs
     kept them one level deep. Support both."""
     return sorted(list(WATCH_DIR.glob("*.json")) + list(WATCH_DIR.glob("*/*.json")))
+
+
+def find_manifest_for_job(slug: str):
+    """Locate the manifest for a job slug - matches the manifest's job
+    field or its <slug>-manifest.json filename."""
+    for mp in all_manifests():
+        if not MANIFEST_RE.match(mp.name):
+            continue
+        try:
+            m = json.loads(mp.read_text())
+        except Exception:
+            continue
+        if slug and (m.get("job") == slug or mp.stem == slug
+                     or mp.stem == slug + "-manifest"):
+            return mp, m
+    return None, None
+
+
+def job_media_files(slug: str) -> list[str]:
+    mp, m = find_manifest_for_job(slug)
+    if not m:
+        return []
+    return [e["file"] for e in m.get("files", [])
+            if e.get("file") and Path(e["file"]).suffix.lower() in MEDIA_EXTS
+            and (mp.parent / e["file"]).exists()]
+
+
+def resolve_job_file(slug: str, name: str):
+    """Only serve basenames that the job's manifest actually expects -
+    no traversal, no arbitrary file reads off the loopback port."""
+    mp, m = find_manifest_for_job(slug)
+    if not m:
+        return None
+    name = Path(name).name
+    if name not in {e.get("file", "") for e in m.get("files", [])}:
+        return None
+    p = mp.parent / name
+    return p if p.exists() and p.suffix.lower() in MEDIA_EXTS else None
 
 
 def pending_expectations():

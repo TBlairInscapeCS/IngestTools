@@ -31,6 +31,7 @@ let repliedConvs = new Set(); // conversationIds that already got a template rep
 let erDeliveries = [];     // parsed ER "Spot Delivery Notification" registry
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
+let portalLiveTimer = null; // 30s records-API poller in step 5
 let matchCols = {};        // column picks in effect for the current match
 let detectedAdvertiser = ''; // brand from delivery-notification subjects
 let pendingRows = [];      // sheet rows with empty fill-back columns
@@ -244,6 +245,8 @@ function resetRun() {
   $('replyArea').classList.add('hidden'); $('replyPreview').value = '';
   const rk = $('replyKind'); if (rk) rk.value = 'auto';
   $('capInfo').innerHTML = '';
+  stopPortalLive();
+  const pl = $('portalLive'); if (pl) pl.textContent = '';
   ourDlIds.clear();
   // Request-specific draft/proof state must not bleed into the next job:
   // a dirty reply kept last request's text, a staged Jira run could post
@@ -3593,12 +3596,105 @@ $('ingestPush').addEventListener('click', async () => {
       v.ok + ' row(s) verified · ' + v.diff + ' differ · ' + v.miss + ' unmatched — watching for new drops');
     $('ingestInfo').textContent = 'fills pushed — new files dropped into the queue auto-fill; ' +
       v.ok + ' ok · ' + v.diff + ' differ · ' + v.miss + ' unmatched';
+    startPortalLive();
   } else {
     setStage('sdIngest', 'warn', 'plan armed (' + plan.rows.length + ' rows) — queue still empty, will fill on drop');
     $('ingestInfo').textContent = 'plan armed for ' + plan.rows.length + ' row(s) — drop the videos, fills apply automatically';
   }
   dbg('ingest push', { rows: plan.rows.length, queued: n });
 });
+
+// Runs INSIDE the portal tab: pulls this job's downloaded files from the
+// watcher's loopback server (http://127.0.0.1:8770, manifest-scoped) and
+// assigns them to the page's bulk file input - same as a manual pick.
+// The armed portalFill observer then writes metadata as rows appear.
+async function feedJobFiles(job, base) {
+  try {
+    const lst = await (await fetch(base + '/ingest-files?job=' + encodeURIComponent(job))).json();
+    const names = (lst && lst.files) || [];
+    if (!names.length) return { error: 'watcher has no downloaded files for job ' + job };
+    const input = document.getElementById('multifile') ||
+      document.querySelector('#bulkdrop input[type=file], input.bulk-btn-upload');
+    if (!input) return { error: 'no bulk file input found - open the File Ingest view' };
+    const MIME = { mp4: 'video/mp4', mov: 'video/quicktime', mxf: 'application/mxf', mpg: 'video/mpeg' };
+    const before = document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').length;
+    const dt = new DataTransfer();
+    const skipped = [];
+    for (const name of names) {
+      try {
+        const r = await fetch(base + '/ingest-file?job=' + encodeURIComponent(job) +
+          '&name=' + encodeURIComponent(name));
+        if (!r.ok) { skipped.push(name); continue; }
+        const b = await r.blob();
+        const ext = (name.match(/\.(\w+)$/) || ['mp4'])[0].slice(1).toLowerCase();
+        dt.items.add(new File([b], name, { type: MIME[ext] || 'video/mp4' }));
+      } catch (e) { skipped.push(name); }
+    }
+    if (!dt.files.length) return { error: 'watcher served 0 of ' + names.length + ' file(s) - is ingest_watch running?' };
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 2500));
+    const after = document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').length;
+    return { fed: dt.files.length, skipped, rowsAdded: after - before, rowsTotal: after };
+  } catch (e) { return { error: String(e) }; }
+}
+
+$('feedPortal').addEventListener('click', async () => {
+  const tab = await portalTab();
+  if (!tab) { toast('No portal.cognet.tv tab open - open the ingest page first'); return; }
+  const job = jobSlug();
+  $('ingestInfo').textContent = 'Streaming job files from Ingest/ into the portal picker…';
+  try {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id }, func: feedJobFiles, args: [job, 'http://127.0.0.1:8770'] });
+    const r = (res && res.result) || {};
+    if (r.error) { $('ingestInfo').textContent = r.error; toast(r.error); return; }
+    stamp('tsIngest');
+    $('ingestInfo').textContent = 'Fed ' + r.fed + ' file(s) - ' + r.rowsAdded + ' new queue row(s), ' +
+      r.rowsTotal + ' total' + (r.rowsAdded ? ' - Check portal / Push fills to verify' :
+      ' - no new rows appeared; the page may need a manual drop') +
+      (r.skipped && r.skipped.length ? ' · skipped: ' + r.skipped.join(', ') : '');
+    dbg('feed portal', r);
+  } catch (e) { toast(e.message); }
+});
+
+// ---------- live portal ingest status (records API while panel is open) ----------
+const PORTAL_STAGE = { INGEST_STARTED: 'uploading', INGEST_COMPLETED: 'queued for detection',
+  DETECTION_STARTED: 'detecting', PROCESSING: 'processing' };
+
+async function portalLiveTick() {
+  const box = $('portalLive');
+  if (!box) return;
+  const realm = ingestRealm();
+  const wanted = ingestReportIds();
+  if (!realm || !wanted.length) { box.textContent = ''; return; }
+  try {
+    const all = await fetchRealmRecords(realm, 1);
+    const idx = new Map(all.map(r => [normalizeName(r.reportingId || '').replace(/ /g, ''), r]));
+    const info = wanted.map(w => {
+      const rec = idx.get(normalizeName(w.reporting).replace(/ /g, ''));
+      const st = rec ? (rec.status || '?') : 'no record';
+      const stage = PORTAL_STAGE[st];
+      const pct = rec && rec.admin_visible && rec.admin_visible.detection_percentage != null
+        ? ' ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
+      const res = rec && rec.detection_result && rec.detection_result !== 'pass'
+        ? '/' + rec.detection_result : '';
+      return { id: w.reporting, st: st + (stage ? ' (' + stage + ')' : '') + pct + res, done: !!rec && (st === 'DETECTION_COMPLETED' || st.indexOf('INGEST_FAILED') === 0) };
+    });
+    const done = info.filter(i => i.done).length;
+    box.innerHTML = 'portal ingest: <b>' + done + '/' + wanted.length + '</b>' +
+      (done < wanted.length ? '<br>' + info.filter(i => !i.done).slice(0, 10).map(i => esc(i.id + ' · ' + i.st)).join('<br>') : ' · all in');
+    if (done === wanted.length) stopPortalLive();
+  } catch (e) { box.textContent = 'portal status: ' + e.message; }
+}
+function stopPortalLive() {
+  if (portalLiveTimer) { clearInterval(portalLiveTimer); portalLiveTimer = null; }
+}
+function startPortalLive() {
+  stopPortalLive();
+  portalLiveTick();
+  portalLiveTimer = setInterval(portalLiveTick, 30000);
+}
 
 // Panel reload = fresh run: only one-shot handoffs (pendingIds/pendingFiles)
 // and config keys (ER key + sweep prefs) restore. Email/ids/files/sheet are
@@ -3760,7 +3856,7 @@ $('verifyIngest').addEventListener('click', async () => {
   if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
   const wanted = ingestReportIds();
   if (!wanted.length) return toast('No matched rows - run Match first.');
-  try { await runVerify(wanted); } catch (e) { toast(e.message); }
+  try { await runVerify(wanted); startPortalLive(); } catch (e) { toast(e.message); }
 });
 
 // Filtered records JSON = the attach-able proof for the Jira ticket -
