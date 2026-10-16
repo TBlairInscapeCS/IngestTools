@@ -69,17 +69,32 @@ def start_log_server():
     try:
         srv = HTTPServer(("127.0.0.1", LOG_PORT), H)
     except OSError as e:
-        print(f"log server disabled: {e}", file=sys.stderr)
+        print(f"log server disabled: {e}", file=sys.stderr, flush=True)
         return
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print(f"Log endpoint on 127.0.0.1:{LOG_PORT}")
+    print(f"Log endpoint on 127.0.0.1:{LOG_PORT}", flush=True)
+
+
+def log(msg):
+    """Watch errors go to logs/watch.log as well as stdout - a terminal
+    window's scrollback is gone forever once the session closes."""
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+    print(line, file=sys.stderr, flush=True)
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        with open(LOG_DIR / "watch.log", "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def notify(title, msg):
     try:
+        # No timeout previously: a hung osascript (e.g. a notification
+        # permission prompt) wedged the whole watch loop silently.
         subprocess.run(
             ["osascript", "-e", f'display notification {json.dumps(msg)} with title {json.dumps(title)}'],
-            check=False, capture_output=True,
+            check=False, capture_output=True, timeout=15,
         )
     except Exception:
         pass
@@ -225,7 +240,11 @@ def relocate_debug_logs():
     debug_dir = WATCH_DIR / "_debug"
     if not debug_dir.exists():
         return
-    LOG_DIR.mkdir(exist_ok=True)
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+    except Exception as e:
+        log(f"relocate_debug_logs: cannot create {LOG_DIR}: {e}")
+        return
     for f in debug_dir.glob("*"):
         if f.suffix == ".crdownload" or not f.is_file():
             continue
@@ -245,17 +264,17 @@ def run_once():
 
 def main():
     if not ESPN_SCRIPT.exists():
-        print(f"warning: {ESPN_SCRIPT} not found - conversions will fail", file=sys.stderr)
+        log(f"warning: {ESPN_SCRIPT} not found - conversions will fail")
     start_log_server()
     if "--once" in sys.argv:
         run_once()
         return
-    print(f"Watching {WATCH_DIR} every {POLL_SECONDS}s (Ctrl+C to stop)")
+    log(f"Watching {WATCH_DIR} every {POLL_SECONDS}s (Ctrl+C to stop)")
     while True:
         try:
             run_once()
         except Exception as e:
-            print(f"watch error: {e}", file=sys.stderr)
+            log(f"watch error: {e}")
         time.sleep(POLL_SECONDS)
 
 
