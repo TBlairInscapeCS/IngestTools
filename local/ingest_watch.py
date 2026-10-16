@@ -309,20 +309,31 @@ def reporting_ids(manifest: dict, client: dict) -> list[str]:
 
 
 def portal_statuses(realm: str, wanted: list[str]) -> dict:
-    """reporting id -> status (None when the record doesn't exist yet)."""
+    """reporting id -> {status, detection_result, pct} (None when the
+    record doesn't exist yet). The progress bars on the portal page are
+    rendered off this same record data."""
     req = urllib.request.Request(
         FI_BASE + "/v1/" + realm + "/content?offset=1&limit=500",
         headers={"Authorization": FI_AUTH})
     with urllib.request.urlopen(req, timeout=20) as r:
         data = json.loads(r.read())
-    idx = {norm_stem(rec.get("reportingId", "")): rec.get("status") or ""
-           for rec in data.get("content", [])}
+    idx = {}
+    for rec in data.get("content", []):
+        idx[norm_stem(rec.get("reportingId", ""))] = {
+            "status": rec.get("status") or "",
+            "result": rec.get("detection_result") or "",
+            "pct": (rec.get("admin_visible") or {}).get("detection_percentage"),
+        }
     return {w: idx.get(norm_stem(w)) for w in wanted}
 
 
-def portal_terminal(status) -> bool:
-    s = status or ""
-    return s == "DETECTION_COMPLETED" or s.startswith("INGEST_FAILED")
+def portal_terminal(rec) -> bool:
+    """Terminal = done either way (pass or fail); detection_result 'pass'
+    counts even on an unrecognized status string."""
+    if not rec:
+        return False
+    s, res = rec.get("status") or "", rec.get("result") or ""
+    return s == "DETECTION_COMPLETED" or s.startswith("INGEST_FAILED") or res == "pass"
 
 
 def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
@@ -346,9 +357,15 @@ def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
             state["portal_status"] = statuses
         except Exception as e:
             log(f"portal check failed ({realm}): {e}")
-    report["portal"] = {"realm": realm, "statuses": statuses,
-                        "failed": [k for k, v in statuses.items()
-                                   if (v or "").startswith("INGEST_FAILED")]}
+    report["portal"] = {
+        "realm": realm,
+        "statuses": {k: ((v.get("status") or "?") +
+                         (" %.0f%%" % v["pct"] if v.get("pct") is not None else ""))
+                        if v else "no record"
+                     for k, v in statuses.items()},
+        "failed": [k for k, v in statuses.items()
+                   if v and (v.get("status") or "").startswith("INGEST_FAILED")],
+    }
     pending = [k for k, v in statuses.items() if not portal_terminal(v)]
     if pending:
         report["archive"] = "waiting on portal ingest: " + ", ".join(pending[:6]) + \
