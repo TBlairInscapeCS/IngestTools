@@ -339,18 +339,6 @@ const CONF_SHEET = [
     "Tracking sheet is updated too.",
     "Sheet's updated with the ingested IDs.",
 ];
-const CONF_EXTRA = {
-  one: [
-    'I ingested this one because it was in the folder, but later found out it was not listed:',
-    'This file was in the folder so I went ahead and ingested it, but it turned out not to be listed:',
-    'One extra file was in the folder and got ingested, though it was not on the request:',
-  ],
-  many: [
-    'I ingested these because they were in the folder, but later found out they were not listed:',
-    'These files were in the folder so they got ingested, but they turned out not to be listed:',
-    'A few extra files were in the folder and got ingested, though they were not on the request:',
-  ],
-};
 const CONF_MISSING = {
   one: [
     'Did not ingest this one as it was not in the linked folder:',
@@ -393,30 +381,25 @@ function buildMatchConfirmation(matched, sender) {
   return lines.join('\n');
 }
 
-// Post-reconcile confirmation in the format actually sent when the folder
-// and the request disagree: found IDs, then extras ("in the folder but not
-// listed") and missing ("not in the linked folder") called out explicitly.
+// Post-reconcile confirmation: found IDs claimed, missing called out.
+// Page extras are deliberately excluded - delivery lists (Extreme Reach
+// especially) carry other clients' files, so naming them in a reply leaks
+// unrelated work and confuses the sender. They still show in the UI.
 // espnIds: Set of normalized IDs that need a <id>_ticker entry.
-function buildReconConfirmation(results, extras, espnIds, sender) {
+function buildReconConfirmation(results, espnIds, sender) {
   const found = results.filter(r => r.status === 'FOUND').map(r => r.id);
   const missing = results.filter(r => r.status === 'MISSING').map(r => r.id);
   const requested = results.filter(r => r.status !== 'BLANK' && r.status !== 'DUPLICATE').length;
-  extras = extras || [];
-  if (!found.length && !extras.length) return null;
-  const ingested = found.length + extras.length;
+  if (!found.length) return null;
   const tickers = found
     .filter(id => espnIds && espnIds.has(normalizeName(id).replace(/ /g, '')))
     .map(id => id + '_ticker');
-  const seed = hashStr(found.join('|') + '::' + extras.join('|') + '::' + missing.join('|'));
+  const seed = hashStr(found.join('|') + '::' + missing.join('|'));
   const lines = [greet(sender), '',
-    pick(CONF_COUNT, seed)(ingested, requested) +
+    pick(CONF_COUNT, seed)(found.length, requested) +
     (tickers.length ? ' and ticker versions' : '') +
     ' to appear in the commercial reports:'];
   found.concat(tickers).forEach(id => lines.push(id));
-  if (extras.length) {
-    lines.push('', pick(CONF_EXTRA[extras.length === 1 ? 'one' : 'many'], seed >> 2));
-    extras.forEach(n => lines.push(n));
-  }
   if (missing.length) {
     lines.push('', pick(CONF_MISSING[missing.length === 1 ? 'one' : 'many'], seed >> 4));
     missing.forEach(id => lines.push(id));

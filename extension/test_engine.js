@@ -23,7 +23,7 @@ if ((env('TEST_SET') || '') === 'recon') {
   out.push('counts: ' + JSON.stringify(counts) + ' extras: ' + JSON.stringify(extras));
   const espnIds = new Set(['0926514bnsh', '0926513znsh']); // normalized keys
   out.push('--- recon confirmation ---');
-  out.push(buildReconConfirmation(results, extras, espnIds));
+  out.push(buildReconConfirmation(results, espnIds));
   out.join('\n');
 } else {
 

@@ -454,7 +454,15 @@ function grabEmailText() {
     '[class*="PersonaDetails" i] [class*="primaryText" i], ' +
     '[role="article"] [title*="@"]'
   );
-  if (sndEl) sender = (sndEl.innerText || sndEl.getAttribute('title') || sndEl.getAttribute('aria-label') || '').trim();
+  if (sndEl) {
+    // Attributes first - a matched [title] node's innerText can be the
+    // whole message body. Then strip role words and any address so only
+    // the display name survives.
+    sender = (sndEl.getAttribute('title') || sndEl.getAttribute('aria-label') || sndEl.innerText || '')
+      .replace(/^(mail from|sender|from)\s*[:.\-]?\s*/i, '')
+      .replace(/<[^>]*>/g, '').replace(/\S+@\S+/g, '').trim()
+      .slice(0, 60);
+  }
   return { text: text.slice(0, 80000), subject, sender };
 }
 
@@ -669,7 +677,7 @@ function setEmailText(text, subject, sender) {
   emailSubject = subject || '';
   // Reply greeting: explicit sender name wins (Outlook DOM / .eml From:),
   // else parse a leading From: line (Graph inbox / pasted headers).
-  emailSender = sender || senderFirstName(text) || '';
+  emailSender = senderFirstName(sender) || senderFirstName(text) || '';
   detectedAdvertiser = extractAdvertiser(emailSubject);
   applyClient(detectClient({ emailText: text, subject: emailSubject }), 'email');
   stamp('tsEmail');
@@ -1699,7 +1707,7 @@ function refreshReply() {
       [m.id, m.trackingId].filter(Boolean).forEach(v =>
         espnIds.add(normalizeName(v).replace(/ /g, '')));
     });
-    text = buildReconConfirmation(lastResults, lastExtras, espnIds, emailSender) ||
+    text = buildReconConfirmation(lastResults, espnIds, emailSender) ||
       buildConfirmationEmail(lastResults, emailSender);
   }
   if (!text && matched) text = buildMatchConfirmation(matched, emailSender);
@@ -1932,7 +1940,9 @@ async function downloadLinked() {
   await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/' + job);
+  const nEspnJobs = jobs.filter(j => j.needs_espn).length;
   toast('Queued ' + jobs.length + ' download(s) + manifest to ~/Downloads/Ingest/' + job + '/' +
+    (nEspnJobs ? ' — ' + nEspnJobs + ' ESPN ticker version(s) auto-build on arrival' : '') +
     (problems.length ? ' — ' + problems.length + ' row(s) skipped' : ''));
   if (problems.length) {
     $('matchResults').innerHTML += problems.map(p => '<div class="hint">' + esc(p) + '</div>').join('');
@@ -2121,9 +2131,10 @@ function runReconcile() {
       `<td><span class="trunc" title="${esc(r.matched)}">${esc(moniker(r.matched))}</span></td><td>${esc(r.notes)}</td></tr>`).join('') +
     '</tbody></table>' +
     (lastExtras.length
-      ? '<div class="hint"><b>Extra on page:</b> ' +
-        lastExtras.slice(0, 25).map(e => esc(moniker(e))).join(' · ') +
-        (lastExtras.length > 25 ? ' +' + (lastExtras.length - 25) : '') + '</div>'
+      ? '<details class="hint" style="margin-top:4px"><summary style="font-weight:400;text-transform:none;letter-spacing:0;display:inline;cursor:pointer">' +
+        '<b>' + lastExtras.length + '</b> surplus file(s) on page - other deliveries, not this request</summary><div style="margin-top:2px">' +
+        lastExtras.slice(0, 40).map(e => esc(moniker(e))).join(' · ') +
+        (lastExtras.length > 40 ? ' +' + (lastExtras.length - 40) : '') + '</div></details>'
       : '');
 
   // Missing callout: requested files with no match yet - they may live on
@@ -2360,9 +2371,11 @@ async function downloadFound() {
   dbg('download found queued', { files: fresh.map(j => j.file), urls: fresh.map(j => j.url) });
   setStage('sdDl', 'ok', fresh.length + ' file(s) queued to Ingest/' + job);
   flushLog(true);
+  const nEspnFresh = fresh.filter(j => j.needs_espn).length;
   toast('Queued ' + fresh.length + ' file(s)' +
     (skipped ? ' (' + skipped + ' already queued earlier)' : '') +
-    (noUrl.length ? ' (' + noUrl.length + ' found but had no link)' : '') + '.');
+    (noUrl.length ? ' (' + noUrl.length + ' found but had no link)' : '') +
+    (nEspnFresh ? ' - ' + nEspnFresh + ' ESPN ticker version(s) auto-build on arrival' : '') + '.');
   return true;
 }
 
