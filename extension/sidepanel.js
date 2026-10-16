@@ -3114,11 +3114,12 @@ async function fetchRealmRecords(realm, pages) {
 
 let lastIngestRecords = [];
 
-$('verifyIngest').addEventListener('click', async () => {
+// Query the realm's records for the wanted reporting IDs, paint the result,
+// and leave lastIngestRecords set for the Jira proof. Returns the filtered
+// records (empty on API failure - caller treats it as "no records proof").
+async function runVerify(wanted) {
   const realm = ingestRealm();
-  if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
-  const wanted = ingestReportIds();
-  if (!wanted.length) return toast('No matched rows - run Match first.');
+  if (!realm) throw new Error('no ingest realm (cidMap) on this playbook');
   $('verifyInfo').textContent = 'Querying ' + realm + ' records…';
   try {
     const all = await fetchRealmRecords(realm, 2);
@@ -3132,9 +3133,21 @@ $('verifyIngest').addEventListener('click', async () => {
       (lastIngestRecords.length ? '<br>' + lastIngestRecords.slice(0, 10).map(r =>
         esc(r.reportingId) + ' · ' + esc(r.status || '?') + ' · ' + esc(String(r.datetime || '').slice(0, 19).replace('T', ' '))).join('<br>') : '');
     $('saveRecords').classList.toggle('hidden', !lastIngestRecords.length);
+    return lastIngestRecords;
   } catch (e) {
+    lastIngestRecords = [];
     $('verifyInfo').textContent = 'records query failed: ' + e.message;
+    dbg('verify failed', e.message);
+    return [];
   }
+}
+
+$('verifyIngest').addEventListener('click', async () => {
+  const realm = ingestRealm();
+  if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
+  const wanted = ingestReportIds();
+  if (!wanted.length) return toast('No matched rows - run Match first.');
+  try { await runVerify(wanted); } catch (e) { toast(e.message); }
 });
 
 // Filtered records JSON = the attach-able proof for the Jira ticket -
@@ -3167,20 +3180,26 @@ $('jiraTicket').addEventListener('click', () => {
 });
 $('copyTicket').addEventListener('click', () => copyText($('jiraPreview').textContent, 'Jira ticket'));
 
-// Visual proof when wanted: captures the portal tab itself (activates it
-// for a moment), saves into the job folder.
-$('shotPortal').addEventListener('click', async () => {
+// Capture the portal tab (activates it for a moment). Throws with the real
+// reason on failure - callers decide whether that's fatal.
+async function capturePortalShot() {
   const tabs = await chrome.tabs.query({ url: '*://portal.cognet.tv/*' });
-  if (!tabs.length) return toast('No portal tab open - open portal.cognet.tv first.');
+  if (!tabs.length) throw new Error('no portal.cognet.tv tab open');
+  await chrome.tabs.update(tabs[0].id, { active: true });
+  await chrome.windows.update(tabs[0].windowId, { focused: true });
+  await new Promise(r => setTimeout(r, 800));
+  return chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' });
+}
+
+// Visual proof when wanted: captures the portal tab, saves into the job folder.
+$('shotPortal').addEventListener('click', async () => {
   try {
-    await chrome.tabs.update(tabs[0].id, { active: true });
-    await chrome.windows.update(tabs[0].windowId, { focused: true });
-    await new Promise(r => setTimeout(r, 500));
-    const dataUrl = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' });
+    const dataUrl = await capturePortalShot();
     const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
     await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '/ingest-screenshot.png' });
     toast('Screenshot saved to Ingest/' + job + '/');
   } catch (e) {
+    dbg('screenshot failed', e.message);
     toast('Screenshot failed: ' + e.message);
   }
 });
@@ -3255,7 +3274,8 @@ function jiraCommentAdf(wanted) {
   emailEl.value.trim().split(/\r?\n/).forEach(l => content.push(para(l.trim() ? l : ' ')));
   content.push({ type: 'rule' }, { type: 'rule' });
   content.push({ type: 'paragraph', content: [{ type: 'text', text: 'ingest:' }]
-    .concat(wanted.flatMap(w => [{ type: 'hardBreak' }, { type: 'text', text: w.reporting }])) });
+    .concat(wanted.flatMap(w => [{ type: 'hardBreak' },
+      { type: 'text', text: w.reporting + (w.title ? ' - ' + w.title : '') + (w.espn ? ' (ESPN)' : '') }])) });
   return { version: 1, type: 'doc', content };
 }
 async function jiraAttach(key, name, blob) {
@@ -3270,35 +3290,35 @@ async function jiraAttach(key, name, blob) {
   return r.json();
 }
 
-async function postJiraComment(issue, wanted, st) {
-  if (lastIngestRecords.length) {
+// Attach the collected proofs (records JSON + portal screenshot) then post
+// the ADF comment. Proofs were gathered BEFORE this ran - posting never
+// proceeds on an empty proof set (the handler gates on it).
+async function postJiraComment(issue, wanted, st, proof) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (proof.records.length) {
     st.textContent = 'Attaching records JSON to ' + issue.key + '…';
-    const payload = new Blob([JSON.stringify({
-      realm: ingestRealm(), queried_at: new Date().toISOString(), records: lastIngestRecords,
-    }, null, 2)], { type: 'application/json' });
-    await jiraAttach(issue.key, 'ingest-records-' + new Date().toISOString().slice(0, 10) + '.json', payload);
+    await jiraAttach(issue.key, 'ingest-records-' + day + '.json', new Blob([JSON.stringify({
+      realm: ingestRealm(), queried_at: new Date().toISOString(), records: proof.records,
+    }, null, 2)], { type: 'application/json' }));
   }
-  const tabs = await chrome.tabs.query({ url: '*://portal.cognet.tv/*' });
-  if (tabs.length) {
-    try {
-      st.textContent = 'Capturing portal screenshot…';
-      await chrome.tabs.update(tabs[0].id, { active: true });
-      await chrome.windows.update(tabs[0].windowId, { focused: true });
-      await new Promise(r => setTimeout(r, 500));
-      const dataUrl = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' });
-      const blob = await (await fetch(dataUrl)).blob();
-      await jiraAttach(issue.key, 'ingest-proof-' + new Date().toISOString().slice(0, 10) + '.png', blob);
-    } catch (e) { /* screenshot is optional proof - never block the post */ }
+  if (proof.shotBlob) {
+    st.textContent = 'Attaching portal screenshot to ' + issue.key + '…';
+    await jiraAttach(issue.key, 'ingest-proof-' + day + '.png', proof.shotBlob);
   }
   st.textContent = 'Posting comment on ' + issue.key + '…';
   await jiraFetch('/rest/api/3/issue/' + issue.key + '/comment', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ body: jiraCommentAdf(wanted) }),
   });
-  st.innerHTML = 'Posted to <a href="' + JIRA_BASE + '/browse/' + issue.key + '" target="_blank"><b>' + issue.key + '</b></a>' +
-    (lastIngestRecords.length ? ' - ' + lastIngestRecords.length + ' record(s) attached' : ' - run Verify first next time to attach records');
+  st.innerHTML = 'Posted to <a href="' + JIRA_BASE + '/browse/' + issue.key + '" target="_blank"><b>' + issue.key + '</b></a> - ' +
+    [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
+     proof.shotBlob ? 'screenshot' : null].filter(Boolean).join(' + ') + ' attached' +
+    (proof.records.length < wanted.length ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '');
 }
 
+// One-button flow: verify -> collect proofs (records JSON + screenshot) ->
+// refuse to post with zero proof unless the user explicitly overrides.
+let postWithoutProof = false;
 $('postJira').addEventListener('click', async () => {
   const epic = jiraEpicFor();
   if (!epic) return toast('No Jira epic mapped for this client - tell Devin the epic key.');
@@ -3306,9 +3326,38 @@ $('postJira').addEventListener('click', async () => {
   if (!wanted.length) return toast('No matched rows - run Match first.');
   const st = $('jiraStatus');
   try {
+    const records = await runVerify(wanted);
+    let shotUrl = null, shotErr = null;
+    try {
+      st.textContent = 'Capturing portal screenshot…';
+      shotUrl = await capturePortalShot();
+    } catch (e) { shotErr = e; dbg('screenshot failed', e.message); }
+
+    const proof = { records, shotBlob: shotUrl ? await (await fetch(shotUrl)).blob() : null };
+    if (!records.length && !proof.shotBlob && !postWithoutProof) {
+      postWithoutProof = true;
+      st.innerHTML = '<span style="color:#ec9a9a"><b>No proof captured</b> - 0 records found' +
+        (shotErr ? ' and screenshot failed (' + esc(shotErr.message) + ')' : '') +
+        '.</span> Click <b>Verify &amp; post Jira</b> again to post anyway.';
+      return;
+    }
+    postWithoutProof = false;
+
+    // Keep the same artifacts locally - the job folder gets the proofs too.
+    const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+    if (records.length) {
+      const blob = new Blob([JSON.stringify({ job, realm: ingestRealm(),
+        queried_at: new Date().toISOString(), records }, null, 2)], { type: 'application/json' });
+      const u = URL.createObjectURL(blob);
+      chrome.downloads.download({ url: u, filename: 'Ingest/' + job + '/ingest-records.json' });
+      setTimeout(() => URL.revokeObjectURL(u), 30000);
+    }
+    if (shotUrl)
+      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/' + job + '/ingest-screenshot.png' });
+
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
     const { issue, newest } = await jiraWeeklyTicket(epic);
-    if (issue) return await postJiraComment(issue, wanted, st);
+    if (issue) return await postJiraComment(issue, wanted, st, proof);
     // No weekly ticket yet - offer to create it, cloning the naming
     // convention of the newest sibling task.
     const epi = await jiraFetch('/rest/api/3/issue/' + epic + '?fields=summary');
@@ -3328,7 +3377,7 @@ $('postJira').addEventListener('click', async () => {
             parent: { key: epic },
           } }),
         });
-        await postJiraComment({ key: created.key }, wanted, st);
+        await postJiraComment({ key: created.key }, wanted, st, proof);
       } catch (e2) { st.textContent = 'Jira: ' + e2.message; }
     });
   } catch (e) {

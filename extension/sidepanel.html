@@ -251,16 +251,16 @@
   <div class="hint" id="ingestInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
   <div class="row" style="margin-top:8px">
-    <button id="verifyIngest">Verify ingest</button>
-    <button id="jiraTicket">Jira ticket</button>
+    <button id="postJira" class="primary">Verify &amp; post Jira</button>
+    <button id="verifyIngest">Check records</button>
+    <button id="jiraTicket">Draft ticket</button>
     <button id="shotPortal">Screenshot</button>
     <button id="saveRecords" class="hidden">Save records JSON</button>
   </div>
   <div class="hint" id="verifyInfo"></div>
+  <div class="hint" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
-    <div class="row"><button id="copyTicket" class="primary">Copy ticket</button>
-      <button id="postJira">Post to Jira</button></div>
-    <div class="hint" id="jiraStatus"></div>
+    <div class="row"><button id="copyTicket">Copy ticket</button></div>
     <pre id="jiraPreview" class="scrollbox mono" style="max-height:22vh;white-space:pre-wrap;font-size:11px;margin-top:4px"></pre>
   </div>
 </details>
