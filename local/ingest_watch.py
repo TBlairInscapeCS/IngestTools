@@ -57,6 +57,9 @@ ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
 # Standard ingest spec (user-supplied): H.264/H.265/MPEG-2 (+ ProRes -
 # the portal demonstrably accepts it, dozens of files completed), the
 # three listed 16:9 resolutions, 24-30fps, 10s minimum runtime.
+# The 10s floor is a SOFT flag, not a gate - the portal detects sub-10s
+# creatives fine, so they pass through with a notification + report note
+# (InMarket is exempt entirely - the rule never applied to them).
 # Container is NOT gated (mp4/mov/mxf/mkv all ingest) and neither is
 # bit rate: the sheet's 4-40Mbps bears no relation to reality - the
 # accepted archive corpus spans ~2-182Mbps. No audio stream is OK too
@@ -752,6 +755,21 @@ def process_job(manifest_path: Path):
             state.setdefault("probed", {})[name] = probe_spec(local)
             changed = True
         pr = state["probed"][name] or {}
+        # Duration is Tim-enforced, not portal-enforced: the portal
+        # happily detects sub-10s creatives, so they pass through with a
+        # notification rather than quarantine. InMarket is exempt - the
+        # rule never applied to them.
+        fails = pr.get("fails") or []
+        dur_fails = [f for f in fails if "duration" in f]
+        cl_name = (client.get("name") or "").lower()
+        cl_realm = str(client.get("cidMap") or "").lower()
+        dur_exempt = "inmarket" in cl_name or "inmarket" in cl_realm
+        if dur_fails and not dur_exempt and name not in state.get("specwarn", {}):
+            state.setdefault("specwarn", {})[name] = dur_fails
+            changed = True
+            notify("Ingest watcher",
+                   f"{local.name}: {'; '.join(dur_fails)} - flagged, allowed through")
+        hard = [f for f in fails if "duration" not in f]
         if not pr.get("info"):
             # ffprobe couldn't parse it at all - bad download, not a spec
             # question. Tiny junk keeps the old label for familiarity.
@@ -771,7 +789,7 @@ def process_job(manifest_path: Path):
             changed = True
             report["files"].append(status)
             continue
-        if pr.get("fails"):
+        if hard:
             rej = job_dir / "_rejected"
             try:
                 rej.mkdir(exist_ok=True)
@@ -779,17 +797,19 @@ def process_job(manifest_path: Path):
             except Exception:
                 pass
             state.setdefault("rejected", []).append(name)
-            state.setdefault("specfail", {})[name] = pr["fails"]
-            status["status"] = "spec_fail: " + "; ".join(pr["fails"])
+            state.setdefault("specfail", {})[name] = hard
+            status["status"] = "spec_fail: " + "; ".join(hard)
             status["spec"] = pr.get("info")
             if name not in state["notified"]:
                 state["notified"].append(name)
                 notify("Ingest watcher",
-                       f"{local.name}: fails ingest spec ({'; '.join(pr['fails'])}) - moved to _rejected/.")
+                       f"{local.name}: fails ingest spec ({'; '.join(hard)}) - moved to _rejected/.")
             changed = True
             report["files"].append(status)
             continue
         status["spec"] = pr["info"]
+        if dur_fails and not dur_exempt:
+            status["note"] = "under 10s - flagged"
 
         if not entry.get("needs_espn"):
             status["status"] = "downloaded"
