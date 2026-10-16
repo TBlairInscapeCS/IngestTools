@@ -19,6 +19,7 @@ let emailDate = '';        // sent timestamp for the Jira ticket header
 let emailGraphId = '';     // Graph message id when the email came via inbox
 let emailFromAddr = '';    // sender address of the Graph-loaded email
 let reqSenders = {};       // learned request senders (addr -> n, dom:x -> n)
+let selfDomain = '';       // user's own mail domain - self-mail isn't a request
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -934,7 +935,7 @@ function renderInbox(msgs, quiet) {
   msgs.forEach(m => {
     const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
     const fromAddr = m.from && m.from.emailAddress && m.from.emailAddress.address;
-    if (isRequestCandidate(m.subject, body, fromAddr, reqSenders)) cands.push({ m, body });
+    if (isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfDomain)) cands.push({ m, body });
   });
   if (!cands.length) {
     el.style.display = 'none';
@@ -982,6 +983,11 @@ function noteConfirmedSender(addr) {
   chrome.storage.local.set({ reqSenders });
 }
 chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; });
+chrome.storage.local.get('msSelfDomain', d => {
+  selfDomain = d.msSelfDomain || '';
+  // Learn it once per session if a token exists but the domain was never captured.
+  if (!selfDomain && MS.refreshToken) graphSelfDomain().then(d => { selfDomain = d; }).catch(() => {});
+});
 
 $('copyLog').addEventListener('click', () => {
   const text = dbgLog.map(e => e.t + ' ' + e.msg + (e.data ? ' ' + JSON.stringify(e.data) : '')).join('\n');

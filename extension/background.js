@@ -62,11 +62,13 @@ chrome.alarms.onAlarm.addListener(async a => {
     const msgs = await graphUnread(25);
     // Dedupe across service-worker restarts via storage - each message id
     // alerts once, ever. reqSenders = learned request senders.
-    const { notifiedIds = [], reqSenders = {} } =
-      await chrome.storage.local.get(['notifiedIds', 'reqSenders']);
+    const { notifiedIds = [], reqSenders = {}, msSelfDomain = '' } =
+      await chrome.storage.local.get(['notifiedIds', 'reqSenders', 'msSelfDomain']);
+    const selfDom = msSelfDomain ||
+      (await graphSelfDomain().catch(() => ''));
     const cands = (msgs || []).filter(m =>
       isRequestCandidate(m.subject, (m.body && m.body.content) || '',
-        m.from && m.from.emailAddress && m.from.emailAddress.address, reqSenders));
+        m.from && m.from.emailAddress && m.from.emailAddress.address, reqSenders, selfDom));
     const seen = new Set(notifiedIds);
     const fresh = cands.filter(m => !seen.has(m.id));
     for (const m of fresh) { await alertNewRequest(m); seen.add(m.id); }

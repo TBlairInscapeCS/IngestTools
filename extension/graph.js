@@ -198,3 +198,13 @@ async function graphMarkRead(msgId) {
     body: JSON.stringify({ isRead: true }),
   });
 }
+
+// The signed-in user's own address domain - cached so request detection
+// can exclude mail they sent themselves.
+async function graphSelfDomain() {
+  const d = await graphFetch('/me?$select=mail,userPrincipalName');
+  const addr = d.mail || d.userPrincipalName || '';
+  const dom = (addr.split('@')[1] || '').toLowerCase();
+  if (dom) chrome.storage.local.set({ msSelfDomain: dom });
+  return dom;
+}

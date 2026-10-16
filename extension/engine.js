@@ -220,6 +220,29 @@ function detectHeaderRow(rows) {
 // the first From: line) or a bare display name/address. "Anthony Cruz
 // <a@b>" -> "Anthony"; "Cruz, Anthony" -> "Anthony"; bare addresses and
 // empty input yield '' (nothing to greet).
+// The first (newest) message segment of an email thread - everything above
+// the first quote boundary. Reply noise lives in what the sender actually
+// wrote; quoted history below doesn't count as signal.
+function firstSegment(text) {
+  const all = String(text || '').split(/\r?\n/);
+  const QUOTE = /^(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i;
+  // Outlook-grabbed threads carry no quote markers - a greeting line right
+  // after a signature-ish line (email/url/contact label/phone/address) is
+  // where the quoted reply really begins.
+  const SIG = /@|www\.|https?:|^[a-z]\s*:|p\.?o\.?\s*box|sent from|get outlook|\b\d{3}[.\-]\d{3}[.\-]\d{4}\b/i;
+  const GREET = /^(hi|hello|hey|dear|good (morning|afternoon|evening))\b/i;
+  for (let i = 1; i < all.length; i++) {
+    const l = all[i].trim();
+    if (QUOTE.test(l)) return all.slice(0, i).join('\n');
+    if (GREET.test(l)) {
+      let j = i - 1;
+      while (j >= 0 && !all[j].trim()) j--;
+      if (j >= 0 && SIG.test(all[j].trim())) return all.slice(0, i).join('\n');
+    }
+  }
+  return String(text || '');
+}
+
 function senderFirstName(text) {
   const first = s => {
     const tok = (String(s || '').trim().match(/[A-Za-zÀ-ÿ'-]+/) || [])[0] || '';
@@ -238,7 +261,7 @@ function senderFirstName(text) {
   }
   // Signature: the sender's sign-off sits at the tail of the FIRST message
   // segment (earlier replies are quoted below it and aren't the sender).
-  const head = s.split(/\r?\n(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i)[0];
+  const head = firstSegment(s);
   // Wide window: corporate footers (contact blocks, legal disclaimers)
   // routinely push the sign-off 10+ lines off the end.
   const tail = head.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-18);
@@ -532,19 +555,27 @@ function isAutoSender(addr) {
 // ingest-ish content (so non-request mail from a client domain still
 // doesn't surface), then the content fallback for brand-new senders.
 // `senders` = the learned map from confirmed ingests (addr -> n, dom:x -> n).
-function isRequestCandidate(subject, body, fromAddr, senders) {
+// `selfDomain` = the user's own domain - self-sent confirmations quoted
+// back into the inbox aren't requests either.
+function isRequestCandidate(subject, body, fromAddr, senders, selfDomain) {
   const s = String(subject || ''), a = String(fromAddr || '');
   if (isAutoSender(a)) return false;
-  if (CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
-  const weak = extractCodes(String(body || '')).length >= 1 ||
+  if (selfDomain && a.toLowerCase().endsWith('@' + selfDomain)) return false;
+  // Replies quoting an old request below "Thanks!" aren't new requests -
+  // only what the sender actually wrote (first segment) may score. A re:
+  // subject describes the old thread, so replies score on body alone.
+  const isReply = /^\s*re\s*:/i.test(s);
+  const b = firstSegment(body);
+  if (!isReply && CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
+  const weak = extractCodes(b).length >= 1 ||
     /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
-      .test(s + ' ' + String(body || '').slice(0, 2000));
+      .test((isReply ? '' : s) + ' ' + b.slice(0, 2000));
   const known = CLIENTS.some(c => ((c.detect || {}).domains || []).some(re => re.test(a)));
   const learned = senders &&
     ((senders[a.toLowerCase()] || 0) >= 1 ||
      (senders['dom:' + (a.split('@')[1] || '').toLowerCase()] || 0) >= 3);
   if (known || learned) return weak;
-  return looksLikeRequest(s, body);
+  return looksLikeRequest(s, b);
 }
 
 function parseEml(text) {
