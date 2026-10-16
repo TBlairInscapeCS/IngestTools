@@ -3193,18 +3193,41 @@ function jiraEpicFor() {
   return JIRA_EPICS[ingestRealm()] || null;
 }
 // Weekly repository tickets are named "<Client> - File Ingests - Week of
-// MM/DD/YY" for that week's Monday.
-function weekOfLabel(d) {
+// MM/DD/YY" for that week's Monday - but the convention drifts per epic
+// (Discovery/Kantar use lowercase "file ingests - week of" and a 4-digit
+// year), so matching tolerates both year forms and case, and new tickets
+// clone the previous week's naming verbatim.
+function weekMonday(d) {
   const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
-  return (t.getMonth() + 1) + '/' + String(t.getDate()).padStart(2, '0') + '/' + String(t.getFullYear()).slice(2);
+  return t;
+}
+function weekLabel(d, longYear) {
+  const t = weekMonday(d);
+  return (t.getMonth() + 1) + '/' + String(t.getDate()).padStart(2, '0') + '/' +
+    (longYear ? t.getFullYear() : String(t.getFullYear()).slice(2));
 }
 async function jiraWeeklyTicket(epic) {
   const j = await jiraFetch('/rest/api/3/search/jql?jql=' +
     encodeURIComponent('parent = ' + epic + ' ORDER BY created DESC') +
     '&maxResults=12&fields=summary,created');
-  const label = 'Week of ' + weekOfLabel(new Date());
-  return (j.issues || []).find(i => (i.fields.summary || '').includes(label)) || null;
+  const kids = j.issues || [];
+  const l2 = 'week of ' + weekLabel(new Date()), l4 = 'week of ' + weekLabel(new Date(), true);
+  const hit = kids.find(i => {
+    const s = (i.fields.summary || '').toLowerCase();
+    return s.includes(l2) || s.includes(l4);
+  });
+  return { issue: hit || null, newest: kids[0] || null };
+}
+// Name a new weekly task by cloning the newest sibling's convention and
+// swapping its week date for this week's (same year format). Falls back
+// to the canonical "File Ingests - Week of MM/DD/YY" shape.
+function weeklyTicketName(newest, epicSummary) {
+  const s = newest && newest.fields && newest.fields.summary;
+  const m = s && s.match(/week of (\d{1,2}\/\d{1,2})\/(\d{2,4})/i);
+  if (!m) return epicSummary + ' - File Ingests - Week of ' + weekLabel(new Date());
+  return s.replace(/week of \d{1,2}\/\d{1,2}\/\d{2,4}/i,
+    'week of ' + weekLabel(new Date(), m[2].length === 4));
 }
 // ADF mirroring the real comment shape: "Received the following email:"
 // + the request verbatim, two rules, then ingest: + hardBreak-separated
@@ -3267,13 +3290,14 @@ $('postJira').addEventListener('click', async () => {
   const st = $('jiraStatus');
   try {
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
-    const issue = await jiraWeeklyTicket(epic);
+    const { issue, newest } = await jiraWeeklyTicket(epic);
     if (issue) return await postJiraComment(issue, wanted, st);
-    // No weekly ticket yet - offer to create it under the epic.
+    // No weekly ticket yet - offer to create it, cloning the naming
+    // convention of the newest sibling task.
     const epi = await jiraFetch('/rest/api/3/issue/' + epic + '?fields=summary');
-    const label = weekOfLabel(new Date());
-    st.innerHTML = 'No "Week of ' + esc(label) + '" task under ' + esc(epic) +
-      ' - <a href="#" id="jiraCreate"><b>create it</b></a> (' + esc(epi.fields.summary) + ' - File Ingests - Week of ' + esc(label) + ')';
+    const name = weeklyTicketName(newest, epi.fields.summary);
+    st.innerHTML = 'No weekly task yet under ' + esc(epic) +
+      ' - <a href="#" id="jiraCreate"><b>create it</b></a> (' + esc(name) + ')';
     $('jiraCreate').addEventListener('click', async ev => {
       ev.preventDefault();
       try {
@@ -3282,7 +3306,7 @@ $('postJira').addEventListener('click', async () => {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fields: {
             project: { key: epic.split('-')[0] },
-            summary: epi.fields.summary + ' - File Ingests - Week of ' + label,
+            summary: name,
             issuetype: { name: 'Task' },
             parent: { key: epic },
           } }),

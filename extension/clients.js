@@ -229,6 +229,7 @@ var CLIENTS = [
     },
     delivery: 'sharepoint',
     note: "SharePoint arrival notice - 'new files added to Documents'. Filenames may or may not appear in the subject; the tracking sheet remains the source of truth for IDs.",
+    ingest: { cidMap: 'kantar', jiraEpic: 'DD-463' },
   },
   {
     id: 'kantar',
@@ -240,6 +241,8 @@ var CLIENTS = [
     delivery: 'sharepoint',
     note: 'Tracker is SharePoint Excel; files via the SharePoint doc library or an Extreme Reach account share (Spot Deliveries page).',
     ingest: {
+      cidMap: 'kantar',
+      jiraEpic: 'DD-463',
       nameTitle: true,
       metadata: 'Reporting ID and Spot Title must exactly reflect the tracking sheet (ISCI = Reporting ID)',
     },
@@ -339,7 +342,7 @@ var CLIENTS = [
     name: 'Warner / Hearts & Science',
     detect: { keywords: [/hearts ?(&|and) ?science/i], domains: [/hearts-science\.com/i] },
     delivery: 'other',
-    ingest: { jiraEpic: 'DD-792', note: 'HBO content ingests for Discovery + Genius Digital customers.' },
+    ingest: { jiraEpic: 'DD-726', note: 'HBO content ingests for Discovery + Genius Digital customers.' },
   },
   {
     // Active - WB theatrical spots under the Warner umbrella. Trafficked
@@ -356,7 +359,7 @@ var CLIENTS = [
     delivery: 'extreme-reach',
     er: { sender: 'omnicom' },  // trafficked by Omnicom per the playbook note
     ingest: {
-      jiraEpic: 'DD-792',
+      jiraEpic: 'DD-726',
       fingerprint: 'both',
       note: 'Theatrical ACR Doc lives on warnermedia.sharepoint.com; spots deliver same-day via ER.',
     },
@@ -375,7 +378,7 @@ var CLIENTS = [
     },
     delivery: 'links',
     ingest: {
-      jiraEpic: 'DD-792',
+      jiraEpic: 'DD-726',
       fingerprint: 'both',
       nameTitle: true,
       advertiser: true,
@@ -617,7 +620,10 @@ function ingestSummary(c) {
 const JIRA_EPICS = {
   horizonmedia: 'DD-657', horizonnext: 'DD-657',
   tatari: 'DD-394',
-  warnermedia: 'DD-792',
+  // Warner requests log under the Discovery epic - the portal customer
+  // chosen is Discovery (same parent company).
+  warnermedia: 'DD-726', discovery: 'DD-726',
+  kantar: 'DD-463',
   comscore: 'DD-631',
   inmarket: 'DD-800',
   chiefmedia: 'DD-826',
