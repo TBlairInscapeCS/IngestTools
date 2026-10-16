@@ -332,7 +332,7 @@ function renderClientNote() {
      client.id === 'er-notify' || client.id === 'yangaroo-delivery');
   // Known tracking sheets -> one-click open (then "scrape sheet" picks up
   // the match from there). First sheetId wins; extras stay in detect.
-  const trackerIds = (client.detect && client.detect.sheetIds) || [];
+  const trackerIds = sheetIdsFor(client);
   // Last-mail date from the weekly folder-activity scan - quiet clients
   // surface their staleness right in the note.
   const lastMail = Object.keys(CLIENT_FOLDERS)
@@ -411,6 +411,17 @@ function repOf(fam) {
 function setSelFor(c) {
   const fam = agencyFamilies[topName(c)];
   if (fam) $('clientSel').value = repOf(fam).id;
+}
+
+// Effective tracker ids for a playbook: its own sheetIds win; brand
+// profiles without one inherit the agency umbrella's tracker (every
+// Horizon brand lives on the NEXT master sheet).
+function sheetIdsFor(c) {
+  const own = (c && c.detect && c.detect.sheetIds) || [];
+  if (own.length) return own;
+  const fam = c && agencyFamilies[topName(c)];
+  const rep = fam && repOf(fam);
+  return (rep && rep !== c && rep.detect && rep.detect.sheetIds) || [];
 }
 
 // A client can keyword-refine to a brand sibling when its agency has
@@ -1140,7 +1151,7 @@ function renderInbox(msgs, quiet) {
     emailFromAddr = (from && from.address) || '';
     // Sheet pops in a background tab - pulls/match run from the export,
     // but the open tab stays ready for "Show on sheet" highlights.
-    const sids = (client && client.detect && client.detect.sheetIds) || [];
+    const sids = sheetIdsFor(client);
     if (sids[0]) chrome.tabs.create({
       url: 'https://docs.google.com/spreadsheets/d/' + sids[0], active: false });
     tryLoadTrackerAttachment(c.m.id);
@@ -1274,7 +1285,7 @@ function onEmailChange() {
   // Auto-pull the client's known tracker off its mined sheet id - the
   // request email no longer needs to carry the sheet link. Skipped when
   // the right doc (or a manual load) is already in place.
-  const sids = (client && client.detect && client.detect.sheetIds) || [];
+  const sids = sheetIdsFor(client);
   const sheetIsCurrent = sheet && lastSheetRef && sids.includes(lastSheetRef.id);
   if (sids.length && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
