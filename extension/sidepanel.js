@@ -3219,6 +3219,16 @@ $('erDays').addEventListener('input', e => chrome.storage.local.set({ erDays: e.
 // The full sweep path: query ER, seed IDs when nothing else defines the
 // wanted set, reconcile, download FOUND. Shared by the button and Run.
 async function sweepAndDownload() {
+  // Surgical first: per-ID API queries pull ONLY the requested codes -
+  // no trawling the whole delivery window. The broad scrape stays the
+  // fallback for IDs the API misses and for sender-only (no IDs) sweeps.
+  const want = idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const wanted = want.length ? want : (matched || []).map(m => m.id || m.trackingId).filter(Boolean);
+  if (erApiKey && wanted.length && await fetchErApi()) {
+    if (!runReconcile()) return false;
+    if (!(lastResults || []).some(r => r.status === 'MISSING')) return downloadFound();
+    toast('API missed some IDs - falling back to the delivery sweep for the rest…');
+  }
   const kept = await sweepEr();
   if (!kept) return false;
   // Sender-only sweep (no requested IDs): treat every kept row as wanted
