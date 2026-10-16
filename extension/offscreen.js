@@ -1,9 +1,15 @@
 // MV3 service workers can't play audio - this offscreen document owns the
-// AudioContext and plays the new-request chime on demand. The chime is a
-// service-bell "order's up" double ding: inharmonic sine partials with a
-// sharp attack, fast decay, hot gain (0.9 peak) so it reads at normal
-// system volume, ~1.6s total. 'stop' cuts it early (e.g. the user opened
-// the panel).
+// AudioContext and plays alert chimes on demand. Three sounds, one per
+// alert kind ('stop' cuts any of them early, e.g. the user opened the
+// panel):
+//   'request'  - service-bell "order's up" double ding: a new request
+//                needs action (unchanged original chime)
+//   'delivery' - single soft mid ding: a delivery notice arrived
+//                (Yangaroo/Comcast manifest, first Tatari ER batch notice)
+//                - informational, not urgent
+//   'arrived'  - ascending A-major bell arpeggio: a WATCHED batch's files
+//                finally landed after the "not yet available" wait -
+//                resolution, not new work
 let ac = null, nodes = [];
 
 function stopAll() {
@@ -11,13 +17,14 @@ function stopAll() {
   nodes = [];
 }
 
+// The original service bell: inharmonic partials make it metal, hot gain
+// (0.9) so it reads at normal system volume.
 function ding(when) {
   const g = ac.createGain();
   g.gain.setValueAtTime(0.0001, when);
   g.gain.exponentialRampToValueAtTime(0.9, when + 0.006);
   g.gain.exponentialRampToValueAtTime(0.0001, when + 1.1);
   g.connect(ac.destination);
-  // Bell partials - inharmonic ratios make it metal, not a beep.
   [1, 2.76, 5.4, 8.9].forEach((r, i) => {
     const o = ac.createOscillator();
     o.type = 'sine';
@@ -31,16 +38,47 @@ function ding(when) {
   nodes.push(g);
 }
 
-function chime() {
+// Parameterized bell for the other sounds - same inharmonic-partials
+// recipe so the family of sounds is coherent, pitched per note.
+function bell(freq, when, peak) {
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(peak || 0.55, when + 0.007);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.95);
+  g.connect(ac.destination);
+  [1, 2.76, 5.4].forEach((r, i) => {
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = freq * r;
+    const og = ac.createGain();
+    og.gain.value = [0.5, 0.24, 0.1][i];
+    o.connect(og); og.connect(g);
+    o.start(when); o.stop(when + 1);
+    nodes.push(o, og);
+  });
+  nodes.push(g);
+}
+
+function ctx() {
   stopAll();
   ac = ac || new (self.AudioContext || self.webkitAudioContext)();
   if (ac.state === 'suspended') ac.resume();
-  const t0 = ac.currentTime;
-  ding(t0);
-  ding(t0 + 0.38);
+  return ac.currentTime;
+}
+
+function chimeRequest() { const t = ctx(); ding(t); ding(t + 0.38); }
+function chimeDelivery() { bell(1568, ctx(), 0.45); }
+function chimeArrived() {
+  const t = ctx();
+  // A5 -> C#6 -> E6 -> A6: rising major arpeggio reads as "resolved".
+  [880, 1108.7, 1318.5, 1760].forEach((f, i) => bell(f, t + i * 0.14, 0.5));
 }
 
 chrome.runtime.onMessage.addListener(msg => {
-  if (msg && msg.play) chime();
-  if (msg && msg.stop) stopAll();
+  if (!msg) return;
+  const kind = msg.play === true ? 'request' : msg.play;
+  if (kind === 'request') chimeRequest();
+  else if (kind === 'delivery') chimeDelivery();
+  else if (kind === 'arrived') chimeArrived();
+  if (msg.stop) stopAll();
 });

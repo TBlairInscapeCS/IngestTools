@@ -40,18 +40,18 @@ async function ensureOffscreen() {
   });
 }
 
-async function alertNewRequest(c) {
+async function alertNewRequest(c, kind) {
   const from = (c.from && c.from.emailAddress && c.from.emailAddress.name) || 'unknown sender';
   await ensureOffscreen();
   await chrome.notifications.create('req-' + c.id, {
     type: 'basic',
     iconUrl: 'icon128.png',
-    title: 'New ingest request',
+    title: kind === 'delivery' ? 'Delivery notice' : 'New ingest request',
     message: (c.subject || '(no subject)') + '\n' + from,
     requireInteraction: true,
     priority: 2,
   });
-  chrome.runtime.sendMessage({ play: true });
+  chrome.runtime.sendMessage({ play: kind || 'request' });
 }
 
 // A watched batch's files showed up in delivery mail - same urgency as a
@@ -67,7 +67,7 @@ async function alertDeliveryArrived(b, n) {
     requireInteraction: true,
     priority: 2,
   });
-  chrome.runtime.sendMessage({ play: true });
+  chrome.runtime.sendMessage({ play: 'arrived' });
 }
 
 chrome.alarms.onAlarm.addListener(async a => {
@@ -83,25 +83,29 @@ chrome.alarms.onAlarm.addListener(async a => {
     const selfAddr = msSelfAddr || '';
     if (!selfAddr) await graphSelfDomain().catch(() => '');
     const batchFresh = Date.now() - erBatchAt > 4 * 864e5;
-    const cands = (msgs || []).filter(m => {
+    // Candidates carry a sound kind: delivery notices (Comcast manifest,
+    // Yangaroo "New Media", first Tatari ER notice) are informational -
+    // one soft ding; real requests keep the urgent double service-bell.
+    const cands = (msgs || []).map(m => {
       const from = m.from && m.from.emailAddress && m.from.emailAddress.address;
       const body = stripHtml((m.body && m.body.content) || '');
-      // Delivery notices (Comcast manifest / Yangaroo "New Media") are the
-      // request itself - alert on them even from no-reply senders.
       const deliveryNotice = parseComcastNotice(m.subject, body) ||
         (/yangaroo\.com/i.test(String(from || '')) && /new media/i.test(m.subject));
-      return deliveryNotice || isRequestCandidate(m.subject, body, from, reqSenders, selfAddr) ||
-        (batchFresh && isTatariErNotice(m.subject, body, from));
-    });
+      if (deliveryNotice || (batchFresh && isTatariErNotice(m.subject, body, from)))
+        return { m, kind: 'delivery' };
+      if (isRequestCandidate(m.subject, body, from, reqSenders, selfAddr))
+        return { m, kind: 'request' };
+      return null;
+    }).filter(Boolean);
     // One alert per Tatari ER batch - the ~99 notices behind it stay quiet.
     if (cands.length && batchFresh &&
-        cands.some(m => isTatariErNotice(m.subject,
-          stripHtml((m.body && m.body.content) || ''),
-          m.from && m.from.emailAddress && m.from.emailAddress.address)))
+        cands.some(c => isTatariErNotice(c.m.subject,
+          stripHtml((c.m.body && c.m.body.content) || ''),
+          c.m.from && c.m.from.emailAddress && c.m.from.emailAddress.address)))
       await chrome.storage.local.set({ erBatchAt: Date.now() });
     const seen = new Set(notifiedIds);
-    const fresh = cands.filter(m => !seen.has(m.id));
-    for (const m of fresh) { await alertNewRequest(m); seen.add(m.id); }
+    const fresh = cands.filter(c => !seen.has(c.m.id));
+    for (const c of fresh) { await alertNewRequest(c.m, c.kind); seen.add(c.m.id); }
     if (fresh.length)
       await chrome.storage.local.set({ notifiedIds: [...seen].slice(-200) });
     // Watched batches: the panel arms missing IDs after an empty sweep;
@@ -139,10 +143,14 @@ chrome.notifications.onClicked.addListener(async () => {
 });
 
 // Panel test path: same alert pipeline, one click verifies sound+banner.
+// Test alert cycles through the three sound kinds so each is audible.
+let testKindIdx = 0;
+const TEST_KINDS = ['request', 'delivery', 'arrived'];
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'test-alert') {
-    alertNewRequest({ id: 'test-' + Date.now(), subject: 'TEST - Vizio - Ingestion request',
-      from: { emailAddress: { name: 'Ingest Tools' } } })
+    const kind = TEST_KINDS[testKindIdx++ % TEST_KINDS.length];
+    alertNewRequest({ id: 'test-' + Date.now(), subject: 'TEST - ' + kind + ' alert',
+      from: { emailAddress: { name: 'Ingest Tools' } } }, kind)
       .then(() => sendResponse(true))
       .catch(e => sendResponse(String(e)));
     return true; // async response
