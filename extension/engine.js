@@ -239,7 +239,9 @@ function senderFirstName(text) {
   // Signature: the sender's sign-off sits at the tail of the FIRST message
   // segment (earlier replies are quoted below it and aren't the sender).
   const head = s.split(/\r?\n(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i)[0];
-  const tail = head.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-6);
+  // Wide window: corporate footers (contact blocks, legal disclaimers)
+  // routinely push the sign-off 10+ lines off the end.
+  const tail = head.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-18);
   const SIGNOFF = /^(thank you|best regards|warm regards|kind regards|best wishes|respectfully|sincerely|thanks|best|regards|cheers|talk soon|see you|thx|ty|appreciated),?\s*(.*)$/i;
   for (let i = tail.length - 1; i >= 0; i--) {
     const sm = tail[i].match(SIGNOFF);
@@ -252,7 +254,8 @@ function senderFirstName(text) {
       if (n && /^[A-ZÀ-Þ]/.test(tail[i + 1]) && tail[i + 1].length < 40 && !/[@:\/\d]/.test(tail[i + 1]))
         return n;
     }
-    return '';
+    // Deepest sign-off yielded no name - try an earlier one rather than
+    // giving up (footers/disclaimers can sit between sign-off and end).
   }
   return '';
 }
@@ -1063,7 +1066,10 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       const id = get(cols.id), title = get(cols.title);
       matched.push({
         row: i + headerRow + 1, id, title,
-        trackingId: CODE_RE.test(id) ? id.trim() : String(title || id).replace(/'/g, '_').trim(),
+        // The sheet's ID column is authoritative even when it isn't ISCI
+        // (Icon Media uses 5-char codes like FAL5H); title only backs it up
+        // when the ID cell is empty.
+        trackingId: id.trim() || String(title || id).replace(/'/g, '_').trim(),
         fileName: get(cols.file), brand: get(cols.brand),
         matchType: 'GUESS', guessScore: score, guessClues: why.slice(0, 5),
         linkText: get(cols.link), link: firstUrl(get(cols.link)),

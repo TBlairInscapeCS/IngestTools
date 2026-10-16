@@ -405,8 +405,8 @@ function grabSheetLoc() {
 // same reason as above, the REST download happens in extension context.
 function grabSharePointLoc() {
   const sd = (location.search + location.href).match(/sourcedoc=(?:%7B|\{)?([0-9a-fA-F-]{36})/i);
-  const site = location.pathname.match(/(\/sites\/[^/]+)/i) ||
-               location.href.match(/sharepoint\.com\/(sites\/[^/:]+)/i);
+  const site = location.pathname.match(/(\/(?:sites|teams)\/[^/]+)/i) ||
+               location.href.match(/sharepoint\.com\/((?:sites|teams)\/[^/:]+)/i);
   return {
     sourcedoc: sd ? sd[1] : '',
     site: site ? site[1] : '',
@@ -1013,7 +1013,20 @@ async function grabSheetTab(tab) {
       cands.push(base + "/_api/web/GetFileById(guid'" + loc.sourcedoc + "')/$value");
       cands.push(base + "/_api/web/GetFileById('" + loc.sourcedoc + "')/$value");
     }
+    // Excel "view" URLs often carry the real file path
+    // (/sites/x/Shared Documents/tracker.xlsx) - fetchable via the
+    // server-relative REST endpoint.
+    try {
+      const p = decodeURIComponent(new URL(loc.pageUrl).pathname);
+      if (/\.xlsx?$/i.test(p)) {
+        const api = "/_api/web/GetFileByServerRelativeUrl('" + encodeURI(p) + "')/$value";
+        if (loc.site) cands.push(loc.origin + loc.site + api);
+        cands.push(loc.origin + api);
+      }
+    } catch (e) { /* odd URL - skip */ }
     cands.push(loc.pageUrl + (loc.pageUrl.includes('?') ? '&' : '?') + 'download=1');
+    // The classic doc-download endpoint accepts a full doc URL.
+    cands.push(loc.origin + '/_layouts/15/download.aspx?SourceUrl=' + encodeURIComponent(loc.pageUrl));
     for (const u of cands) {
       try {
         const r = await fetch(u, { credentials: 'include' });
@@ -1818,6 +1831,7 @@ function linkShape(url) {
   if (driveFolderId(u)) return 'drive-folder';
   if (/\.sharepoint(-df)?\.com/i.test(u) && (/\/:f:\/s\//i.test(u) || /AllItems\.aspx|\/Forms\//i.test(u)))
     return 'sp-folder';
+  if (/egnyte\.com/i.test(u) && /\/(fl|fs|dd|hs|fsc|ul)\//i.test(u)) return 'egnyte';
   if (/wetransfer\.com|\bwe\.tl\b|hightail\.com|frame\.io|\bf\.io\b|aspera|signiant|app\.box\.com|box\.com\/s\//i.test(u))
     return 'viewer';
   return 'file';
@@ -1903,6 +1917,8 @@ async function downloadLinked() {
       const shape = linkShape(m.link);
       if (shape === 'sp-folder') {
         problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): SharePoint folder link - open the folder, copy the file link (or download the folder manually)');
+      } else if (shape === 'egnyte') {
+        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): Egnyte share link - open it (password is in the email) and download there');
       } else if (shape === 'viewer') {
         problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): link is a ' +
           (m.link.match(/wetransfer|\bwe\.tl\b/i) ? 'WeTransfer' : m.link.match(/frame\.io|\bf\.io\b/i) ? 'Frame.io' :
@@ -2288,8 +2304,9 @@ async function downloadFound() {
       // append .mp4 so the watcher treats the file as media. ffmpeg probes
       // content, so a wrong container guess is harmless.
       const shape = linkShape(url);
-      if (shape === 'viewer' || shape === 'sp-folder') {
-        noUrl.push(r.matched + ' (' + (shape === 'sp-folder' ? 'SharePoint folder - open it' : 'viewer link - open the page') + ')');
+      if (shape === 'viewer' || shape === 'sp-folder' || shape === 'egnyte') {
+        noUrl.push(r.matched + ' (' + (shape === 'sp-folder' ? 'SharePoint folder - open it'
+          : shape === 'egnyte' ? 'Egnyte share - open it (password in email)' : 'viewer link - open the page') + ')');
         return;
       }
       if (!e.apiAuth) url = directUrl(url);
