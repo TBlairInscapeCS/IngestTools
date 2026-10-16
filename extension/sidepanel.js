@@ -3052,3 +3052,117 @@ $('settingsReset').addEventListener('click', e => {
   chrome.storage.local.remove('uiOpts');
   applyUiOpts({});
 });
+
+// ---------- Jira ticket + ingest proof (fileingest.cognet.tv) ----------
+
+// The portal's records API - same read-only endpoint the detection-engine
+// mirror uses. Records are authoritative proof of ingest (status +
+// detection result), better evidence than a queue screenshot.
+const FI_BASE = 'https://fileingest.cognet.tv';
+const FI_AUTH = 'Basic Y3Jvb21pYW46c1pJUiNVWmVkNVVNZzQ4Sg==';
+const FI_ALIASES = { horizon: 'horizonmedia', 'in-market': 'inmarket', itn: 'itnnetworks', chief: 'chiefmedia' };
+
+function ingestRealm() {
+  const cid = (client && client.ingest && client.ingest.cidMap) || '';
+  const n = String(cid).toLowerCase().replace(/ /g, '');
+  return FI_ALIASES[n] || n;
+}
+
+// Reporting IDs exactly as pushed to the portal: bare id per row, plus
+// id+suffix for rows flagged for a ticker version.
+function ingestReportIds() {
+  const plan = ingestPlan();
+  const ids = [];
+  plan.rows.forEach(r => {
+    if (!r.id) return;
+    ids.push({ reporting: r.id, title: r.title, espn: false });
+    if (r.espn) ids.push({ reporting: r.id + plan.opts.tickerSuffix, title: r.title, espn: true });
+  });
+  return ids;
+}
+
+async function fetchRealmRecords(realm, pages) {
+  const out = [];
+  for (let p = 0; p < (pages || 1); p++) {
+    const r = await fetch(FI_BASE + '/v1/' + realm + '/content?offset=' + (p * 500 + 1) + '&limit=500',
+      { headers: { Authorization: FI_AUTH } });
+    if (!r.ok) throw new Error('records API ' + r.status);
+    const j = await r.json();
+    out.push(...(j.content || []));
+    if ((j.content || []).length < 500) break;
+  }
+  return out;
+}
+
+let lastIngestRecords = [];
+
+$('verifyIngest').addEventListener('click', async () => {
+  const realm = ingestRealm();
+  if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
+  const wanted = ingestReportIds();
+  if (!wanted.length) return toast('No matched rows - run Match first.');
+  $('verifyInfo').textContent = 'Querying ' + realm + ' records…';
+  try {
+    const all = await fetchRealmRecords(realm, 2);
+    const want = new Map(wanted.map(w => [normalizeName(w.reporting).replace(/ /g, ''), w.reporting]));
+    lastIngestRecords = all.filter(r => want.has(normalizeName(r.reportingId || '').replace(/ /g, '')));
+    const hitIds = new Set(lastIngestRecords.map(r => normalizeName(r.reportingId).replace(/ /g, '')));
+    const missed = wanted.filter(w => !hitIds.has(normalizeName(w.reporting).replace(/ /g, '')));
+    $('verifyInfo').innerHTML =
+      '<b>' + lastIngestRecords.length + '/' + wanted.length + '</b> reporting ID(s) in ' + esc(realm) + ' records' +
+      (missed.length ? ' - <span style="color:#ec9a9a">not found: ' + missed.slice(0, 8).map(m => esc(m.reporting)).join(', ') + (missed.length > 8 ? ' +' + (missed.length - 8) : '') + '</span>' : '') +
+      (lastIngestRecords.length ? '<br>' + lastIngestRecords.slice(0, 10).map(r =>
+        esc(r.reportingId) + ' · ' + esc(r.status || '?') + ' · ' + esc(String(r.datetime || '').slice(0, 19).replace('T', ' '))).join('<br>') : '');
+    $('saveRecords').classList.toggle('hidden', !lastIngestRecords.length);
+  } catch (e) {
+    $('verifyInfo').textContent = 'records query failed: ' + e.message;
+  }
+});
+
+// Filtered records JSON = the attach-able proof for the Jira ticket -
+// same artifact the Tatari/large-batch workflow already uses.
+$('saveRecords').addEventListener('click', async () => {
+  if (!lastIngestRecords.length) return;
+  const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+  const payload = JSON.stringify({
+    job, realm: ingestRealm(), queried_at: new Date().toISOString(),
+    records: lastIngestRecords,
+  }, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/ingest-records.json' });
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  toast('Saved ingest-records.json to Ingest/' + job + '/ - attach it to the ticket.');
+});
+
+function buildJiraTicket() {
+  const wanted = ingestReportIds();
+  const lines = [emailEl.value.trim(), '', '----', '', 'Ingest:'];
+  wanted.forEach(w => lines.push(w.reporting + (w.title ? ' - ' + w.title : '') + (w.espn ? ' (ESPN)' : '')));
+  return lines.join('\n');
+}
+
+$('jiraTicket').addEventListener('click', () => {
+  const t = buildJiraTicket();
+  $('jiraPreview').textContent = t;
+  $('jiraBox').classList.remove('hidden');
+});
+$('copyTicket').addEventListener('click', () => copyText($('jiraPreview').textContent, 'Jira ticket'));
+
+// Visual proof when wanted: captures the portal tab itself (activates it
+// for a moment), saves into the job folder.
+$('shotPortal').addEventListener('click', async () => {
+  const tabs = await chrome.tabs.query({ url: '*://portal.cognet.tv/*' });
+  if (!tabs.length) return toast('No portal tab open - open portal.cognet.tv first.');
+  try {
+    await chrome.tabs.update(tabs[0].id, { active: true });
+    await chrome.windows.update(tabs[0].windowId, { focused: true });
+    await new Promise(r => setTimeout(r, 500));
+    const dataUrl = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' });
+    const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '/ingest-screenshot.png' });
+    toast('Screenshot saved to Ingest/' + job + '/');
+  } catch (e) {
+    toast('Screenshot failed: ' + e.message);
+  }
+});
