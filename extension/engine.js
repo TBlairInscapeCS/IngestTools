@@ -518,7 +518,7 @@ function buildSpecFailReply(failures, ingestedIds, sender) {
     lines.push(`I've received the files and ingested ${ok.length} of ${ok.length + failures.length} to appear in the commercial reports. There was ${failText}.`);
   else
     lines.push(`I've received the files, but ${failText}.`);
-  lines.push('For reference, our ingest requirements: MP4 container; H.264, H.265 or MPEG-2 video; 1920x1080 preferred (3840x2160 or 1280x720 accepted); 16:9; 24-30fps; 4-40 Mbps; minimum 10 seconds runtime.');
+  lines.push('For reference, our ingest requirements: H.264, H.265 or MPEG-2 video; 1920x1080 preferred (3840x2160 or 1280x720 accepted); 16:9; 24-30fps; 4-40 Mbps; minimum 10 seconds runtime.');
   if (ok.length) lines.push(`Ingested: ${ok.join(', ')}.`);
   lines.push("I've updated the tracking sheet accordingly. If you can resend a version meeting the requirements above I'll get it into the queue.", '', 'Thanks,');
   return lines.join('\n');

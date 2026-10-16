@@ -37,10 +37,10 @@ ESPN_SCRIPT = Path("/Users/tim.blair/Devin/espn_ticker.sh")
 TICKER_IMAGE = Path("/Users/tim.blair/Devin/ticker.png")
 POLL_SECONDS = 15
 LOG_PORT = 8770
-MEDIA_EXTS = {".mp4", ".mov", ".mpg", ".mxf"}
-# Other video containers get probed too - the spec verdict ("container
-# matroska not mp4") is more useful than a generic non-media flag.
-PROBEABLE_EXTS = MEDIA_EXTS | {".mkv", ".avi", ".wmv", ".m4v", ".m2ts",
+MEDIA_EXTS = {".mp4", ".mov", ".mpg", ".mxf", ".mkv"}
+# Other video containers get probed too - a real spec verdict beats a
+# generic non-media flag even when the container itself isn't gated.
+PROBEABLE_EXTS = MEDIA_EXTS | {".avi", ".wmv", ".m4v", ".m2ts",
                                ".ts", ".webm", ".mpeg", ".m2v", ".vob", ".3gp"}
 # Finished ingests are filed under ~/Documents/Customer Content/<Client>/.
 ARCHIVE_ROOT = Path.home() / "Documents" / "Customer Content"
@@ -54,10 +54,10 @@ FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
 ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
                             # New-Ingest un-gray lag is ~20s per the user)
-# Standard ingest spec (user-supplied): MP4 container, H.264/H.265/MPEG-2,
-# 1920x1080 preferred (3840x2160 and 1280x720 accepted - all 16:9),
-# 24-30fps, 4-40 Mbps, 10s minimum runtime. Audio isn't on the sheet but
-# detection fingerprints audio - a silent stream can't match anything.
+# Standard ingest spec (user-supplied): H.264/H.265/MPEG-2, 1920x1080
+# preferred (3840x2160 and 1280x720 accepted - all 16:9), 24-30fps,
+# 4-40 Mbps, 10s minimum runtime. Container is NOT gated - mp4/mov/mxf/
+# mkv all ingest. No audio stream is OK too: video-only fingerprints.
 MIN_DURATION = 10.0
 SPEC_RES = {(3840, 2160), (1920, 1080), (1280, 720)}
 SPEC_CODECS = {"h264", "hevc", "mpeg2video"}
@@ -312,8 +312,6 @@ def probe_spec(path: Path) -> dict:
     except Exception:
         dur = 0
     fails = []
-    if "mp4" not in fmtname:
-        fails.append(f"container {fmtname} not mp4")
     v = vids[0] if vids else {}
     if not vids:
         fails.append("no video stream")
@@ -328,8 +326,6 @@ def probe_spec(path: Path) -> dict:
         # NTSC fractional rates (23.976, 29.97) count as their nominal 24/30.
         if fps and not (23.9 <= fps <= 30.6):
             fails.append(f"frame rate {fps:.2f}fps outside 24-30")
-    if not auds:
-        fails.append("no audio stream")
     if dur and dur < MIN_DURATION:
         fails.append(f"{dur:.1f}s under {MIN_DURATION:.0f}s minimum duration")
     br = int(fmt.get("bit_rate") or 0)
