@@ -420,6 +420,8 @@ var CLIENTS = [
     delivery: 'links',
     note: 'Standalone client with their own tracking sheet - not under an agency umbrella. Request email carries an Egnyte folder link (+ password) for files and the Vizio_Ingestion_Form_IMD.xlsx link; brand varies per request ("this time for Crepe Erase").',
     ingest: {
+      cidMap: 'iconmedia',
+      jiraEpic: 'DD-836',
       fingerprint: 'both',
       advertiser: true,
       nameTitle: true,
