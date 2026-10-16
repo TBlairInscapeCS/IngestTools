@@ -266,20 +266,20 @@ def relocate_debug_logs():
             pass
 
 
+# A real manifest is exactly: manifest.json, Chrome-uniquified
+# "manifest (n).json", or "<job>-manifest.json". Reports/state derived
+# from a manifest must never re-match - "manifest (1)-report.json" still
+# starts with 'manifest' and would spawn -report-report-report chains.
+MANIFEST_RE = re.compile(r"^(?:manifest(?: \(\d+\))?|.+-manifest)\.json$")
+
+
 def run_once():
     if not WATCH_DIR.exists():
         return
     relocate_debug_logs()
-    # Manifest names: "<job>-manifest.json" (current), "manifest.json" and
-    # Chrome-uniquified "manifest (n).json" (legacy same-folder batches).
-    # "*-report.json" files never match either pattern. Each manifest gets
-    # its own state/report so batches sharing a folder don't collide.
-    manifests = sorted(set(
-        list(WATCH_DIR.glob("*/manifest*.json")) +
-        list(WATCH_DIR.glob("*/*-manifest.json"))
-    ))
-    for manifest in manifests:
-        process_job(manifest)
+    for manifest in sorted(WATCH_DIR.glob("*/*.json")):
+        if MANIFEST_RE.match(manifest.name):
+            process_job(manifest)
 
 
 def main():
