@@ -21,8 +21,23 @@ python3 ingest_watch.py          # poll every 15s, Ctrl+C to stop
 python3 ingest_watch.py --once   # single pass (testing)
 ```
 
-To have it always running, create a launchd agent or just leave a terminal
-open during ingest batches.
+## Always-on (launchd)
+
+Installed as `~/Library/LaunchAgents/dev.ingest-watch.plist` — starts at
+login and launchd restarts it if it dies. Manage it with:
+
+```bash
+launchctl print gui/$(id -u)/dev.ingest-watch          # status / pid
+launchctl kickstart -k gui/$(id -u)/dev.ingest-watch   # restart (e.g. after edits)
+launchctl bootout gui/$(id -u)/dev.ingest-watch        # stop + unload
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.ingest-watch.plist  # reload
+```
+
+Logs: watch errors in `logs/watch.log`, stdout/stderr in
+`logs/watch-stdout.log`, per-job results in each job's `report.json`.
+
+**Restart after every edit to `ingest_watch.py`** — Python runs the code
+loaded at launch, so a running watcher never picks up file changes.
 
 ## What it does per manifest entry
 

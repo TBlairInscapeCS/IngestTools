@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.ingest-watch</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/python3</string>
+		<string>/Users/tim.blair/Devin/ingest-tools/local/ingest_watch.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/tim.blair/Devin/ingest-tools</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>/Users/tim.blair/Devin/ingest-tools/logs/watch-stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/tim.blair/Devin/ingest-tools/logs/watch-stdout.log</string>
+</dict>
+</plist>
