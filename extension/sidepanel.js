@@ -553,21 +553,24 @@ function grabEmailText() {
 // queued straight from the email, no portal scraping. Only anchors
 // literally labelled "Download" are taken - never Confirm Delivery /
 // Stream / Support, which have remote side effects.
-function grabYangarooDelivery() {
+// Yangaroo "New Media Available" deliveries: per-spot Download anchors,
+// each row carrying the ISCI + title. Runs against any document - the
+// live Outlook tab or a DOMParser'd Graph message body.
+function yangarooFromDoc(doc) {
   const CODE = '\\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\\d)[A-Z0-9]{7,14}\\b';
   const codeRe = new RegExp(CODE);
   const codeReG = new RegExp(CODE, 'g');
   const spots = [];
   const seen = new Set();
-  document.querySelectorAll('a[href]').forEach(a => {
-    if ((a.innerText || '').trim().toLowerCase() !== 'download') return;
+  doc.querySelectorAll('a[href]').forEach(a => {
+    if ((a.innerText || a.textContent || '').trim().toLowerCase() !== 'download') return;
     const row = a.closest('tr') || a.closest('li') || a.closest('td') || a.parentElement;
-    const txt = row ? (row.innerText || '') : '';
+    const txt = row ? (row.innerText || row.textContent || '') : '';
     // If a row carries more than one Download link, pair them positionally.
     let idx = 0;
     if (row) {
       const dls = [...row.querySelectorAll('a[href]')]
-        .filter(x => (x.innerText || '').trim().toLowerCase() === 'download');
+        .filter(x => (x.innerText || x.textContent || '').trim().toLowerCase() === 'download');
       idx = Math.max(0, dls.indexOf(a));
     }
     const codes = [...txt.matchAll(codeReG)].map(m => m[0]);
@@ -580,10 +583,21 @@ function grabYangarooDelivery() {
     seen.add(key);
     spots.push({ id: code, title: rest[0] || '', url: a.href });
   });
-  const body = (document.body && document.body.innerText) || '';
+  const body = (doc.body && (doc.body.innerText || doc.body.textContent)) || '';
   const om = body.match(/Order Name:\s*([^\n]+)/i);
   const oi = body.match(/Order ID:\s*([^\n]+)/i);
   return { spots, orderName: om ? om[1].trim() : '', orderId: oi ? oi[1].trim() : '' };
+}
+function grabYangarooDelivery() { return yangarooFromDoc(document); }
+
+// Same delivery parse for a Graph-loaded email - no Outlook tab needed.
+function parseYangarooHtml(html) {
+  if (!/yangaroo|new media available/i.test(String(html || ''))) return null;
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const r = yangarooFromDoc(doc);
+    return r.spots.length ? r : null;
+  } catch (e) { return null; }
 }
 
 // Inside app.extremereach.com Spot Deliveries: each row's download icon is
@@ -991,6 +1005,13 @@ function renderInbox(msgs, quiet) {
       erDeliveries.push({ id: m.id, when: m.receivedDateTime, ...er });
       erDirty = true;
     }
+    // Comcast AdDelivery manifests register the same way - their ISCI
+    // lists become the delivery ground truth for the agency's request.
+    const cm = parseComcastNotice(m.subject, body);
+    if (cm && !erDeliveries.some(x => x.id === m.id)) {
+      erDeliveries.push({ id: m.id, when: m.receivedDateTime, ...cm });
+      erDirty = true;
+    }
     const erNotice = isTatariErNotice(m.subject, body, fromAddr) &&
       Date.now() - erBatchAt > ER_BATCH_WINDOW;
     if (erNotice || isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr))
@@ -1048,12 +1069,19 @@ function renderInbox(msgs, quiet) {
     e.preventDefault();
     const c = cands[parseInt(a.dataset.ib, 10)];
     const from = c.m.from && c.m.from.emailAddress;
-    yangaroo = null;
+    // Yangaroo deliveries parse off the raw HTML - the Graph body carries
+    // the same Download anchors the Outlook-tab scrape looks for.
+    yangaroo = parseYangarooHtml((c.m.body && c.m.body.content) || '');
     emailFolderName = folderMap[c.m.parentFolderId] || '';
     setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
       '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
       String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
     emailFromAddr = (from && from.address) || '';
+    // Sheet pops in a background tab - pulls/match run from the export,
+    // but the open tab stays ready for "Show on sheet" highlights.
+    const sids = (client && client.detect && client.detect.sheetIds) || [];
+    if (sids[0]) chrome.tabs.create({
+      url: 'https://docs.google.com/spreadsheets/d/' + sids[0], active: false });
     tryLoadTrackerAttachment(c.m.id);
     toast('Email loaded from inbox.');
   }));
@@ -1165,7 +1193,14 @@ function onEmailChange() {
   if (sids.length && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
     loadSheetDoc(sids[0], 0, '', client.name + ' tracker')
-      .then(ok => { if (ok) toast('Auto-loaded the ' + client.name + ' tracker.'); });
+      .then(ok => {
+        if (!ok) return;
+        toast('Auto-loaded the ' + client.name + ' tracker.');
+        // The whole point of auto-pull: with codes in the email and a
+        // fresh sheet, match can run itself - files are ready to rename
+        // and download the moment the user looks at the panel.
+        if (!matched && extractCodes(latestSegment(emailEl.value)).length) doMatch();
+      });
   }
   // The request is the newest message only - older replies in a pasted
   // thread carry already-confirmed codes that must not re-extract.
@@ -1207,6 +1242,12 @@ function onEmailChange() {
       (uncited.length ? ' · <b>' + uncited.length + ' not cited in email</b>' : ' · all cited'));
     if (erCodes.length) bits.push('<a href="#" id="useDeliveredCodes">use delivered IDs</a>');
   }
+  // ER-delivered clients: files won't be in the email - the sweep is the
+  // path. Preset already applied; note when the registry has no delivery
+  // evidence yet so a missing file isn't a surprise.
+  if (client && client.delivery === 'extreme-reach' && client.er)
+    bits.push('files arrive via Extreme Reach - sweep preset: sender "' +
+      esc(client.er.sender) + '"' + (erHits.length ? '' : ' · <b>no delivered registry hits yet</b>'));
   // Same-line code+title pairs (Chief Media) feed spot-title naming when
   // the sheet has no title column.
   emailPairs = extractCodeTitlePairs(req);

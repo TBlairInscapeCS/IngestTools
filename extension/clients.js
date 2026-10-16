@@ -825,6 +825,8 @@ function extractAdvertiser(subject) {
   const s = String(subject || '').replace(/^\s*(re|fw|fwd|\[external\])\s*:\s*/gi, '').trim();
   let m = s.match(/^(.*?)\s*Spot Delivery Notification/i);
   if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/^(.*?)\s*delivery notification/i);
+  if (m && m[1].trim()) return m[1].trim();
   m = s.match(/new media available from\s+([^:]+)/i);
   if (m && m[1].trim()) return m[1].trim();
   m = s.match(/^(.*?)\s*\|\s*horizon media\s*\|/i);

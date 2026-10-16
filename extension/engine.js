@@ -589,6 +589,36 @@ function parseErNotice(subject, body, fromAddr) {
   };
 }
 
+// Comcast AdDelivery "Delivery Notification" mails are structured
+// manifests: ORDER SUMMARY (Provider/Advertiser/Brand/Order #) plus
+// DELIVERY DETAILS rows (ISCI title HD duration). Parsed into the same
+// registry shape as parseErNotice - the agency's request email lands
+// separately and cross-references these deliveries.
+function parseComcastNotice(subject, body) {
+  if (!/delivery notification/i.test(String(subject || '')) ||
+      !/comcast addelivery/i.test(String(body || '').slice(0, 4000))) return null;
+  const t = String(body || '');
+  const field = (re) => { const m = t.match(re); return m ? m[1].trim() : ''; };
+  const spots = [];
+  // Code needs >=1 letter AND >=1 digit - plain caps words (DELIVERY,
+  // DETAILS) must not eat the code slot and swallow the row's real ISCI.
+  const re = /((?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{7,14})\s+(.{2,80}?)\s+(?:HD|SD)\s+\d+\s*:\s*\d+/g;
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    if (isCodeToken(m[1])) spots.push({ isci: m[1], title: m[2].trim() });
+  }
+  return {
+    src: 'comcast',
+    agency: field(/provider\s+([^\n(]{2,50})/i),
+    advertiser: field(/advertiser\s+(.+?)\s+(?:brand|flight|kill|zone|notes|deliveries)\b/i),
+    brand: field(/brand\s+(.+?)\s+(?:flight|kill|zone|notes|deliveries)\b/i),
+    order: field(/order\s+#\s*:?\s*([A-Z0-9-]{3,20})/i) ||
+           field(/po\s+#\s*:?\s*([A-Z0-9-]{3,20})/i),
+    spots,
+    codes: spots.map(s => s.isci),
+  };
+}
+
 // Code-shaped tokens that survive detection scrutiny: URLs stripped first
 // (SafeLinks/Mimecast tracking params tokenize into fake codes), then
 // require a digit and reject broadcast callsigns (SHOCSHD, WGTADT, D2
