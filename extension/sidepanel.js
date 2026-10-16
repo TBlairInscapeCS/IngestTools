@@ -1937,7 +1937,13 @@ function presentMatches() {
   matched.forEach(m => {
     if (m.offSheet) return;
     if (!m.link && sheet.links) {
-      const u = sheet.links[(m.row - 1) + ',' + matchCols.link];
+      // Mapped link column first; any other hyperlink on the row after
+      // (InMarket's tracker carries links in H/I/J - a strict column map
+      // drops rows whose link lives in a neighbor).
+      const rk = (m.row - 1) + ',';
+      const u = sheet.links[rk + matchCols.link] ||
+        Object.keys(sheet.links).filter(k => k.startsWith(rk))
+          .map(k => sheet.links[k]).find(u => /^https?:/i.test(u));
       if (u) m.link = u;
     }
     if (m.date) m.date = serialToDate(m.date);
@@ -2288,21 +2294,42 @@ $('copyExcReply').addEventListener('click', () => {
   else toast('Nothing to report - no missing or ambiguous results.');
 });
 
-// List a Drive folder's files via the embedded-folder HTML view.
-// Works for "anyone with link" folders without auth; the browser session
-// covers restricted folders you can already open.
+// List a Drive folder's files by scraping the real folder page in a
+// hidden tab. embeddedfolderview is dead (Google retired the endpoint);
+// the live page renders entries as [data-id] rows under the user's own
+// Google session, which covers both link-shared and account-shared
+// folders. Tab closes when done.
 async function fetchDriveListing(folderId) {
-  const url = 'https://drive.google.com/embeddedfolderview?id=' + folderId + '#list';
-  const r = await fetch(url, { credentials: 'include' });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
-  const files = [];
-  doc.querySelectorAll('.flip-entry').forEach(el => {
-    const a = el.querySelector('a.flip-entry-title');
-    const id = (el.id || '').replace('entry-', '');
-    if (a && id) files.push({ id, name: (a.textContent || '').trim() });
-  });
-  return files;
+  const tab = await chrome.tabs.create({
+    url: 'https://drive.google.com/drive/folders/' + folderId, active: false });
+  try {
+    for (let i = 0; i < 20; i++) { // ~10s budget - entries stream in as Drive renders
+      await new Promise(r => setTimeout(r, 500));
+      const res = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => [...document.querySelectorAll('[data-id]')].map(el => {
+          let name = '';
+          const tt = el.querySelector('[data-tooltip]');
+          if (tt) name = (tt.getAttribute('data-tooltip') || '').trim();
+          // Deepest element whose text ends in a filename extension -
+          // isolates the file name from dates/owners in the same row.
+          if (!name || !/\.\w{2,5}$/.test(name)) {
+            const leaf = [...el.querySelectorAll('*')]
+              .find(n => !n.children.length && /\.\w{2,5}$/.test((n.textContent || '').trim()));
+            if (leaf) name = leaf.textContent.trim();
+          }
+          return { id: el.getAttribute('data-id'), name };
+        }).filter(x => /^[\w-]{20,}$/.test(x.id || '') && /\.\w{2,5}$/.test(x.name || ''))
+          .slice(0, 200),
+      }).catch(() => null);
+      const files = res && res[0] && res[0].result;
+      if (files && files.length) return files;
+      if (!await chrome.tabs.get(tab.id).catch(() => null)) break;
+    }
+    return [];
+  } finally {
+    chrome.tabs.remove(tab.id).catch(() => {});
+  }
 }
 
 // MediaSilo QuickLinks (ql.mediasilo.com/ql/<id>) are viewer pages, not
