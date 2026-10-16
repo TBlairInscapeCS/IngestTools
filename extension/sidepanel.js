@@ -931,7 +931,8 @@ function renderInbox(msgs, quiet) {
   const cands = [];
   msgs.forEach(m => {
     const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
-    if (looksLikeRequest(m.subject, body)) cands.push({ m, body });
+    const fromAddr = m.from && m.from.emailAddress && m.from.emailAddress.address;
+    if (!isAutoSender(fromAddr) && looksLikeRequest(m.subject, body)) cands.push({ m, body });
   });
   if (!cands.length) {
     el.style.display = 'none';

@@ -520,6 +520,13 @@ function looksLikeRequest(subject, body) {
   return /ingest|new creative|new spot|deliver(y|ed)|traffick|extreme ?reach|yangaroo|ad-?id|isci|spot (delivery|list)|tracking sheet/i.test(t);
 }
 
+// Automated senders never carry a request - Jira comment mail quotes our
+// own "ingest:" lists and would trip content detection every time.
+function isAutoSender(addr) {
+  return /atlassian\.net|jira@|no-?reply|do-?not-?reply|notification|mailer-?daemon|postmaster|bounce/i
+    .test(String(addr || ''));
+}
+
 function parseEml(text) {
   text = String(text || '');
   const i = text.search(/\r?\n\r?\n/);
