@@ -496,6 +496,34 @@ function buildNotAvailableReply(results, channel, sender) {
     '', 'Thanks,'].join('\n');
 }
 
+// Spec-rejection reply, mined from the TGFS thread (Sep 24): "There was a
+// six second creative (JENNIFERWEB6S) that was not ingested as it does not
+// meet our minimum duration requirement of ten seconds."
+// failures: [{id, fails:[reason...], info:{duration}}].
+function buildSpecFailReply(failures, ingestedIds, sender) {
+  if (!failures || !failures.length) return null;
+  const part = (f) => {
+    const dur = f.info && f.info.duration ? Math.round(f.info.duration) : null;
+    if ((f.fails || []).some(x => /duration/i.test(x)))
+      return (dur === 8 || dur === 11 || dur === 18 ? 'an' : 'a') +
+        ` ${dur || 'under-ten'} second creative (${f.id}) that was not ingested as it` +
+        ' does not meet our minimum duration requirement of ten seconds';
+    return `the creative ${f.id} that was not ingested as it does not` +
+      ` meet our ingest requirements (${(f.fails || []).join('; ')})`;
+  };
+  const failText = failures.map(part).join(' and ');
+  const ok = (ingestedIds || []).filter(Boolean);
+  const lines = [greet(sender), ''];
+  if (ok.length)
+    lines.push(`I've received the files and ingested ${ok.length} of ${ok.length + failures.length} to appear in the commercial reports. There was ${failText}.`);
+  else
+    lines.push(`I've received the files, but ${failText}.`);
+  lines.push('For reference, our ingest requirements: creatives must run at least ten seconds and carry both video and audio streams, in a standard broadcast container/codec.');
+  if (ok.length) lines.push(`Ingested: ${ok.join(', ')}.`);
+  lines.push("I've updated the tracking sheet accordingly. If you can resend a version meeting the requirements above I'll get it into the queue.", '', 'Thanks,');
+  return lines.join('\n');
+}
+
 function buildConfirmationEmail(results, sender) {
   const found = results.filter(r => r.status === 'FOUND');
   const reviewed = results.filter(r => r.status === 'POSSIBLE MATCH' || r.status === 'AMBIGUOUS');
@@ -681,6 +709,14 @@ function isAutoSender(addr) {
 // `selfAddr` = the user's own address - self-sent confirmations quoted back
 // into the inbox aren't requests. Address-only: colleagues on the same
 // domain carry most real request traffic.
+// Reply-shaped subjects ("RE: ..." incl. [External] prefixes). Replies on
+// request threads - ingest confirmations, acknowledgements - are thread
+// context, not new work: they may still surface as candidates but must
+// never fire the new-request alert.
+function isReplySubject(subject) {
+  return /^\s*(?:\[\s*external\s*\]\s*)*re\s*:/i.test(String(subject || ''));
+}
+
 function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   const s = String(subject || ''), a = String(fromAddr || '');
   if (isAutoSender(a)) return false;

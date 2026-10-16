@@ -146,7 +146,9 @@ chrome.alarms.onAlarm.addListener(async a => {
       if (deliveryNotice || (batchFresh && isTatariErNotice(m.subject, body, from)))
         return { m, kind: 'delivery' };
       if (isRequestCandidate(m.subject, body, from, reqSenders, selfAddr))
-        return { m, kind: 'request' };
+        // Replies (Chris's ingest confirmations et al.) score on quoted body
+        // vocabulary but are thread context - never alert on them.
+        return isReplySubject(m.subject) ? null : { m, kind: 'request' };
       return null;
     }).filter(Boolean);
     // One alert per Tatari ER batch - the ~99 notices behind it stay quiet.
