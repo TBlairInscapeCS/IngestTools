@@ -1,5 +1,5 @@
 // Clicking the toolbar icon opens the side panel.
-importScripts('engine.js', 'graph.js');
+importScripts('engine.js', 'clients.js', 'graph.js');
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -60,14 +60,13 @@ chrome.alarms.onAlarm.addListener(async a => {
     await msLoad();
     if (!MS.refreshToken) return;
     const msgs = await graphUnread(25);
-    const cands = (msgs || []).filter(m =>
-      !isAutoSender(m.from && m.from.emailAddress && m.from.emailAddress.address) &&
-      looksLikeRequest(m.subject, (m.body && m.body.content) || ''));
-    chrome.action.setBadgeText({ text: cands.length ? String(cands.length) : '' });
-    chrome.action.setBadgeBackgroundColor({ color: '#e8a13d' });
     // Dedupe across service-worker restarts via storage - each message id
-    // alerts once, ever.
-    const { notifiedIds = [] } = await chrome.storage.local.get('notifiedIds');
+    // alerts once, ever. reqSenders = learned request senders.
+    const { notifiedIds = [], reqSenders = {} } =
+      await chrome.storage.local.get(['notifiedIds', 'reqSenders']);
+    const cands = (msgs || []).filter(m =>
+      isRequestCandidate(m.subject, (m.body && m.body.content) || '',
+        m.from && m.from.emailAddress && m.from.emailAddress.address, reqSenders));
     const seen = new Set(notifiedIds);
     const fresh = cands.filter(m => !seen.has(m.id));
     for (const m of fresh) { await alertNewRequest(m); seen.add(m.id); }

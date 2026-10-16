@@ -17,6 +17,8 @@ let emailSubject = '';
 let emailSender = '';      // sender first name for reply greetings
 let emailDate = '';        // sent timestamp for the Jira ticket header
 let emailGraphId = '';     // Graph message id when the email came via inbox
+let emailFromAddr = '';    // sender address of the Graph-loaded email
+let reqSenders = {};       // learned request senders (addr -> n, dom:x -> n)
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -192,7 +194,7 @@ function resetRun() {
   // Request-specific draft/proof state must not bleed into the next job:
   // a dirty reply kept last request's text, a staged Jira run could post
   // the wrong ticket's comment, and stale records/dates attach wrongly.
-  replyDirty = false; emailDate = ''; emailGraphId = '';
+  replyDirty = false; emailDate = ''; emailGraphId = ''; emailFromAddr = '';
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
   $('jiraPreview').value = ''; $('jiraStatus').innerHTML = '';
@@ -932,7 +934,7 @@ function renderInbox(msgs, quiet) {
   msgs.forEach(m => {
     const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
     const fromAddr = m.from && m.from.emailAddress && m.from.emailAddress.address;
-    if (!isAutoSender(fromAddr) && looksLikeRequest(m.subject, body)) cands.push({ m, body });
+    if (isRequestCandidate(m.subject, body, fromAddr, reqSenders)) cands.push({ m, body });
   });
   if (!cands.length) {
     el.style.display = 'none';
@@ -955,6 +957,7 @@ function renderInbox(msgs, quiet) {
     setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
       '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
       String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
+    emailFromAddr = (from && from.address) || '';
     tryLoadTrackerAttachment(c.m.id);
     toast('Email loaded from inbox.');
   }));
@@ -967,6 +970,18 @@ function renderInbox(msgs, quiet) {
 // While the panel is open, poll quietly every 5 min so a fresh request
 // surfaces without the user pressing anything.
 setInterval(() => { if (MS.refreshToken) checkInbox(true); }, 5 * 60 * 1000);
+
+// Learned request senders: each confirmed ingest bumps the sender's address
+// (trusted at 1) and their domain (trusted at 3), stored across sessions.
+function noteConfirmedSender(addr) {
+  const a = String(addr || '').toLowerCase();
+  if (!a.includes('@')) return;
+  const dom = 'dom:' + a.split('@')[1];
+  reqSenders[a] = (reqSenders[a] || 0) + 1;
+  reqSenders[dom] = (reqSenders[dom] || 0) + 1;
+  chrome.storage.local.set({ reqSenders });
+}
+chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; });
 
 $('copyLog').addEventListener('click', () => {
   const text = dbgLog.map(e => e.t + ' ' + e.msg + (e.data ? ' ' + JSON.stringify(e.data) : '')).join('\n');
@@ -3457,7 +3472,9 @@ async function postJiraComment(issue, wanted, st, proof) {
     [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
      proof.shotBlob ? 'screenshot' : null].filter(Boolean).join(' + ') + ' attached' +
     (proof.records.length < wanted.length ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '');
-  // Loop closed - the request stops surfacing as an unread candidate.
+  // Loop closed - the request stops surfacing as an unread candidate, and
+  // the confirmed sender teaches future detection (addr now, domain at 3).
+  if (emailFromAddr) noteConfirmedSender(emailFromAddr);
   if (emailGraphId) graphMarkRead(emailGraphId).then(() => {
     st.innerHTML += ' · request marked read';
   }).catch(e => dbg('mark-read fail', { err: String(e) }));

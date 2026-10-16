@@ -527,6 +527,26 @@ function isAutoSender(addr) {
     .test(String(addr || ''));
 }
 
+// Inbox request detection, strongest signal first: playbook subject
+// templates, then a known client domain or learned sender PLUS any
+// ingest-ish content (so non-request mail from a client domain still
+// doesn't surface), then the content fallback for brand-new senders.
+// `senders` = the learned map from confirmed ingests (addr -> n, dom:x -> n).
+function isRequestCandidate(subject, body, fromAddr, senders) {
+  const s = String(subject || ''), a = String(fromAddr || '');
+  if (isAutoSender(a)) return false;
+  if (CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
+  const weak = extractCodes(String(body || '')).length >= 1 ||
+    /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
+      .test(s + ' ' + String(body || '').slice(0, 2000));
+  const known = CLIENTS.some(c => ((c.detect || {}).domains || []).some(re => re.test(a)));
+  const learned = senders &&
+    ((senders[a.toLowerCase()] || 0) >= 1 ||
+     (senders['dom:' + (a.split('@')[1] || '').toLowerCase()] || 0) >= 3);
+  if (known || learned) return weak;
+  return looksLikeRequest(s, body);
+}
+
 function parseEml(text) {
   text = String(text || '');
   const i = text.search(/\r?\n\r?\n/);
