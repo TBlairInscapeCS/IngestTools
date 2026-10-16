@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -38,6 +39,15 @@ LOG_PORT = 8770
 MEDIA_EXTS = {".mp4", ".mov", ".mpg", ".mxf"}
 # Finished ingests are filed under ~/Documents/Customer Content/<Client>/.
 ARCHIVE_ROOT = Path.home() / "Documents" / "Customer Content"
+# The portal's records API (SIDMAP surface) - same read-only endpoint the
+# extension's verify step uses. Files only archive after every reporting
+# ID reaches a terminal ingest state, plus a rest beat for big-file lag.
+FI_BASE = "https://fileingest.cognet.tv"
+FI_AUTH = "Basic Y3Jvb21pYW46c1pJUiNVWmVkNVVNZzQ4Sg=="
+FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
+              "itn": "itnnetworks", "chief": "chiefmedia"}
+PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
+ARCHIVE_REST_SECONDS = 90   # settle time after all-terminal confirmation
 # -----------------------------------------------------------------------------
 
 
@@ -274,6 +284,83 @@ def uniquified(dest: Path) -> Path:
         if not c.exists():
             return c
         n += 1
+
+
+def ingest_realm(client: dict) -> str:
+    cid = client.get("cidMap") or ""
+    first = cid[0] if isinstance(cid, list) else cid
+    n = str(first).lower().replace(" ", "")
+    return FI_ALIASES.get(n, n)
+
+
+def reporting_ids(manifest: dict, client: dict) -> list[str]:
+    """Reporting IDs exactly as pushed to the portal: bare tracking id per
+    row, plus id+ticker suffix for rows flagged for an ESPN version."""
+    suffix = client.get("tickerSuffix") or "_ticker"
+    ids = []
+    for e in manifest.get("files", []):
+        rid = e.get("tracking_id") or Path(e.get("file", "")).stem.split()[0]
+        if not rid:
+            continue
+        ids.append(rid)
+        if e.get("needs_espn"):
+            ids.append(rid + suffix)
+    return ids
+
+
+def portal_statuses(realm: str, wanted: list[str]) -> dict:
+    """reporting id -> status (None when the record doesn't exist yet)."""
+    req = urllib.request.Request(
+        FI_BASE + "/v1/" + realm + "/content?offset=1&limit=500",
+        headers={"Authorization": FI_AUTH})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.loads(r.read())
+    idx = {norm_stem(rec.get("reportingId", "")): rec.get("status") or ""
+           for rec in data.get("content", [])}
+    return {w: idx.get(norm_stem(w)) for w in wanted}
+
+
+def portal_terminal(status) -> bool:
+    s = status or ""
+    return s == "DETECTION_COMPLETED" or s.startswith("INGEST_FAILED")
+
+
+def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
+                state: dict, report: dict, client: dict) -> bool:
+    """True when the portal confirms every reporting ID reached a terminal
+    ingest state and the rest beat has elapsed - or an archive.ok marker
+    overrides the gate entirely."""
+    marker = job_dir / ((manifest.get("job") or manifest_path.stem) + "-archive.ok")
+    if marker.exists():
+        return True
+    realm = ingest_realm(client)
+    wanted = reporting_ids(manifest, client)
+    if not realm or not wanted:
+        return True  # nothing verifiable - settle-and-move as before
+    now = time.time()
+    statuses = state.get("portal_status") or {}
+    if now - state.get("portal_check_at", 0) >= PORTAL_CHECK_SECONDS:
+        state["portal_check_at"] = now
+        try:
+            statuses = portal_statuses(realm, wanted)
+            state["portal_status"] = statuses
+        except Exception as e:
+            log(f"portal check failed ({realm}): {e}")
+    report["portal"] = {"realm": realm, "statuses": statuses,
+                        "failed": [k for k, v in statuses.items()
+                                   if (v or "").startswith("INGEST_FAILED")]}
+    pending = [k for k, v in statuses.items() if not portal_terminal(v)]
+    if pending:
+        report["archive"] = "waiting on portal ingest: " + ", ".join(pending[:6]) + \
+            (" +%d" % (len(pending) - 6) if len(pending) > 6 else "")
+        return False
+    # All terminal - rest a beat: large files can lag after the record posts.
+    first = state.setdefault("portal_done_at", now)
+    remain = ARCHIVE_REST_SECONDS - (now - first)
+    if remain > 0:
+        report["archive"] = f"portal confirmed - resting {int(remain)}s before archive"
+        return False
+    return True
 
 
 def archive_done(job_dir: Path, manifest: dict, state: dict, report: dict, client: dict):
@@ -515,14 +602,15 @@ def process_job(manifest_path: Path):
         changed = True
         report["files"].append(status)
 
-    # All entries resolved -> file the job's media under Customer Content.
-    # Rejected/espn_failed count as resolved (the row is settled either
-    # way); only still-missing or still-downloading files hold the job.
+    # All entries settled -> portal gate (SIDMAP terminal statuses + rest
+    # beat) -> file the job's media under Customer Content. Rejected /
+    # espn_failed count as settled; missing/downloading hold the job.
     if report["files"] and not state.get("archived_all") and all(
             s.get("status") not in ("missing", "downloading") for s in report["files"]):
-        if archive_done(job_dir, manifest, state, report, client):
-            state["archived_all"] = True
-            changed = True
+        if portal_gate(manifest_path, job_dir, manifest, state, report, client):
+            if archive_done(job_dir, manifest, state, report, client):
+                state["archived_all"] = True
+        changed = True  # portal_gate timestamps live in state
 
     write_report(manifest_path, report)
     if changed:
