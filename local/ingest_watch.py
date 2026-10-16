@@ -48,7 +48,8 @@ FI_AUTH = "Basic Y3Jvb21pYW46c1pJUiNVWmVkNVVNZzQ4Sg=="
 FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
               "itn": "itnnetworks", "chief": "chiefmedia"}
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
-ARCHIVE_REST_SECONDS = 90   # settle time after all-terminal confirmation
+ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
+                            # New-Ingest un-gray lag is ~20s per the user)
 # -----------------------------------------------------------------------------
 
 
