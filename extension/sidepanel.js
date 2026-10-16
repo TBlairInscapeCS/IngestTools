@@ -193,10 +193,34 @@ function jobSlug() {
 }
 
 function saveInputs() {
-  chrome.storage.local.set({
-    emailText: emailEl.value, idsText: idsEl.value, filesText: filesEl.value,
-    capturedByName,
-  });
+  // Request inputs are intentionally ephemeral - a panel reload is a
+  // fresh run (the "start from scratch" the user expects). One-shot
+  // pendingIds/pendingFiles handoffs and config keys persist via their
+  // own writers, not here.
+}
+
+// "Clear all" - wipe every request artifact AND the loaded tracker back
+// to a bare panel. Access config is deliberately untouched: Graph
+// tokens, Jira creds, ER key, sweep prefs, learned senders, the
+// deliveries registry and cached sheet refs for OTHER clients survive.
+function clearAll() {
+  resetRun();
+  // Order matters: client and sheet clear BEFORE onEmailChange, or the
+  // auto-pull sees the old client's sheetIds and re-fetches the tracker.
+  client = null; clientSource = ''; $('clientSel').value = '';
+  sheet = null; pendingRows = []; lastSheetRef = null; sheetAutoLoaded = '';
+  $('sheetInfo').style.display = 'none'; $('sheetInfo').innerHTML = '';
+  $('colSummary').textContent = '';
+  setStage('sdSheet'); $('tsSheet').textContent = '';
+  // Email artifacts resetRun deliberately keeps for same-run re-requests
+  emailEl.value = ''; emailDate = '';
+  onEmailChange(); // resets sender/graph-id/derived state for empty text
+  setStage('sdEmail'); $('tsEmail').textContent = '';
+  renderClientNote();
+  // Persisted inputs must not resurrect on the next panel reload
+  chrome.storage.local.remove(['emailText', 'idsText', 'filesText',
+    'capturedByName', 'msLastSheet', 'pendingIds', 'pendingFiles']);
+  toast('Cleared - fresh run.');
 }
 
 function esc(s) {
@@ -208,6 +232,7 @@ function esc(s) {
 // survives reloads unless actively cleared).
 function resetRun() {
   matched = null; matchedFor = ''; lastResults = null; lastExtras = [];
+  yangaroo = null;
   idsEl.value = ''; filesEl.value = '';
   capturedByName = {}; queuedUrls.clear(); lastCapTab = null;
   $('matchResults').innerHTML = '';
@@ -795,6 +820,7 @@ $('grabEmail').addEventListener('click', async () => {
 });
 
 $('clearEmail').addEventListener('click', () => { emailEl.value = ''; emailDate = ''; onEmailChange(); saveInputs(); });
+$('clearAll').addEventListener('click', clearAll);
 
 // One-click email intake without an Outlook tab: clipboard or a saved
 // .eml file (Outlook desktop exports them; web users keep grab/paste).
@@ -1157,7 +1183,8 @@ chrome.storage.local.get('msRepliedConvs', d => { repliedConvs = new Set(d.msRep
 chrome.storage.local.get('erDeliveries', d => { erDeliveries = d.erDeliveries || []; });
 chrome.storage.local.get('msCustomerFolderIds', d => { customerFolderIds = d.msCustomerFolderIds || []; });
 chrome.storage.local.get('msFolderActivity', d => { folderActivity = d.msFolderActivity || {}; });
-chrome.storage.local.get('msLastSheet', d => { lastSheetRef = d.msLastSheet || null; });
+// msLastSheet is deliberately NOT restored - a panel reload is a fresh
+// run, so last batch's tracker shouldn't quietly re-pull itself.
 // Folder map powers the client tagging on inbox candidates; refresh weekly
 // (the folder tree rarely changes). The activity scan rides along - one
 // latest-mail call per Customers subfolder feeds the "quiet client" date.
@@ -3467,15 +3494,12 @@ $('ingestPush').addEventListener('click', async () => {
   dbg('ingest push', { rows: plan.rows.length, queued: n });
 });
 
-chrome.storage.local.get(['pendingIds', 'pendingFiles', 'emailText', 'idsText', 'filesText', 'capturedByName', 'erApiKey', 'erSender', 'erDays'], data => {
-  if (data.emailText) { emailEl.value = data.emailText; onEmailChange(); }
+// Panel reload = fresh run: only one-shot handoffs (pendingIds/pendingFiles)
+// and config keys (ER key + sweep prefs) restore. Email/ids/files/sheet are
+// request data - they belong to a completed batch, not a new session.
+chrome.storage.local.get(['pendingIds', 'pendingFiles', 'erApiKey', 'erSender', 'erDays'], data => {
   if (data.pendingIds) { idsEl.value = data.pendingIds; chrome.storage.local.remove('pendingIds'); }
-  else if (data.idsText) idsEl.value = data.idsText;
   if (data.pendingFiles) { filesEl.value = data.pendingFiles; chrome.storage.local.remove('pendingFiles'); }
-  else if (data.filesText) filesEl.value = data.filesText;
-  // The file box persists across panel reloads - so does its URL map,
-  // otherwise names dedupe forever while download links are lost.
-  if (data.capturedByName) capturedByName = data.capturedByName;
   if (data.erApiKey) { erApiKey = data.erApiKey; $('erApiKey').value = erApiKey; }
   if (data.erSender) $('erSender').value = data.erSender;
   if (data.erDays) $('erDays').value = data.erDays;
