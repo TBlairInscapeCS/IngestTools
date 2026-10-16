@@ -54,14 +54,18 @@ FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
 ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
                             # New-Ingest un-gray lag is ~20s per the user)
-# Standard ingest spec (user-supplied): H.264/H.265/MPEG-2, 1920x1080
-# preferred (3840x2160 and 1280x720 accepted - all 16:9), 24-30fps,
-# 4-40 Mbps, 10s minimum runtime. Container is NOT gated - mp4/mov/mxf/
-# mkv all ingest. No audio stream is OK too: video-only fingerprints.
+# Standard ingest spec (user-supplied): H.264/H.265/MPEG-2 (+ ProRes -
+# the portal demonstrably accepts it, dozens of files completed), the
+# three listed 16:9 resolutions, 24-30fps, 10s minimum runtime.
+# Container is NOT gated (mp4/mov/mxf/mkv all ingest) and neither is
+# bit rate: the sheet's 4-40Mbps bears no relation to reality - the
+# accepted archive corpus spans ~2-182Mbps. No audio stream is OK too
+# (video-only fingerprints), but a PRESENT audio stream in an exotic
+# codec fails portal-side as INGEST_FAILED_Invalid_audio_codec.
 MIN_DURATION = 10.0
 SPEC_RES = {(3840, 2160), (1920, 1080), (1280, 720)}
-SPEC_CODECS = {"h264", "hevc", "mpeg2video"}
-SPEC_MIN_MBPS, SPEC_MAX_MBPS = 4.0, 40.0
+SPEC_CODECS = {"h264", "hevc", "mpeg2video", "prores"}
+AUDIO_OK = {"aac", "mp3", "mp2", "ac3", "eac3", "s302m", "alac", "lpcm"}
 # -----------------------------------------------------------------------------
 
 
@@ -318,20 +322,33 @@ def probe_spec(path: Path) -> dict:
     else:
         codec = v.get("codec_name") or "?"
         if codec not in SPEC_CODECS:
-            fails.append(f"video codec {codec} not H.264/H.265/MPEG-2")
+            fails.append(f"video codec {codec} not H.264/H.265/MPEG-2/ProRes")
         w, h = v.get("width") or 0, v.get("height") or 0
         if (w, h) not in SPEC_RES:
             fails.append(f"resolution {w}x{h} not 3840x2160/1920x1080/1280x720")
+        # Aspect is a real portal gate (INGEST_FAILED_Unsupported_Aspect_
+        # Ratio). Display ratio when signaled, else storage ratio.
+        dar = v.get("display_aspect_ratio") or ""
+        try:
+            ratio = (float(dar.split(":")[0]) / float(dar.split(":")[1])
+                     if ":" in dar else (w / h if h else 0))
+        except Exception:
+            ratio = 0
+        if ratio and not (1.74 <= ratio <= 1.81):
+            fails.append(f"aspect ratio {dar or f'{w}x{h}'} not 16:9")
         fps = _fps(v)
         # NTSC fractional rates (23.976, 29.97) count as their nominal 24/30.
         if fps and not (23.9 <= fps <= 30.6):
             fails.append(f"frame rate {fps:.2f}fps outside 24-30")
+    # Absent audio is fine (video-only fingerprint); a present stream in
+    # an exotic codec is what the portal rejects as Invalid_audio_codec.
+    acodec = (auds[0].get("codec_name") or "") if auds else ""
+    if acodec and acodec not in AUDIO_OK and not acodec.startswith("pcm_"):
+        fails.append(f"audio codec {acodec} may fail ingest")
     if dur and dur < MIN_DURATION:
         fails.append(f"{dur:.1f}s under {MIN_DURATION:.0f}s minimum duration")
     br = int(fmt.get("bit_rate") or 0)
     mbps = br / 1e6 if br else 0
-    if mbps and not (SPEC_MIN_MBPS <= mbps <= SPEC_MAX_MBPS):
-        fails.append(f"bit rate {mbps:.1f}Mbps outside 4-40")
     info = {"duration": round(dur, 2),
             "container": fmtname,
             "video": vids and f"{v.get('codec_name')} {v.get('width')}x{v.get('height')}",
