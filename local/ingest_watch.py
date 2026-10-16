@@ -19,10 +19,12 @@ Usage:
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -163,6 +165,57 @@ def sniff_bad_media(path: Path) -> str:
     return ""
 
 
+def norm_stem(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", Path(name).stem.lower())
+
+
+def unzip_media(zip_path: Path, job_dir: Path) -> list[str]:
+    """Extract media members of a zip into job_dir, flattened to basenames
+    (nested folder structure inside the zip is irrelevant to ingest).
+    Returns the extracted filenames."""
+    out = []
+    with zipfile.ZipFile(zip_path) as z:
+        for info in z.infolist():
+            base = Path(info.filename).name
+            if info.is_dir() or not base:
+                continue
+            if Path(base).suffix.lower() not in MEDIA_EXTS:
+                continue
+            if info.file_size > 8 * 1024**3:
+                continue
+            target = job_dir / base
+            n = 1
+            while target.exists():
+                target = job_dir / f"{Path(base).stem} ({n}){Path(base).suffix}"
+                n += 1
+            with z.open(info) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            out.append(target.name)
+    return out
+
+
+def pair_members(members: list[str], expected: list[str], job_dir: Path):
+    """Rename extracted members to their manifest-expected filenames where
+    stems overlap. An expected .zip name inherits the member's real ext."""
+    for i, mem in enumerate(members):
+        mstem = norm_stem(mem)
+        for want in expected:
+            wstem = norm_stem(want)
+            if not wstem or len(wstem) < 4:
+                continue
+            if wstem not in mstem and mstem not in wstem:
+                continue
+            want_name = Path(want).stem + Path(mem).suffix if want.lower().endswith(".zip") else want
+            target = job_dir / want_name
+            if mem != want_name and not target.exists():
+                try:
+                    (job_dir / mem).rename(target)
+                    members[i] = want_name
+                except Exception:
+                    pass
+            break
+
+
 def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bool, str]:
     """Run espn_ticker.sh on <file>; rename to <suffix> when it differs."""
     ticker = job_dir / "ticker.png"
@@ -223,6 +276,62 @@ def process_job(manifest_path: Path):
             continue
 
         status["downloaded_as"] = local.name
+
+        # Zip payloads (Drive select-all archives, direct zip links):
+        # unpack media members into the job dir. A single-member zip stood
+        # in for this row's file - it adopts the entry's stem and falls
+        # through to the normal media checks / ESPN conversion below.
+        # Multi-member zips get paired onto manifest rows by stem match so
+        # sibling entries can find their files on the next pass.
+        if local.suffix.lower() == ".zip":
+            if name in state.get("unzipped", []):
+                status["status"] = "zip already extracted"
+                report["files"].append(status)
+                continue
+            try:
+                members = unzip_media(local, job_dir)
+            except Exception as e:
+                rej = job_dir / "_rejected"
+                try:
+                    rej.mkdir(exist_ok=True)
+                    local.rename(rej / local.name)
+                except Exception:
+                    pass
+                state.setdefault("rejected", []).append(name)
+                status["status"] = "rejected: unreadable zip - " + str(e)[:80]
+                notify("Ingest watcher", f"{local.name}: rejected (unreadable zip) - not real media.")
+                changed = True
+                report["files"].append(status)
+                continue
+            state.setdefault("unzipped", []).append(name)
+            changed = True
+            if not members:
+                status["status"] = "zip extracted - no media files inside"
+                notify("Ingest watcher", f"{local.name}: zip held no media files.")
+                report["files"].append(status)
+                continue
+            expected = [e.get("file", "") for e in manifest.get("files", []) if e.get("file")]
+            pair_members(members, expected, job_dir)
+            if len(members) == 1 and not any(members[0] == e for e in expected):
+                # sole member takes this row's stem so the manifest name stays canonical
+                single = job_dir / members[0]
+                target = job_dir / (Path(name).stem + single.suffix)
+                if not target.exists():
+                    try:
+                        single.rename(target)
+                        members[0] = target.name
+                    except Exception:
+                        pass
+            status["zip_extracted"] = members
+            if len(members) == 1:
+                local = job_dir / members[0]
+                status["downloaded_as"] = local.name
+            else:
+                status["status"] = f"zip extracted ({len(members)} media file(s)): " + ", ".join(members[:5])
+                notify("Ingest watcher", f"{job_dir.name}: zip unpacked {len(members)} media files.")
+                report["files"].append(status)
+                continue
+
         if local.suffix.lower() not in MEDIA_EXTS:
             status["status"] = "downloaded (non-media ext - check link type)"
             if name not in state["notified"]:
