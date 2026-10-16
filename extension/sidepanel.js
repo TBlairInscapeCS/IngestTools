@@ -2132,6 +2132,16 @@ function updateReplyCheck() {
       : 'no IDs cited in email');
 }
 
+// Where the reconcile just looked for files - for the "not available"
+// reply ("not yet available on Extreme Reach"). Playbook delivery route
+// names it; the ER sweep is the common case.
+function dlChannelName() {
+  const d = (client && client.delivery) || '';
+  return ({ 'extreme-reach': 'Extreme Reach', yangaroo: 'Yangaroo', vimeo: 'Vimeo',
+    dropbox: 'Dropbox', egnyte: 'Egnyte', onedrive: 'OneDrive', sharepoint: 'SharePoint',
+    box: 'Box', 'google-drive': 'Google Drive' })[d] || 'Extreme Reach';
+}
+
 function refreshReply(force) {
   const area = $('replyArea');
   let text = null;
@@ -2142,7 +2152,10 @@ function refreshReply(force) {
       [m.id, m.trackingId].filter(Boolean).forEach(v =>
         espnIds.add(normalizeName(v).replace(/ /g, '')));
     });
-    text = buildReconConfirmation(lastResults, espnIds, emailSender) ||
+    // All-missing must NOT fall through to the "I've ingested" draft -
+    // nothing was downloaded, the reply says so instead.
+    text = buildNotAvailableReply(lastResults, dlChannelName(), emailSender) ||
+      buildReconConfirmation(lastResults, espnIds, emailSender) ||
       buildConfirmationEmail(lastResults, emailSender);
   }
   if (!text && matched) text = buildMatchConfirmation(matched, emailSender);

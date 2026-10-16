@@ -479,6 +479,23 @@ function buildReconConfirmation(results, espnIds, sender) {
   return lines.join('\n');
 }
 
+// "Not yet available" reply when a delivery sweep finds NONE of the
+// requested files - mined from real sent replies ("Those creatives are
+// not yet available on Extreme Reach, let me know when we can proceed").
+// Returns null for partial results - the recon confirmation handles
+// found+missing mixes already.
+function buildNotAvailableReply(results, channel, sender) {
+  const missing = results.filter(r => r.status === 'MISSING');
+  const found = results.filter(r => r.status === 'FOUND');
+  const reviewed = results.filter(r => r.status === 'POSSIBLE MATCH' || r.status === 'AMBIGUOUS');
+  if (!missing.length || found.length || reviewed.length) return null;
+  const on = /yangaroo/i.test(channel) ? 'from Yangaroo' : 'on ' + (channel || 'Extreme Reach');
+  return [greet(sender), '',
+    (missing.length === 1 ? 'That creative is' : 'Those creatives are') +
+    ' not yet available ' + on + ', let me know when we can proceed.',
+    '', 'Thanks,'].join('\n');
+}
+
 function buildConfirmationEmail(results, sender) {
   const found = results.filter(r => r.status === 'FOUND');
   const reviewed = results.filter(r => r.status === 'POSSIBLE MATCH' || r.status === 'AMBIGUOUS');
