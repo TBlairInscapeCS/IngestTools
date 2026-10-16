@@ -35,7 +35,7 @@ async function ensureOffscreen() {
   if (await chrome.offscreen.hasDocument()) return;
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
-    reasons: ['AUDIO'],
+    reasons: ['AUDIO_PLAYBACK'],
     justification: 'Audible alert when a new request email arrives.',
   });
 }
