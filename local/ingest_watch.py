@@ -38,6 +38,10 @@ TICKER_IMAGE = Path("/Users/tim.blair/Devin/ticker.png")
 POLL_SECONDS = 15
 LOG_PORT = 8770
 MEDIA_EXTS = {".mp4", ".mov", ".mpg", ".mxf"}
+# Other video containers get probed too - the spec verdict ("container
+# matroska not mp4") is more useful than a generic non-media flag.
+PROBEABLE_EXTS = MEDIA_EXTS | {".mkv", ".avi", ".wmv", ".m4v", ".m2ts",
+                               ".ts", ".webm", ".mpeg", ".m2v", ".vob", ".3gp"}
 # Finished ingests are filed under ~/Documents/Customer Content/<Client>/.
 ARCHIVE_ROOT = Path.home() / "Documents" / "Customer Content"
 # The portal's records API (SIDMAP surface) - same read-only endpoint the
@@ -50,10 +54,14 @@ FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
 ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
                             # New-Ingest un-gray lag is ~20s per the user)
-# Minimum ingest file spec - duration floor is the confirmed rule from the
-# agency-facing rejection email ("minimum duration requirement of ten
-# seconds"); missing video/audio streams can't fingerprint at all.
+# Standard ingest spec (user-supplied): MP4 container, H.264/H.265/MPEG-2,
+# 1920x1080 preferred (3840x2160 and 1280x720 accepted - all 16:9),
+# 24-30fps, 4-40 Mbps, 10s minimum runtime. Audio isn't on the sheet but
+# detection fingerprints audio - a silent stream can't match anything.
 MIN_DURATION = 10.0
+SPEC_RES = {(3840, 2160), (1920, 1080), (1280, 720)}
+SPEC_CODECS = {"h264", "hevc", "mpeg2video"}
+SPEC_MIN_MBPS, SPEC_MAX_MBPS = 4.0, 40.0
 # -----------------------------------------------------------------------------
 
 
@@ -235,7 +243,7 @@ def unzip_media(zip_path: Path, job_dir: Path) -> list[str]:
             base = Path(info.filename).name
             if info.is_dir() or not base:
                 continue
-            if Path(base).suffix.lower() not in MEDIA_EXTS:
+            if Path(base).suffix.lower() not in PROBEABLE_EXTS:
                 continue
             if info.file_size > 8 * 1024**3:
                 continue
@@ -272,6 +280,19 @@ def pair_members(members: list[str], expected: list[str], job_dir: Path):
             break
 
 
+def _fps(v: dict) -> float:
+    for k in ("avg_frame_rate", "r_frame_rate"):
+        r = v.get(k) or ""
+        if "/" in r:
+            try:
+                n, d = r.split("/")
+                if float(d):
+                    return float(n) / float(d)
+            except Exception:
+                pass
+    return 0.0
+
+
 def probe_spec(path: Path) -> dict:
     """ffprobe facts + spec violations for a downloaded file."""
     try:
@@ -282,22 +303,43 @@ def probe_spec(path: Path) -> dict:
         d = json.loads(r.stdout or "{}")
     except Exception as e:
         return {"info": {}, "fails": [], "error": str(e)[:80]}
+    fmt = d.get("format") or {}
+    fmtname = fmt.get("format_name") or "?"
     vids = [s for s in d.get("streams", []) if s.get("codec_type") == "video"]
     auds = [s for s in d.get("streams", []) if s.get("codec_type") == "audio"]
     try:
-        dur = float((d.get("format") or {}).get("duration") or 0)
+        dur = float(fmt.get("duration") or 0)
     except Exception:
         dur = 0
     fails = []
+    if "mp4" not in fmtname:
+        fails.append(f"container {fmtname} not mp4")
+    v = vids[0] if vids else {}
     if not vids:
         fails.append("no video stream")
+    else:
+        codec = v.get("codec_name") or "?"
+        if codec not in SPEC_CODECS:
+            fails.append(f"video codec {codec} not H.264/H.265/MPEG-2")
+        w, h = v.get("width") or 0, v.get("height") or 0
+        if (w, h) not in SPEC_RES:
+            fails.append(f"resolution {w}x{h} not 3840x2160/1920x1080/1280x720")
+        fps = _fps(v)
+        # NTSC fractional rates (23.976, 29.97) count as their nominal 24/30.
+        if fps and not (23.9 <= fps <= 30.6):
+            fails.append(f"frame rate {fps:.2f}fps outside 24-30")
     if not auds:
         fails.append("no audio stream")
     if dur and dur < MIN_DURATION:
         fails.append(f"{dur:.1f}s under {MIN_DURATION:.0f}s minimum duration")
+    br = int(fmt.get("bit_rate") or 0)
+    mbps = br / 1e6 if br else 0
+    if mbps and not (SPEC_MIN_MBPS <= mbps <= SPEC_MAX_MBPS):
+        fails.append(f"bit rate {mbps:.1f}Mbps outside 4-40")
     info = {"duration": round(dur, 2),
-            "video": vids and f"{vids[0].get('codec_name')} "
-                     f"{vids[0].get('width')}x{vids[0].get('height')}",
+            "container": fmtname,
+            "video": vids and f"{v.get('codec_name')} {v.get('width')}x{v.get('height')}",
+            "fps": round(_fps(v), 2), "mbps": round(mbps, 2),
             "audio": bool(auds)}
     return {"info": info, "fails": fails}
 
@@ -664,7 +706,7 @@ def process_job(manifest_path: Path):
                 report["files"].append(status)
                 continue
 
-        if local.suffix.lower() not in MEDIA_EXTS:
+        if local.suffix.lower() not in PROBEABLE_EXTS:
             status["status"] = "downloaded (non-media ext - check link type)"
             if name not in state["notified"]:
                 state["notified"].append(name)
