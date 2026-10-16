@@ -188,6 +188,14 @@ function resetRun() {
   $('replyArea').classList.add('hidden');
   $('capInfo').innerHTML = '';
   ourDlIds.clear();
+  // Request-specific draft/proof state must not bleed into the next job:
+  // a dirty reply kept last request's text, a staged Jira run could post
+  // the wrong ticket's comment, and stale records/dates attach wrongly.
+  replyDirty = false; emailDate = '';
+  pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
+  $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
+  $('jiraPreview').value = ''; $('jiraStatus').innerHTML = '';
+  $('verifyInfo').innerHTML = ''; $('saveRecords').classList.add('hidden');
   // Sheet/email dots keep their state (the sheet stays loaded across
   // requests); match/download dots reset with the data they described.
   ['sdMatch', 'sdDl', 'sdIngest'].forEach(id => setStage(id));
@@ -720,7 +728,7 @@ $('grabEmail').addEventListener('click', async () => {
   toast('Email captured' + (yangaroo ? ' - Yangaroo delivery: ' + yangaroo.spots.length + ' spot(s) with download links' : '') + '.');
 });
 
-$('clearEmail').addEventListener('click', () => { emailEl.value = ''; onEmailChange(); saveInputs(); });
+$('clearEmail').addEventListener('click', () => { emailEl.value = ''; emailDate = ''; onEmailChange(); saveInputs(); });
 
 // One-click email intake without an Outlook tab: clipboard or a saved
 // .eml file (Outlook desktop exports them; web users keep grab/paste).
@@ -3441,6 +3449,7 @@ $('postJira').addEventListener('click', async () => {
 $('jiraApprove').addEventListener('click', async () => {
   const p = pendingJira;
   if (!p) return;
+  if (!$('jiraPreview').value.trim()) return toast('Comment preview is empty - rebuild or re-draft first.');
   pendingJira = null;
   $('jiraApprove').classList.add('hidden');
   const st = $('jiraStatus');

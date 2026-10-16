@@ -1017,11 +1017,10 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       else if (bN.length >= 4 && hay.includes(bN)) matchType = 'BRAND';
     }
     if (!matchType) return;
-    // Tracking ID convention (from real sheets): Ad-ID codes pass through
-    // verbatim; title-style IDs get apostrophes -> underscores.
-    const trackingId = CODE_RE.test(id)
-      ? id.trim()
-      : String(title || id).replace(/'/g, '_').trim();
+    // The sheet's ID column is authoritative even when it isn't ISCI
+    // (Icon Media uses 5-char codes like FAL5H); the title only backs it
+    // up when the ID cell is empty (apostrophes -> underscores).
+    const trackingId = id.trim() || String(title || id).replace(/'/g, '_').trim();
     const entry = {
       row: rowNum,
       id,
