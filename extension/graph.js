@@ -8,6 +8,10 @@
 // for the unread-count badge alarm. Keep it to fetch + chrome.storage.
 
 const MS = { clientId: '', tenant: '', refreshToken: '', accessToken: '', accessExp: 0 };
+// New sign-ins request read+write (reply drafts, mark-read). Existing
+// Mail.Read refresh tokens keep working for reads; write calls then 403
+// and the UI tells the user to re-consent.
+const MS_SCOPE = 'Mail.Read Mail.ReadWrite offline_access';
 
 async function msLoad() {
   const s = await chrome.storage.local.get(['msClientId', 'msTenant', 'msRefreshToken']);
@@ -61,7 +65,7 @@ function msAuthorizeUrl(challenge, redirect) {
     client_id: MS.clientId,
     response_type: 'code',
     redirect_uri: redirect,
-    scope: 'Mail.Read offline_access',
+    scope: MS_SCOPE,
     response_mode: 'query',
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -86,7 +90,7 @@ async function msExchangeCode(code, verifier, redirect) {
 async function msDeviceCode() {
   const d = await msPost('devicecode', {
     client_id: MS.clientId,
-    scope: 'Mail.Read offline_access',
+    scope: MS_SCOPE,
   });
   if (d.error) throw new Error(d.error_description || d.error);
   return d;
@@ -117,6 +121,8 @@ async function msAccessToken() {
   if (MS.accessToken && Date.now() < MS.accessExp - 60000) return MS.accessToken;
   await msLoad();
   if (!MS.refreshToken) return null;
+  // Refresh only claims what the original consent granted - asking wider
+  // than consented here would invalidate the token entirely.
   const d = await msPost('token', {
     grant_type: 'refresh_token',
     client_id: MS.clientId,
@@ -145,4 +151,47 @@ async function graphUnread(top) {
   const v = (await r.json()).value || [];
   v.sort((a, b) => String(b.receivedDateTime).localeCompare(String(a.receivedDateTime)));
   return v;
+}
+
+// Shared authenticated call; throws with status so callers can tell a
+// consent gap (401/403) from a real error.
+async function graphFetch(path, opts) {
+  const tok = await msAccessToken();
+  if (!tok) throw new Error('not signed in');
+  const r = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    ...(opts || {}),
+    headers: { Authorization: 'Bearer ' + tok, ...((opts && opts.headers) || {}) },
+  });
+  if (!r.ok) throw new Error('Graph ' + r.status + (r.status === 401 || r.status === 403
+    ? ' - re-run Sign in to consent Mail.ReadWrite' : ''));
+  return r.status === 204 ? null : r.json();
+}
+
+// Attachment metadata for one message (names/types/sizes only).
+async function graphAttachments(msgId) {
+  return (await graphFetch('/me/messages/' + msgId + '/attachments?$select=id,name,contentType,size')).value || [];
+}
+
+// Raw bytes of a fileAttachment (contentBytes arrives base64).
+async function graphAttachmentBytes(msgId, attId) {
+  const d = await graphFetch('/me/messages/' + msgId + '/attachments/' + attId);
+  return Uint8Array.from(atob(d.contentBytes || ''), c => c.charCodeAt(0)).buffer;
+}
+
+// createReply makes a draft threaded on the source message; PATCH fills
+// the body. The user reviews and sends in Outlook - nothing auto-sends.
+async function graphReplyDraft(msgId, bodyText) {
+  const d = await graphFetch('/me/messages/' + msgId + '/createReply', { method: 'POST' });
+  await graphFetch('/me/messages/' + d.id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: { contentType: 'text', content: bodyText } }),
+  });
+  return d;
+}
+
+async function graphMarkRead(msgId) {
+  return graphFetch('/me/messages/' + msgId, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isRead: true }),
+  });
 }

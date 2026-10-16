@@ -16,6 +16,7 @@ let emailDates = new Set();
 let emailSubject = '';
 let emailSender = '';      // sender first name for reply greetings
 let emailDate = '';        // sent timestamp for the Jira ticket header
+let emailGraphId = '';     // Graph message id when the email came via inbox
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -191,7 +192,7 @@ function resetRun() {
   // Request-specific draft/proof state must not bleed into the next job:
   // a dirty reply kept last request's text, a staged Jira run could post
   // the wrong ticket's comment, and stale records/dates attach wrongly.
-  replyDirty = false; emailDate = '';
+  replyDirty = false; emailDate = ''; emailGraphId = '';
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
   $('jiraPreview').value = ''; $('jiraStatus').innerHTML = '';
@@ -703,10 +704,11 @@ async function grabEmailFrom(tab) {
 // Email intake shared by the Outlook grab, clipboard paste, and .eml load.
 // Anything that arrives as plain text loses the delivery-page anchor
 // scrape - callers null yangaroo themselves.
-function setEmailText(text, subject, sender, date) {
+function setEmailText(text, subject, sender, date, graphId) {
   if (text !== emailEl.value) resetRun(); // new request = fresh run state
   emailEl.value = text;
   emailSubject = subject || '';
+  emailGraphId = graphId || '';
   // Reply greeting: explicit sender name wins (Outlook DOM / .eml From:),
   // else parse a leading From: line (Graph inbox / pasted headers).
   emailSender = senderFirstName(sender) || senderFirstName(text) || '';
@@ -868,13 +870,48 @@ async function checkInbox(quiet) {
   renderInbox(msgs || [], quiet);
 }
 
+// Graph bodies arrive as HTML: anchors carry the real hrefs that innerText
+// loses ("Download" text with the URL behind it). Re-inject each href after
+// its link text and unwrap O365 SafeLinks wrappers while doing so.
+function stripHtmlKeepLinks(html) {
+  const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  doc.querySelectorAll('a[href]').forEach(a => {
+    let h = a.getAttribute('href') || '';
+    const m = h.match(/safelinks\.protection\.outlook\.com\/\?url=([^&]+)/i);
+    if (m) h = decodeURIComponent(m[1]);
+    const t = (a.textContent || '').trim();
+    a.replaceWith(doc.createTextNode(/^https?:/i.test(h) ? (t && t !== h ? t + ' ' + h : h) : t));
+  });
+  return stripHtml(doc.body.innerHTML);
+}
+
+// If the request email carries the tracker as an attachment, load it
+// straight into section 2 - no SharePoint tab needed.
+async function tryLoadTrackerAttachment(msgId) {
+  try {
+    const atts = await graphAttachments(msgId);
+    const wb = atts.find(a => /\.xlsx?$/i.test(a.name || ''));
+    const others = atts.filter(a => a !== wb && !/\.(png|jpe?g|gif|bmp|svg|webp|ico)$/i.test(a.name || ''));
+    if (others.length)
+      $('emailInfo').innerHTML = 'attachments: ' + others.map(a => esc(a.name)).join(', ');
+    if (!wb) return;
+    const ab = await graphAttachmentBytes(msgId, wb.id);
+    const w = await readXlsx(ab, '');
+    sheetBuf = ab;
+    sheetTabs = w.sheetNames || [];
+    sheetTabName = w.sheetName;
+    loadSheetRows(w, 'email attachment');
+    toast('Tracker loaded from email attachment: ' + wb.name);
+  } catch (e) { dbg('attachment load fail', { err: String(e) }); }
+}
+
 // Unread mail scored by the same detectors the rest of the pipeline uses
 // (extractCodes + delivery vocabulary). Each candidate gets a Load link.
 function renderInbox(msgs, quiet) {
   const el = $('inboxList');
   const cands = [];
   msgs.forEach(m => {
-    const body = stripHtml((m.body && m.body.content) || '');
+    const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
     if (looksLikeRequest(m.subject, body)) cands.push({ m, body });
   });
   if (!cands.length) {
@@ -897,7 +934,8 @@ function renderInbox(msgs, quiet) {
     yangaroo = null;
     setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
       '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
-      String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16));
+      String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
+    tryLoadTrackerAttachment(c.m.id);
     toast('Email loaded from inbox.');
   }));
   // Quiet background polls announce only genuinely new candidates.
@@ -1792,6 +1830,19 @@ $('clearReply').addEventListener('click', () => {
 $('copyReply').addEventListener('click', () => {
   const t = $('replyPreview').value;
   if (t) copyText(t, 'Reply');
+});
+
+// Posts the draft (with any user edits) as a reply draft on the source
+// thread. Only works when the email came via the Graph inbox - the user
+// reviews and sends in Outlook.
+$('draftReplyOut').addEventListener('click', async () => {
+  const t = $('replyPreview').value.trim();
+  if (!t) return toast('No reply draft to send.');
+  if (!emailGraphId) return toast('Only for emails loaded via Check inbox - this one has no thread id.');
+  try {
+    await graphReplyDraft(emailGraphId, t);
+    toast('Reply draft created - review and send it in Outlook.');
+  } catch (e) { toast('Reply draft failed: ' + e.message); }
 });
 $('copyExcReply').addEventListener('click', () => {
   const t = lastResults && buildExceptionEmail(lastResults, emailSender);
@@ -3376,6 +3427,10 @@ async function postJiraComment(issue, wanted, st, proof) {
     [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
      proof.shotBlob ? 'screenshot' : null].filter(Boolean).join(' + ') + ' attached' +
     (proof.records.length < wanted.length ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '');
+  // Loop closed - the request stops surfacing as an unread candidate.
+  if (emailGraphId) graphMarkRead(emailGraphId).then(() => {
+    st.innerHTML += ' · request marked read';
+  }).catch(e => dbg('mark-read fail', { err: String(e) }));
 }
 
 // Staged Jira run: "Verify & draft Jira" verifies, gathers proofs, finds
