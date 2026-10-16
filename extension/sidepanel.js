@@ -216,7 +216,8 @@ function resetRun() {
   $('outRow').classList.add('hidden');
   $('download').classList.add('hidden');
   $('showSheet').classList.add('hidden');
-  $('replyArea').classList.add('hidden');
+  $('replyArea').classList.add('hidden'); $('replyPreview').value = '';
+  const rk = $('replyKind'); if (rk) rk.value = 'auto';
   $('capInfo').innerHTML = '';
   ourDlIds.clear();
   // Request-specific draft/proof state must not bleed into the next job:
@@ -233,7 +234,7 @@ function resetRun() {
   $('verifyInfo').innerHTML = ''; $('saveRecords').classList.add('hidden');
   // Sheet/email dots keep their state (the sheet stays loaded across
   // requests); match/download dots reset with the data they described.
-  ['sdMatch', 'sdDl', 'sdIngest'].forEach(id => setStage(id));
+  ['sdMatch', 'sdDl', 'sdIngest', 'sdReply'].forEach(id => setStage(id));
   $('ingestInfo').innerHTML = ''; $('ingestPreviewBox').innerHTML = '';
   saveInputs();
 }
@@ -2142,10 +2143,33 @@ function dlChannelName() {
     box: 'Box', 'google-drive': 'Google Drive' })[d] || 'Extreme Reach';
 }
 
+// Manual draft variants - the escape hatch for when the run state doesn't
+// match reality (files ARE delivered but the sweep/page couldn't see
+// them). Sources IDs from matched rows first, email codes second.
+function manualReply(kind) {
+  const rows = (matched || []).filter(m => m.matchType !== 'ROW (out of range)');
+  const ids = rows.length
+    ? rows.map(m => m.trackingId || m.title || m.id).filter(Boolean)
+    : [...new Set(extractCodes(latestSegment(emailEl.value)))];
+  if (kind === 'missing')
+    return buildNotAvailableReply(
+      (ids.length ? ids : ['(request)', '(request)']).map(id => ({ id, status: 'MISSING' })),
+      dlChannelName(), emailSender);
+  if (!ids.length) return null;
+  if (kind === 'received')
+    return buildConfirmationEmail(ids.map(id => ({ id, status: 'FOUND' })), emailSender);
+  // 'ingest' - matched rows carry espn/title extras; bare IDs still draft
+  return buildMatchConfirmation(rows.length ? rows : ids.map(id => ({ trackingId: id })), emailSender);
+}
+
 function refreshReply(force) {
   const area = $('replyArea');
+  const kind = ($('replyKind') && $('replyKind').value) || 'auto';
   let text = null;
-  if (lastResults) {
+  if (kind !== 'auto') {
+    text = manualReply(kind);
+    if (!text) toast('Nothing to draft - no IDs or rows to cite.');
+  } else if (lastResults) {
     const espnIds = new Set();
     (matched || []).forEach(m => {
       if (!m.espn) return;
@@ -2158,15 +2182,19 @@ function refreshReply(force) {
       buildReconConfirmation(lastResults, espnIds, emailSender) ||
       buildConfirmationEmail(lastResults, emailSender);
   }
-  if (!text && matched) text = buildMatchConfirmation(matched, emailSender);
-  if (!text) { area.classList.add('hidden'); return; }
+  if (!text && matched && kind === 'auto') text = buildMatchConfirmation(matched, emailSender);
+  if (!text) { area.classList.add('hidden'); setStage('sdReply'); return; }
   area.classList.remove('hidden');
+  const det = area.closest('details');
+  if (det && !det.open) det.open = true;
+  setStage('sdReply', 'ok', 'reply drafted');
   if (force || !replyDirty) { $('replyPreview').value = text; replyDirty = false; }
   updateReplyCheck();
 }
 
 $('replyPreview').addEventListener('input', () => { replyDirty = true; updateReplyCheck(); });
 $('redraftReply').addEventListener('click', () => refreshReply(true));
+$('replyKind').addEventListener('change', () => { replyDirty = false; refreshReply(true); });
 $('clearReply').addEventListener('click', () => {
   $('replyPreview').value = ''; replyDirty = false; updateReplyCheck();
 });
