@@ -70,7 +70,11 @@ chrome.alarms.onAlarm.addListener(async a => {
     const cands = (msgs || []).filter(m => {
       const from = m.from && m.from.emailAddress && m.from.emailAddress.address;
       const body = stripHtml((m.body && m.body.content) || '');
-      return isRequestCandidate(m.subject, body, from, reqSenders, selfAddr) ||
+      // Delivery notices (Comcast manifest / Yangaroo "New Media") are the
+      // request itself - alert on them even from no-reply senders.
+      const deliveryNotice = parseComcastNotice(m.subject, body) ||
+        (/yangaroo\.com/i.test(String(from || '')) && /new media/i.test(m.subject));
+      return deliveryNotice || isRequestCandidate(m.subject, body, from, reqSenders, selfAddr) ||
         (batchFresh && isTatariErNotice(m.subject, body, from));
     });
     // One alert per Tatari ER batch - the ~99 notices behind it stay quiet.

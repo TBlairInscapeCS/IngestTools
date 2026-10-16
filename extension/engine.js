@@ -589,6 +589,14 @@ function parseErNotice(subject, body, fromAddr) {
   };
 }
 
+// "Spot" anchors in a Comcast notice -> cad-api asset URLs (mimecast-wrapped).
+// Document order matches the spot rows parsed by parseComcastNotice.
+function comcastDlLinks(html) {
+  const re = /<a[^>]+href="([^"]+)"[^>]*>\s*Spot\s*<\/a>/gi, out = [];
+  let m; while ((m = re.exec(html)) && out.length < 40) out.push(m[1]);
+  return out;
+}
+
 // Comcast AdDelivery "Delivery Notification" mails are structured
 // manifests: ORDER SUMMARY (Provider/Advertiser/Brand/Order #) plus
 // DELIVERY DETAILS rows (ISCI title HD duration). Parsed into the same

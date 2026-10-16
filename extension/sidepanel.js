@@ -1014,8 +1014,22 @@ function renderInbox(msgs, quiet) {
     }
     const erNotice = isTatariErNotice(m.subject, body, fromAddr) &&
       Date.now() - erBatchAt > ER_BATCH_WINDOW;
-    if (erNotice || isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr))
-      cands.push({ m, body, erNotice });
+    const html = (m.body && m.body.content) || '';
+    const yd = parseYangarooHtml(html);
+    let dl = yd ? yd.spots : null;
+    if (!dl) {
+      const cd = parseComcastNotice(m.subject, body), links = comcastDlLinks(html);
+      // spot rows and "Spot" anchors share document order - zip them, but
+      // never reuse a link: unlinked rows are better skipped than
+      // downloaded under a wrong ISCI name.
+      if (cd && links.length)
+        dl = cd.spots.map((s, i) => ({ id: s.isci || s.id, url: links[i] }))
+          .filter(s => s.url);
+    }
+    // dl present (Yangaroo/Comcast) means live download links - the
+    // notice IS the request, even from a no-reply sender.
+    if (erNotice || dl || isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr))
+      cands.push({ m, body, erNotice, yd, dl });
   });
   if (erDirty) {
     if (erDeliveries.length > 300) erDeliveries = erDeliveries.slice(-300);
@@ -1063,7 +1077,9 @@ function renderInbox(msgs, quiet) {
       return '<div><a href="#" data-ib="' + i + '"><b>load</b></a> ' +
         esc(c.m.subject || '(no subject)') + ' <i>' + esc(from) + ' · ' + esc(when) +
         (folder ? ' · <b>' + esc(folder) + '</b>' : '') + unmapped +
-        (replied ? ' · <b>replied ✓</b>' : '') + '</i></div>';
+        (replied ? ' · <b>replied ✓</b>' : '') +
+        (c.dl ? ' <a href="#" data-ydl="' + i + '"><b>dl ' + c.dl.length + ' spot(s)</b></a>' : '') +
+        '</i></div>';
     }).join('');
   el.querySelectorAll('a[data-ib]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
@@ -1084,6 +1100,30 @@ function renderInbox(msgs, quiet) {
       url: 'https://docs.google.com/spreadsheets/d/' + sids[0], active: false });
     tryLoadTrackerAttachment(c.m.id);
     toast('Email loaded from inbox.');
+  }));
+  // One-click delivery download: every spot's direct link (Yangaroo or
+  // Comcast cad-api) queues into Ingest/<date>-<client>-<brand>/ without
+  // ever opening the email.
+  el.querySelectorAll('a[data-ydl]').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    const c = cands[parseInt(a.dataset.ydl, 10)];
+    const yc = detectClient({ emailText: c.body, subject: c.m.subject,
+      folderName: folderMap[c.m.parentFolderId] || '' });
+    const brand = (extractAdvertiser(c.m.subject) || 'delivery')
+      .replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+    const d = String(c.m.receivedDateTime || '').slice(0, 10).replace(/-/g, '');
+    const cl = yc ? yc.name.split(' (')[0].split(' / ')[0].replace(/[^\w]+/g, '') :
+      (c.yd ? 'yangaroo' : 'comcast');
+    const job = (d + '-' + cl + '-' + brand).slice(0, 80);
+    let n = 0;
+    c.dl.forEach(s => {
+      const nm = ((s.id || 'spot').replace(/[^\w.-]+/g, '_')) + '.mp4';
+      chrome.downloads.download({ url: s.url, filename: 'Ingest/' + job + '/' + nm,
+        conflictAction: 'uniquify' }).then(id => ourDlIds.add(id)).catch(() => {});
+      n++;
+    });
+    toast('Queued ' + n + ' spot(s) to Ingest/' + job + '/.');
+    dbg('delivery dl', { job, spots: n, order: (c.yd && c.yd.orderId) || '' });
   }));
   // Quiet background polls announce only genuinely new candidates.
   const fresh = cands.filter(c => !inboxSeen.has(c.m.id));
