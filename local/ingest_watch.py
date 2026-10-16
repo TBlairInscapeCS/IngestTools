@@ -327,6 +327,19 @@ def portal_statuses(realm: str, wanted: list[str]) -> dict:
     return {w: idx.get(norm_stem(w)) for w in wanted}
 
 
+# Status vocabulary from the portal page's own JS (examples/ saved pages):
+# INGEST_STARTED -> INGEST_COMPLETED -> DETECTION_STARTED -> DETECTION_COMPLETED,
+# INGEST_FAILED_<reason> as terminal failures. UI progress bars render
+# detection_results + detection_percentage - the same fields we poll.
+PORTAL_STAGE = {
+    "INGEST_STARTED": "uploading to portal",
+    "INGEST_COMPLETED": "queued for detection",
+    "DETECTION_STARTED": "detecting",
+    "PROCESSING": "processing",
+    "DETECTION_COMPLETED": "done",
+}
+
+
 def portal_terminal(rec) -> bool:
     """Terminal = done either way (pass or fail); detection_result 'pass'
     counts even on an unrecognized status string."""
@@ -360,6 +373,7 @@ def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
     report["portal"] = {
         "realm": realm,
         "statuses": {k: ((v.get("status") or "?") +
+                         (" (" + PORTAL_STAGE[v["status"]] + ")" if v.get("status") in PORTAL_STAGE else "") +
                          (" %.0f%%" % v["pct"] if v.get("pct") is not None else ""))
                         if v else "no record"
                      for k, v in statuses.items()},
