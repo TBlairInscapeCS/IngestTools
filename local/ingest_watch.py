@@ -255,6 +255,30 @@ def process_job(manifest_path: Path):
     report = {"job": manifest.get("job"), "client": client or None, "files": []}
     changed = False
 
+    # Loose zips no manifest entry names (scooped select-all archives,
+    # manual drops): unpack once, pair members onto pending rows so the
+    # entry loop finds them this same pass.
+    expected_names = [e.get("file", "") for e in manifest.get("files", []) if e.get("file")]
+    for zp in job_dir.glob("*.zip"):
+        if zp.name in expected_names or zp.name in state.get("unzipped", []):
+            continue
+        try:
+            members = unzip_media(zp, job_dir)
+            pair_members(members, expected_names, job_dir)
+        except Exception:
+            members = []
+            try:
+                rej = job_dir / "_rejected"
+                rej.mkdir(exist_ok=True)
+                zp.rename(rej / zp.name)
+            except Exception:
+                pass
+        state.setdefault("unzipped", []).append(zp.name)
+        changed = True
+        notify("Ingest watcher",
+               f"{zp.name}: unpacked {len(members)} media file(s)" if members
+               else f"{zp.name}: no usable media inside")
+
     for entry in manifest.get("files", []):
         name = entry.get("file", "")
         status = {"file": name, "needs_espn": entry.get("needs_espn", False)}
@@ -418,11 +442,103 @@ def relocate_debug_logs():
 # starts with 'manifest' and would spawn -report-report-report chains.
 MANIFEST_RE = re.compile(r"^(?:manifest(?: \(\d+\))?|.+-manifest)\.json$")
 
+# ---- Downloads scoop --------------------------------------------------------
+# Chrome's own downloads (Drive select-all zips, manual saves) land in
+# ~/Downloads, outside the job folders. A file moves into a job ONLY when
+# its name - or a zip's media members - matches a pending manifest row;
+# everything else stays put and silent. Recency + seen-set bound the scan.
+DOWNLOADS_DIR = WATCH_DIR.parent
+SCOOP_WINDOW = 6 * 3600
+_seen_dl = set()
+
+
+def pending_expectations():
+    """job_dir -> list of manifest filenames that still have no local file."""
+    jobs = {}
+    for manifest in sorted(WATCH_DIR.glob("*/*.json")):
+        if not MANIFEST_RE.match(manifest.name):
+            continue
+        try:
+            m = json.loads(manifest.read_text())
+        except Exception:
+            continue
+        job_dir = manifest.parent
+        state = load_state(manifest)
+        for e in m.get("files", []):
+            name = e.get("file", "")
+            if not name:
+                continue
+            if name in state.get("rejected", []) or name in state.get("unzipped", []):
+                continue
+            if find_downloaded(job_dir, name) is not None:
+                continue
+            jobs.setdefault(job_dir, []).append(name)
+    return jobs
+
+
+def stem_match(a: str, b: str) -> bool:
+    a, b = norm_stem(a), norm_stem(b)
+    return len(a) >= 4 and len(b) >= 4 and (a in b or b in a)
+
+
+def scoop_downloads():
+    if not DOWNLOADS_DIR.exists():
+        return
+    pending = pending_expectations()
+    if not pending:
+        return
+    now = time.time()
+    try:
+        entries = list(DOWNLOADS_DIR.iterdir())
+    except Exception:
+        return
+    for p in entries:
+        if not p.is_file() or p.suffix.lower() == ".crdownload" or p.name in _seen_dl:
+            continue
+        try:
+            if now - p.stat().st_mtime > SCOOP_WINDOW:
+                _seen_dl.add(p.name)
+                continue
+        except Exception:
+            continue
+        ext = p.suffix.lower()
+        if ext in MEDIA_EXTS:
+            for job_dir, wants in pending.items():
+                match = next((w for w in wants if stem_match(w, p.name)), None)
+                if match:
+                    try:
+                        p.replace(job_dir / match)
+                    except Exception:
+                        continue
+                    notify("Ingest watcher", f"{p.name} -> {job_dir.name}/{match}")
+                    log(f"scooped {p.name} into {job_dir.name} as {match}")
+                    break
+            _seen_dl.add(p.name)
+        elif ext == ".zip":
+            try:
+                with zipfile.ZipFile(p) as z:
+                    med = [Path(i.filename).name for i in z.infolist()
+                           if not i.is_dir()
+                           and Path(i.filename).suffix.lower() in MEDIA_EXTS]
+            except Exception:
+                med = []
+            hit = next((jd for jd, wants in pending.items()
+                        if any(stem_match(w, m) for m in med for w in wants)), None)
+            if hit:
+                try:
+                    p.replace(hit / p.name)
+                    notify("Ingest watcher", f"{p.name} -> {hit.name}/ (zip matched pending rows)")
+                    log(f"scooped zip {p.name} into {hit.name}")
+                except Exception:
+                    pass
+            _seen_dl.add(p.name)
+
 
 def run_once():
     if not WATCH_DIR.exists():
         return
     relocate_debug_logs()
+    scoop_downloads()
     for manifest in sorted(WATCH_DIR.glob("*/*.json")):
         if MANIFEST_RE.match(manifest.name):
             process_job(manifest)
