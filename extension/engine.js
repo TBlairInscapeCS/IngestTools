@@ -270,8 +270,19 @@ function greet(sender) {
 // legal/disclaimer paragraphs, signature contact/logo/device lines. Body
 // lines (incl. any inline-image placeholder text) are never touched.
 function ticketEmail(text) {
-  const head = String(text || '').split(
-    /\r?\n(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i)[0];
+  // Cut quoted replies at the first quote marker - but a pasted email can
+  // carry real headers (From:/Sent:/Date:) at the top, which are content,
+  // not quotes. Skip a leading header run before hunting the cut line.
+  const all = String(text || '').split(/\r?\n/);
+  const HDR = /^(from|sent|to|cc|bcc|subject|date):\s/i;
+  const QUOTE = /^(from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i;
+  let i = 0;
+  while (i < all.length && (HDR.test(all[i].trim()) || !all[i].trim())) i++;
+  let end = all.length;
+  for (let j = i; j < all.length; j++) {
+    if (QUOTE.test(all[j].trim())) { end = j; break; }
+  }
+  const head = all.slice(0, end).join('\n');
   // Disclaimers travel as their own blank-separated paragraphs - drop the
   // whole block when it carries a legal/confidentiality marker.
   const JUNK_PARA = /intended recipient|confidential|privileged|may not (disclose|distribute|copy)|delete this message|notify the sender|liabilit|property of|transmission|scanned.*(virus|threat)|(virus|threat).*scanned|consider the environment|unsubscribe|accept (no|any) responsibility|does not represent/i;
@@ -533,7 +544,8 @@ function parseEml(text) {
     body = stripHtml(body);
   }
   if (/quoted-printable/i.test(headers)) body = qpDecode(body);
-  return { subject: subject.trim(), body: body.trim(), from: from.trim() };
+  const date = (headers.match(/^date:\s*([^\r\n]+(?:\r?\n[ \t][^\r\n]*)*)/im) || [])[1] || '';
+  return { subject: subject.trim(), body: body.trim(), from: from.trim(), date: date.trim() };
 }
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;

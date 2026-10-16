@@ -15,6 +15,7 @@ let lastResults = null;    // reconcile() output
 let emailDates = new Set();
 let emailSubject = '';
 let emailSender = '';      // sender first name for reply greetings
+let emailDate = '';        // sent timestamp for the Jira ticket header
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -463,7 +464,29 @@ function grabEmailText() {
       .replace(/<[^>]*>/g, '').replace(/\S+@\S+/g, '').trim()
       .slice(0, 60);
   }
-  return { text: text.slice(0, 80000), subject, sender };
+  // Sent timestamp off the reading-pane header - best effort, three passes:
+  // a <time> element, an aria-label/title carrying date+time, then any small
+  // header-shaped element whose text is date-ish.
+  let date = '';
+  const tEl = document.querySelector('time[datetime]');
+  if (tEl) date = (tEl.getAttribute('datetime') || tEl.innerText || '').trim();
+  if (!date) {
+    const lbl = [...document.querySelectorAll('[aria-label],[title]')]
+      .map(el => el.getAttribute('aria-label') || el.getAttribute('title') || '')
+      .find(s => s.length < 90 && /\d{1,2}:\d{2}/.test(s) &&
+        /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun|\d{1,2}\/\d{1,2}\//i.test(s));
+    if (lbl) date = lbl.trim();
+  }
+  if (!date) {
+    document.querySelectorAll('div,span').forEach(el => {
+      const t = (el.innerText || '').trim();
+      if (!date && t.length > 8 && t.length < 70 &&
+          /\d{1,2}:\d{2}\s*(am|pm)?/i.test(t) &&
+          /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}\/\d{1,2}\//i.test(t))
+        date = t;
+    });
+  }
+  return { text: text.slice(0, 80000), subject, sender, date: date.slice(0, 90) };
 }
 
 // Inside Outlook: Yangaroo "ADVERTISING DELIVERY" notifications carry a
@@ -664,20 +687,24 @@ async function grabEmailFrom(tab) {
     yr = yres.result || {};
   } catch (e) { /* delivery-link scrape is optional */ }
   yangaroo = (yr.spots && yr.spots.length) ? yr : null;
-  setEmailText(text, (res.result && res.result.subject) || '', (res.result && res.result.sender) || '');
+  setEmailText(text, (res.result && res.result.subject) || '', (res.result && res.result.sender) || '',
+    (res.result && res.result.date) || '');
   return true;
 }
 
 // Email intake shared by the Outlook grab, clipboard paste, and .eml load.
 // Anything that arrives as plain text loses the delivery-page anchor
 // scrape - callers null yangaroo themselves.
-function setEmailText(text, subject, sender) {
+function setEmailText(text, subject, sender, date) {
   if (text !== emailEl.value) resetRun(); // new request = fresh run state
   emailEl.value = text;
   emailSubject = subject || '';
   // Reply greeting: explicit sender name wins (Outlook DOM / .eml From:),
   // else parse a leading From: line (Graph inbox / pasted headers).
   emailSender = senderFirstName(sender) || senderFirstName(text) || '';
+  // Timestamp: explicit probe wins, else a pasted header line carries it.
+  emailDate = String(date || '').trim() ||
+    ((text.match(/^(?:sent|date|received):\s*(.+)$/im) || [])[1] || '').trim().slice(0, 90);
   detectedAdvertiser = extractAdvertiser(emailSubject);
   applyClient(detectClient({ emailText: text, subject: emailSubject }), 'email');
   stamp('tsEmail');
@@ -716,7 +743,7 @@ emailEl.addEventListener('drop', e => {
   r.onload = () => {
     const eml = /\.eml$/i.test(f.name) ? parseEml(r.result) : { subject: '', body: r.result };
     yangaroo = null;
-    setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from));
+    setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from), eml.date);
     toast('Loaded ' + f.name + '.');
   };
   r.readAsText(f);
@@ -861,7 +888,8 @@ function renderInbox(msgs, quiet) {
     const from = c.m.from && c.m.from.emailAddress;
     yangaroo = null;
     setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
-      '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '');
+      '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
+      String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16));
     toast('Email loaded from inbox.');
   }));
   // Quiet background polls announce only genuinely new candidates.
@@ -1216,7 +1244,7 @@ $('fileInput').addEventListener('change', e => {
     r.onload = () => {
       const eml = /\.eml$/i.test(f.name) ? parseEml(r.result) : { subject: '', body: r.result };
       yangaroo = null;
-      setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from));
+      setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from), eml.date);
       toast('Loaded ' + f.name + '.');
     };
     r.readAsText(f);
@@ -3182,7 +3210,10 @@ $('saveRecords').addEventListener('click', async () => {
 
 function buildJiraTicket() {
   const wanted = ingestReportIds();
-  const lines = [ticketEmail(emailEl.value), '', '----', '', 'Ingest:'];
+  // Timestamp rides above the request as a header line - searchable and
+  // provenance-clear, without rewriting the email itself.
+  const eml = (emailDate ? 'Date: ' + emailDate + '\n' : '') + ticketEmail(emailEl.value);
+  const lines = [eml, '', '----', '', 'Ingest:'];
   wanted.forEach(w => lines.push(w.reporting + (w.title ? ' - ' + w.title : '') + (w.espn ? ' (ESPN)' : '')));
   return lines.join('\n');
 }
