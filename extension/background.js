@@ -26,7 +26,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 // Fresh-request alert: poll every minute. A never-before-seen request-like
-// unread message fires a sticky OS notification AND a loud siren through
+// unread message fires a sticky OS notification AND a double-ding service-bell chime through
 // the offscreen audio doc - the badge counts what's outstanding. Silent
 // no-op until the user signs in from the panel.
 chrome.alarms.create('inboxPoll', { periodInMinutes: 1 });
@@ -76,7 +76,7 @@ chrome.alarms.onAlarm.addListener(async a => {
 });
 
 // Clicking the notification focuses the side panel (user gesture, so the
-// open is allowed) and silences the siren.
+// open is allowed) and silences the chime.
 chrome.notifications.onClicked.addListener(async () => {
   chrome.runtime.sendMessage({ stop: true });
   try {
