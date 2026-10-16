@@ -534,13 +534,34 @@ function mimeWord(s) {
     } catch (e) { return txt; }
   });
 }
-// Does an unread message look like a delivery request? Codes in the body
-// are a slam dunk; otherwise the delivery-vocabulary check catches the
-// "please ingest" phrasing. Used by the Graph inbox scan and the badge.
+// Request-intent phrasing for unknown senders. Bare "ingest"/"delivered"
+// match ops noise (CCR "signal ingest", AWS "data ingest") so every
+// alternative needs media context or vendor vocabulary - corpus-verified
+// against ~500 real inbox messages.
+const REQ_INTENT = /please\s+ingest|to\s+be\s+ingest|ingest\w*\s+(?:the\s+|these\s+|this\s+)?(?:following|attached|enclosed|new|below|creative|spot|file|video|clip|asset|commercial)s?\b|\b(?:creative|spot|file|video|clip|asset|commercial)s?\s+(?:to|for|need\w*\s+to\s+be)\s+ingest\w*\b|\b(?:creative|spot|file|video|clip|asset|commercial)s?\s+(?:added|attached|enclosed|inside|for\s+ingest\w*)\b|\bcreative\s+ingest\w*\b|\binscape\s+ingest\w*\b|\bfingerprint(?:ing)?\s+(?:request|needed|required)\b|\bcommercials?\s+uploaded\b|\bnew\s+(?:creative|spot)s?\b|\byangaroo\b|\bextreme\s*reach\b|\bisci\b|\bad-?ids?\b|\bspot\s+(?:delivery|list)s?\b|\btracking\s+(?:sheet|ids?|codes?)\b/i;
+// POD (proof of delivery) is case-sensitive - lowercase "pod" is Kubernetes.
+const REQ_INTENT_POD = /\bPOD\b/;
+
+// Code-shaped tokens that survive detection scrutiny: URLs stripped first
+// (SafeLinks/Mimecast tracking params tokenize into fake codes), then
+// require a digit and reject broadcast callsigns (SHOCSHD, WGTADT, D2
+// suffixes), pure-hex GUID/tracking fragments, and AWS region names.
+function detectCodes(text) {
+  const clean = String(text || '').replace(/https?:\/\/\S+/g, ' ');
+  return extractCodes(clean).filter(c =>
+    /\d/.test(c) &&
+    !/^[A-Z]{2,6}(HD|DT|CD|LD|SHD)\d?$/i.test(c) &&
+    !/^[0-9A-F]{8,}$/i.test(c) &&
+    !/^[a-z]{2}-[a-z]+-\d+$/i.test(c));
+}
+
+// Does an unread message look like a delivery request? Strong intent
+// phrasing is enough on its own; a bare code dump needs 3+ clean tokens.
+// Used by the Graph inbox scan and the badge.
 function looksLikeRequest(subject, body) {
-  if (extractCodes(body || '').length >= 2) return true;
   const t = (subject || '') + ' ' + String(body || '').slice(0, 4000);
-  return /ingest|new creative|new spot|deliver(y|ed)|traffick|extreme ?reach|yangaroo|ad-?id|isci|spot (delivery|list)|tracking sheet/i.test(t);
+  if (REQ_INTENT.test(t) || REQ_INTENT_POD.test(t)) return true;
+  return detectCodes(body).length >= 3;
 }
 
 // Automated senders never carry a request - Jira comment mail quotes our
@@ -555,19 +576,22 @@ function isAutoSender(addr) {
 // ingest-ish content (so non-request mail from a client domain still
 // doesn't surface), then the content fallback for brand-new senders.
 // `senders` = the learned map from confirmed ingests (addr -> n, dom:x -> n).
-// `selfDomain` = the user's own domain - self-sent confirmations quoted
-// back into the inbox aren't requests either.
-function isRequestCandidate(subject, body, fromAddr, senders, selfDomain) {
+// `selfAddr` = the user's own address - self-sent confirmations quoted back
+// into the inbox aren't requests. Address-only: colleagues on the same
+// domain carry most real request traffic.
+function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   const s = String(subject || ''), a = String(fromAddr || '');
   if (isAutoSender(a)) return false;
-  if (selfDomain && a.toLowerCase().endsWith('@' + selfDomain)) return false;
+  if (selfAddr && a.toLowerCase() === String(selfAddr).toLowerCase()) return false;
+  // OOO/auto-replies on request threads quote the request below them.
+  if (/^\s*(?:\[\s*external\s*\]\s*)*(?:automatic reply|auto-?reply|out of office)\b/i.test(s)) return false;
   // Replies quoting an old request below "Thanks!" aren't new requests -
   // only what the sender actually wrote (first segment) may score. A re:
   // subject describes the old thread, so replies score on body alone.
   const isReply = /^\s*re\s*:/i.test(s);
   const b = firstSegment(body);
   if (!isReply && CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
-  const weak = extractCodes(b).length >= 1 ||
+  const weak = detectCodes(b).length >= 1 ||
     /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
       .test((isReply ? '' : s) + ' ' + b.slice(0, 2000));
   const known = CLIENTS.some(c => ((c.detect || {}).domains || []).some(re => re.test(a)));
@@ -575,7 +599,7 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfDomain) {
     ((senders[a.toLowerCase()] || 0) >= 1 ||
      (senders['dom:' + (a.split('@')[1] || '').toLowerCase()] || 0) >= 3);
   if (known || learned) return weak;
-  return looksLikeRequest(s, b);
+  return looksLikeRequest(isReply ? '' : s, b);
 }
 
 function parseEml(text) {

@@ -19,7 +19,8 @@ let emailDate = '';        // sent timestamp for the Jira ticket header
 let emailGraphId = '';     // Graph message id when the email came via inbox
 let emailFromAddr = '';    // sender address of the Graph-loaded email
 let reqSenders = {};       // learned request senders (addr -> n, dom:x -> n)
-let selfDomain = '';       // user's own mail domain - self-mail isn't a request
+let selfAddr = '';         // user's own address - self-mail isn't a request
+let selfDomain = '';       // own domain - never learned as a sender domain
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -935,7 +936,7 @@ function renderInbox(msgs, quiet) {
   msgs.forEach(m => {
     const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
     const fromAddr = m.from && m.from.emailAddress && m.from.emailAddress.address;
-    if (isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfDomain)) cands.push({ m, body });
+    if (isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr)) cands.push({ m, body });
   });
   if (!cands.length) {
     el.style.display = 'none';
@@ -976,17 +977,23 @@ setInterval(() => { if (MS.refreshToken) checkInbox(true); }, 5 * 60 * 1000);
 // (trusted at 1) and their domain (trusted at 3), stored across sessions.
 function noteConfirmedSender(addr) {
   const a = String(addr || '').toLowerCase();
-  if (!a.includes('@')) return;
-  const dom = 'dom:' + a.split('@')[1];
+  if (!a.includes('@') || isAutoSender(a) || a === selfAddr) return;
+  const d = a.split('@')[1];
   reqSenders[a] = (reqSenders[a] || 0) + 1;
-  reqSenders[dom] = (reqSenders[dom] || 0) + 1;
+  // Own domain is never learned - it would bless every colleague's mail at
+  // weak-signal level, and real requests still score on content.
+  if (d && d !== selfDomain) reqSenders['dom:' + d] = (reqSenders['dom:' + d] || 0) + 1;
   chrome.storage.local.set({ reqSenders });
 }
 chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; });
-chrome.storage.local.get('msSelfDomain', d => {
+chrome.storage.local.get(['msSelfDomain', 'msSelfAddr'], d => {
   selfDomain = d.msSelfDomain || '';
-  // Learn it once per session if a token exists but the domain was never captured.
-  if (!selfDomain && MS.refreshToken) graphSelfDomain().then(d => { selfDomain = d; }).catch(() => {});
+  selfAddr = d.msSelfAddr || '';
+  // Learn it once per session if a token exists but it was never captured.
+  if (!selfAddr && MS.refreshToken)
+    graphSelfDomain().then(() => chrome.storage.local.get(['msSelfDomain', 'msSelfAddr'], x => {
+      selfDomain = x.msSelfDomain || ''; selfAddr = x.msSelfAddr || '';
+    })).catch(() => {});
 });
 
 $('copyLog').addEventListener('click', () => {

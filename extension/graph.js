@@ -199,12 +199,13 @@ async function graphMarkRead(msgId) {
   });
 }
 
-// The signed-in user's own address domain - cached so request detection
-// can exclude mail they sent themselves.
+// The signed-in user's own address + domain - cached so request detection
+// can exclude mail they sent themselves (address match only: colleagues
+// on the same domain carry real request traffic).
 async function graphSelfDomain() {
   const d = await graphFetch('/me?$select=mail,userPrincipalName');
-  const addr = d.mail || d.userPrincipalName || '';
-  const dom = (addr.split('@')[1] || '').toLowerCase();
-  if (dom) chrome.storage.local.set({ msSelfDomain: dom });
+  const addr = (d.mail || d.userPrincipalName || '').toLowerCase();
+  const dom = (addr.split('@')[1] || '');
+  if (dom) chrome.storage.local.set({ msSelfDomain: dom, msSelfAddr: addr });
   return dom;
 }
