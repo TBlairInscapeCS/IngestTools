@@ -20,6 +20,8 @@ let emailGraphId = '';     // Graph message id when the email came via inbox
 let emailFromAddr = '';    // sender address of the Graph-loaded email
 let emailFolderName = '';  // Outlook folder the loaded email was filed into
 let folderMap = {};        // folderId -> displayName (rules-based client map)
+let customerFolderIds = []; // folder ids under the Customers tree
+let folderActivity = {};   // client folder name -> latest mail ISO
 let reqSenders = {};       // learned request senders (addr -> n, dom:x -> n)
 let erBatchAt = 0;         // when a Tatari ER batch notice last surfaced
 const ER_BATCH_WINDOW = 4 * 864e5; // Tatari batches land within a week
@@ -280,10 +282,25 @@ function renderClientNote() {
   const showAdv = detectedAdvertiser &&
     ((client.ingest && client.ingest.advertiser) ||
      client.id === 'er-notify' || client.id === 'yangaroo-delivery');
+  // Known tracking sheets -> one-click open (then "scrape sheet" picks up
+  // the match from there). First sheetId wins; extras stay in detect.
+  const trackerIds = (client.detect && client.detect.sheetIds) || [];
+  // Last-mail date from the weekly folder-activity scan - quiet clients
+  // surface their staleness right in the note.
+  const lastMail = Object.keys(CLIENT_FOLDERS)
+    .filter(f => CLIENT_FOLDERS[f] === client.id)
+    .map(f => folderActivity[f]).filter(Boolean).sort().pop();
   el.innerHTML = '<b>' + esc(client.name) + (client.inactive ? ' (inactive)' : '') + '</b> - ' +
     esc(caveat) +
     ((live || (client.note && caveat !== client.note)) ? ' <span class="ib" data-bubble="clientFull">?</span>' : '') +
     (showAdv ? '<br><b>Advertiser:</b> ' + esc(detectedAdvertiser) : '') +
+    (client.delivery ? '<br><b>Delivery:</b> ' + esc(client.delivery) : '') +
+    (lastMail ? ' <i>· last mail ' + esc(lastMail.slice(0, 10)) + '</i>' : '') +
+    (trackerIds.length
+      ? '<br>' + trackerIds.map(id =>
+          '<a href="https://docs.google.com/spreadsheets/d/' + esc(id) +
+          '" target="_blank">open tracker sheet</a>').join(' · ')
+      : '') +
     (client.er && client.er.sender
       ? '<br><b>ER sweep:</b> sender "' + esc(client.er.sender) + '"' +
         (client.er.days ? ' · ' + client.er.days + 'd' : '')
@@ -992,9 +1009,17 @@ function renderInbox(msgs, quiet) {
       const when = String(c.m.receivedDateTime || '').replace('T', ' ').slice(5, 16);
       const folder = folderMap[c.m.parentFolderId] || '';
       const replied = c.m.conversationId && repliedConvs.has(c.m.conversationId);
+      // Request-shaped mail filed under a Customers folder we don't have a
+      // playbook for: mapped-but-null = known unclassified, absent = a rule
+      // folder we've never seen = probably a new client.
+      const unmapped = folder &&
+        (CLIENT_FOLDERS[folder] === null
+          ? ' · <b>unmapped folder</b>'
+          : (!(folder in CLIENT_FOLDERS) && customerFolderIds.includes(c.m.parentFolderId)
+            ? ' · <b>new client?</b>' : ''));
       return '<div><a href="#" data-ib="' + i + '"><b>load</b></a> ' +
         esc(c.m.subject || '(no subject)') + ' <i>' + esc(from) + ' · ' + esc(when) +
-        (folder ? ' · <b>' + esc(folder) + '</b>' : '') +
+        (folder ? ' · <b>' + esc(folder) + '</b>' : '') + unmapped +
         (replied ? ' · <b>replied ✓</b>' : '') + '</i></div>';
     }).join('');
   el.querySelectorAll('a[data-ib]').forEach(a => a.addEventListener('click', e => {
@@ -1036,15 +1061,22 @@ chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; }
 chrome.storage.local.get('erBatchAt', d => { erBatchAt = d.erBatchAt || 0; });
 chrome.storage.local.get('msRepliedConvs', d => { repliedConvs = new Set(d.msRepliedConvs || []); });
 chrome.storage.local.get('erDeliveries', d => { erDeliveries = d.erDeliveries || []; });
+chrome.storage.local.get('msCustomerFolderIds', d => { customerFolderIds = d.msCustomerFolderIds || []; });
+chrome.storage.local.get('msFolderActivity', d => { folderActivity = d.msFolderActivity || {}; });
 // Folder map powers the client tagging on inbox candidates; refresh weekly
-// (the folder tree rarely changes).
+// (the folder tree rarely changes). The activity scan rides along - one
+// latest-mail call per Customers subfolder feeds the "quiet client" date.
 chrome.storage.local.get(['msFolderMap', 'msFolderMapAt'], d => {
   folderMap = d.msFolderMap || {};
   const stale = !d.msFolderMapAt || Date.now() - d.msFolderMapAt > 7 * 864e5;
   if (stale && MS.refreshToken)
-    graphFolderMap().then(m => {
-      folderMap = m;
+    graphFolderMap().then(r => {
+      folderMap = r.map || r;
+      customerFolderIds = r.custIds || customerFolderIds;
       chrome.storage.local.set({ msFolderMapAt: Date.now() });
+      graphFolderActivity(customerFolderIds, folderMap)
+        .then(a => { folderActivity = a; })
+        .catch(() => {});
     }).catch(() => {});
 });
 // Sent-template learning: once a day, scan Sent Items for template replies
@@ -1079,6 +1111,23 @@ $('copyLog').addEventListener('click', () => {
 $('clearLog').addEventListener('click', () => { dbgLog = []; chrome.storage.local.set({ dbgLog }); renderDbg(); flushLog(); });
 emailEl.addEventListener('input', () => { stamp('tsEmail'); onEmailChange(); saveInputs(); });
 
+// ER-deliveries registry entries that plausibly belong to this request:
+// same trafficking agency as the detected client's er.sender, or an
+// advertiser/brand the notice names appearing in the email text.
+// Window is the client's er.days (Tatari 14d) so stale batches don't leak.
+function erRegistryHits(req) {
+  const days = (client && client.er && client.er.days) || 14;
+  const cutoff = Date.now() - days * 864e5;
+  const sender = (client && client.er && client.er.sender || '').toLowerCase();
+  const hay = ((emailSubject || '') + '\n' + req).toLowerCase();
+  return erDeliveries.filter(x => {
+    if (new Date(x.when).getTime() < cutoff) return false;
+    if (sender && (x.agency || '').toLowerCase().includes(sender)) return true;
+    return [x.advertiser, x.brand].filter(Boolean)
+      .some(v => v.length > 3 && hay.includes(v.toLowerCase()));
+  });
+}
+
 function onEmailChange() {
   const text = emailEl.value;
   if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
@@ -1109,6 +1158,19 @@ function onEmailChange() {
   if (emailCodes.length >= 2) {
     bits.push('<a href="#" id="useEmailCodes">use codes as requested IDs</a>');
   }
+  // ER registry cross-check: what the agency actually delivered (ER
+  // notices) vs what this request cites. Delivered-but-uncited spots get
+  // surfaced; "use delivered IDs" seeds the requested-IDs box from the
+  // registry when the request mail is vague ("the batch from this week").
+  const erHits = erRegistryHits(req);
+  const erCodes = [...new Set(erHits.flatMap(x => x.codes || []))];
+  if (erHits.length) {
+    const uncited = erCodes.filter(c => !emailCodes.includes(c));
+    bits.push('ER registry: <b>' + erHits.length + '</b> notice(s) / ' +
+      erCodes.length + ' spot(s) from ' + esc(erHits[0].agency || 'agency') +
+      (uncited.length ? ' · <b>' + uncited.length + ' not cited in email</b>' : ' · all cited'));
+    if (erCodes.length) bits.push('<a href="#" id="useDeliveredCodes">use delivered IDs</a>');
+  }
   // Same-line code+title pairs (Chief Media) feed spot-title naming when
   // the sheet has no title column.
   emailPairs = extractCodeTitlePairs(req);
@@ -1138,6 +1200,14 @@ function onEmailChange() {
     idsEl.value = emailCodes.join('\n');
     saveInputs();
     toast(emailCodes.length + ' email code(s) set as requested IDs.');
+  });
+  const ud = $('useDeliveredCodes');
+  if (ud) ud.addEventListener('click', e => {
+    e.preventDefault();
+    const codes = [...new Set(erRegistryHits(req).flatMap(x => x.codes || []))];
+    idsEl.value = codes.join('\n');
+    saveInputs();
+    toast(codes.length + ' ER-delivered code(s) set as requested IDs.');
   });
   // Green when the email carries something matchable; orange when it
   // loaded but nothing extractable came with it (probably the wrong

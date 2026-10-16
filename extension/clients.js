@@ -709,6 +709,19 @@ var CLIENTS = [
     delivery: 'links',
     note: 'Scheduled "Inscape Delivery From CBS" feed notices - confirmations, not request triggers.',
   },
+  {
+    id: 'vizio-ads',
+    name: 'Vizio Ads (internal)',
+    detect: {
+      subjects: [/clips for ingestion|vizio ?ads/i],
+      keywords: [/clips for ingestion|vizio ?ads|ingest as (?:commercial|clip|video)/i],
+      // No domain pattern - @vizio.com senders carry every colleague
+      // thread; only the subject/keyword phrasing is distinctive.
+    },
+    delivery: 'links',
+    note: "Internal studio clip requests ('Clips for Ingestion - <studio> <title>': PHE = Paramount, WBHE = Warner Bros Home Entertainment) from @vizio.com teammates. The body names the portal customers - 'ingest as Commercial Video + Audio to geniusdigital and vizio' - so ingest to EVERY customer the email names, not just one.",
+    ingest: { cidMap: ['vizioads', 'vizio', 'geniusdigital'] },
+  },
 ];
 
 // Outlook folder rules file customer mail before it reaches the inbox -
@@ -822,6 +835,8 @@ function extractAdvertiser(subject) {
   if (m && m[1].trim()) return m[1].trim();
   m = s.match(/inscape\s+ingest\s*-\s*(.+)/i);
   if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/clips for ingestion\s*[-–—:]\s*(.+)/i);
+  if (m && m[1].trim()) return m[1].trim();
   m = s.match(/^(.*?)\s*-\s*creatives for\s+(?:re-?)?fingerprinting/i);
   if (m && m[1].trim()) return m[1].trim();
   m = s.match(/^(.*?)\s*\|\s*inscape\s+ingest(?:ion)?/i) ||
@@ -864,4 +879,7 @@ const JIRA_EPICS = {
   lwd: 'DD-832', lwdirect: 'DD-832',
   simulmedia: 'DD-597',
   dataplusmath: 'DD-495', liveramp: 'DD-495',
+  // Internal clip ingests (PHE/WBHE movie clips) log on the Vizio Ads
+  // weekly task - "to geniusdigital and vizio" rides under the same epic.
+  vizioads: 'DD-751', vizio: 'DD-751', geniusdigital: 'DD-751',
 };

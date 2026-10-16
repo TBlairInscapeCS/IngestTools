@@ -160,25 +160,47 @@ async function graphUnread(top) {
 }
 
 // folderId -> displayName for every folder (incl. Customers/*
-// grandchildren). Cached in storage - the tree rarely changes.
+// grandchildren). Cached in storage - the tree rarely changes. Returns
+// { map, custIds } - custIds are the folder ids under Customers, used to
+// spot request-shaped mail landing in unmapped client folders.
 async function graphFolderMap() {
   const map = {};
+  const custIds = [];
   const top = (await graphFetch('/me/mailFolders?$top=100&$select=id,displayName,childFolderCount')).value || [];
   for (const f of top) {
     map[f.id] = f.displayName;
     if (!f.childFolderCount) continue;
+    const inCust = /^customers$/i.test(f.displayName);
     const kids = (await graphFetch('/me/mailFolders/' + f.id +
       '/childFolders?$top=100&$select=id,displayName,childFolderCount')).value || [];
     for (const k of kids) {
       map[k.id] = k.displayName;
+      if (inCust) custIds.push(k.id);
       if (!k.childFolderCount) continue;
       const g = (await graphFetch('/me/mailFolders/' + k.id +
         '/childFolders?$top=100&$select=id,displayName')).value || [];
-      g.forEach(x => { map[x.id] = x.displayName; });
+      g.forEach(x => { map[x.id] = x.displayName; if (inCust) custIds.push(x.id); });
     }
   }
-  chrome.storage.local.set({ msFolderMap: map });
-  return map;
+  chrome.storage.local.set({ msFolderMap: map, msCustomerFolderIds: custIds });
+  return { map, custIds };
+}
+
+// Latest-mail timestamp per folder (Customers subfolders drive the
+// "quiet client" display in the client note). ~1 call per folder; meant
+// for the weekly folder-map refresh, not per poll.
+async function graphFolderActivity(folderIds, map) {
+  const act = {};
+  for (const id of folderIds || []) {
+    try {
+      const r = await graphFetch('/me/mailFolders/' + id +
+        '/messages?$top=1&$select=receivedDateTime&$orderby=receivedDateTime desc');
+      const v = r.value || [];
+      if (v.length && (map || {})[id]) act[map[id]] = v[0].receivedDateTime;
+    } catch (e) { /* folder may be gone or empty */ }
+  }
+  chrome.storage.local.set({ msFolderActivity: act });
+  return act;
 }
 
 // The reply template - "I've ingested those creatives ... under the
