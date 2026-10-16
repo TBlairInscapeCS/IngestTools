@@ -46,6 +46,8 @@ let sheetTabs = [];        // tab names in that workbook
 let sheetTabName = '';     // which tab was loaded
 let sheetSourceTab = null; // the open Sheets tab the workbook came from
 let sheetGids = {};        // tab name -> web gid (for #gid= navigation)
+let lastSheetRef = null;   // {id, gid, tabName} - re-exportable w/o the tab
+let sheetAutoLoaded = '';  // client.id whose tracker auto-pulled this run
 let dlTotal = 0, dlDone = 0, dlFailed = 0;
 const ourDlIds = new Set(); // chrome.downloads ids we started - onChanged fires for ALL browser downloads
 let lastCapTab = null;     // tab the last page capture ran against
@@ -224,6 +226,7 @@ function resetRun() {
   // The job label is per-batch - a stale one kept merging later batches
   // into one folder. The base (date+client) regenerates at download time.
   $('jobLabel').value = '';
+  sheetAutoLoaded = ''; // next request may auto-pull a different tracker
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
   $('jiraPreview').value = ''; $('jiraStatus').innerHTML = '';
@@ -1063,6 +1066,9 @@ function renderInbox(msgs, quiet) {
 // While the panel is open, poll quietly every 5 min so a fresh request
 // surfaces without the user pressing anything.
 setInterval(() => { if (MS.refreshToken) checkInbox(true); }, 5 * 60 * 1000);
+// Keep a doc-loaded tracker near-real-time: re-export every 5 min in the
+// background. Safe because loadSheetDoc only needs the stored doc id.
+setInterval(() => { if (lastSheetRef) refreshSheet(true); }, 5 * 60 * 1000);
 
 // Learned request senders: each confirmed ingest bumps the sender's address
 // (trusted at 1) and their domain (trusted at 3), stored across sessions.
@@ -1082,6 +1088,7 @@ chrome.storage.local.get('msRepliedConvs', d => { repliedConvs = new Set(d.msRep
 chrome.storage.local.get('erDeliveries', d => { erDeliveries = d.erDeliveries || []; });
 chrome.storage.local.get('msCustomerFolderIds', d => { customerFolderIds = d.msCustomerFolderIds || []; });
 chrome.storage.local.get('msFolderActivity', d => { folderActivity = d.msFolderActivity || {}; });
+chrome.storage.local.get('msLastSheet', d => { lastSheetRef = d.msLastSheet || null; });
 // Folder map powers the client tagging on inbox candidates; refresh weekly
 // (the folder tree rarely changes). The activity scan rides along - one
 // latest-mail call per Customers subfolder feeds the "quiet client" date.
@@ -1150,6 +1157,16 @@ function erRegistryHits(req) {
 function onEmailChange() {
   const text = emailEl.value;
   if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
+  // Auto-pull the client's known tracker off its mined sheet id - the
+  // request email no longer needs to carry the sheet link. Skipped when
+  // the right doc (or a manual load) is already in place.
+  const sids = (client && client.detect && client.detect.sheetIds) || [];
+  const sheetIsCurrent = sheet && lastSheetRef && sids.includes(lastSheetRef.id);
+  if (sids.length && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
+    sheetAutoLoaded = client.id;
+    loadSheetDoc(sids[0], 0, '', client.name + ' tracker')
+      .then(ok => { if (ok) toast('Auto-loaded the ' + client.name + ' tracker.'); });
+  }
   // The request is the newest message only - older replies in a pasted
   // thread carry already-confirmed codes that must not re-extract.
   const req = latestSegment(text);
@@ -1271,6 +1288,10 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
       dbg('tab mismatch', { focused: tabName, gid, loaded: wb.sheetName });
     }
     loadSheetRows(wb, sourceLabel || ('tab "' + wb.sheetName + '"'));
+    // The doc id is all a refresh needs - the open tab going through
+    // reloads, navigation, or being closed can't break the pull anymore.
+    lastSheetRef = { id, gid: gid || 0, tabName: wb.sheetName };
+    chrome.storage.local.set({ msLastSheet: lastSheetRef });
     return true;
   } catch (e) {
     dbg('xlsx fetch fail', { id: id.slice(0, 12), err: String(e) });
@@ -1284,6 +1305,16 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
     loadSheetText(await r2.text(), 'Sheet tab gid=' + (gid || '0'));
     return true;
   } catch (e2) { toast('Could not export sheet: ' + e2); setStage('sdSheet', 'fail', 'sheet export failed (auth?)'); return false; }
+}
+
+// Re-export the last doc-loaded sheet. The tab is irrelevant - refresh,
+// navigation, even closing it can't break this, and Match calls it so
+// the data is always current at the moment it matters.
+async function refreshSheet(quiet) {
+  if (!lastSheetRef) return false;
+  const ok = await loadSheetDoc(lastSheetRef.id, lastSheetRef.gid, lastSheetRef.tabName, 'sheet refresh');
+  if (!quiet) toast(ok ? 'Sheet refreshed from Google.' : 'Sheet refresh failed.');
+  return ok;
 }
 
 // Load a tracker off an already-open tab (Google Sheet or SharePoint
@@ -1516,6 +1547,7 @@ $('fileInput').addEventListener('change', e => {
       try {
         const wb = await readXlsx(r.result, '');
         sheetSourceTab = null; sheetGids = {};
+        lastSheetRef = null;
         scoreCache = { key: '', scores: null };
         sheetBuf = r.result;
         sheetTabs = wb.sheetNames || [];
@@ -1539,6 +1571,7 @@ $('fileInput').addEventListener('change', e => {
 function loadSheetText(text, sourceLabel) {
   sheetBuf = null; sheetTabs = []; sheetTabName = '';
   sheetSourceTab = null; sheetGids = {};
+  lastSheetRef = null;
   scoreCache = { key: '', scores: null };
   const p = parseInput(text);
   if (!p.rows.length) { setStage('sdSheet', 'fail', 'nothing parsed'); return toast('Nothing parsed from ' + sourceLabel); }
@@ -1732,7 +1765,12 @@ function mergeMatches(fresh) {
   return fresh.concat(carried);
 }
 
-$('match').addEventListener('click', () => { doMatch(); });
+$('match').addEventListener('click', async () => {
+  // Fresh data at match time - the sheet may have gained rows since the
+  // last manual pull, and doc-loaded sheets can always re-export by id.
+  await refreshSheet(true);
+  doMatch();
+});
 
 // Everything that runs once `matched` is final: link/spot joins, results
 // table, requested-ID seeding, and the delivery-path pick.

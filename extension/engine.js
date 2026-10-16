@@ -854,7 +854,9 @@ function extractCodes(text) {
   const re = /[A-Z0-9][A-Z0-9_\-:]{3,24}/g;
   let m;
   while ((m = re.exec(String(text || ''))) !== null) {
-    const tok = m[0].replace(/[.:;,]+$/, '');
+    // "_ticker" citations (ESPN variants) collapse to the base code; a
+    // leftover trailing '_' is never part of the code itself.
+    const tok = m[0].replace(/_ticker$/i, '').replace(/[.:;,!_]+$/, '');
     if (isCodeToken(tok) && !seen.has(tok)) { seen.add(tok); out.push(tok); }
   }
   return out;

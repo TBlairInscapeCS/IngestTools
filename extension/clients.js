@@ -837,6 +837,8 @@ function extractAdvertiser(subject) {
   if (m && m[1].trim()) return m[1].trim();
   m = s.match(/clips for ingestion\s*[-–—:]\s*(.+)/i);
   if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/^(.*?)\s*inscape\s+pod\b/i);
+  if (m && m[1].trim()) return m[1].trim();
   m = s.match(/^(.*?)\s*-\s*creatives for\s+(?:re-?)?fingerprinting/i);
   if (m && m[1].trim()) return m[1].trim();
   m = s.match(/^(.*?)\s*\|\s*inscape\s+ingest(?:ion)?/i) ||
