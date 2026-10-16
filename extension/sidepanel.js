@@ -174,6 +174,22 @@ function emailSheetRefs() {
   return refs;
 }
 
+// Job naming: ~/Downloads/Ingest/<date>-<client>-<label>/ - the client
+// name is always in the path so every batch self-identifies and lands in
+// its own folder (a reused label can no longer pile batches together and
+// get Chrome-uniquified manifests the watcher can't see). The label box
+// is an optional suffix; advertiser falls in when the box is empty.
+function jobSlugBase() {
+  const d = extractDates(emailEl.value)[0] || new Date().toISOString().slice(0, 10);
+  const cl = client ? client.name.split(' (')[0].split(' / ')[0].replace(/[^\w]+/g, '') : 'job';
+  return d.replace(/-/g, '') + '-' + cl;
+}
+function jobSlug() {
+  const extra = String($('jobLabel').value || detectedAdvertiser || '')
+    .replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+  return (jobSlugBase() + (extra ? '-' + extra : '')).slice(0, 80);
+}
+
 function saveInputs() {
   chrome.storage.local.set({
     emailText: emailEl.value, idsText: idsEl.value, filesText: filesEl.value,
@@ -205,6 +221,9 @@ function resetRun() {
   // a dirty reply kept last request's text, a staged Jira run could post
   // the wrong ticket's comment, and stale records/dates attach wrongly.
   replyDirty = false; emailDate = ''; emailGraphId = ''; emailFromAddr = ''; emailFolderName = '';
+  // The job label is per-batch - a stale one kept merging later batches
+  // into one folder. The base (date+client) regenerates at download time.
+  $('jobLabel').value = '';
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
   $('jiraPreview').value = ''; $('jiraStatus').innerHTML = '';
@@ -1828,11 +1847,10 @@ function presentMatches() {
   // Feed the reconcile box + suggest a job folder name.
   idsEl.value = matched.map(m => m.id).filter(Boolean).join('\n');
   if (!$('jobLabel').value) {
-    const d = extractDates(emailEl.value)[0] || new Date().toISOString().slice(0, 10);
-    const slug = emailSubject
-      ? emailSubject.replace(/^\[external\]\s*/i, '').replace(/^(re|fw|fwd):\s*/i, '').replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-      : '';
-    $('jobLabel').value = d.replace(/-/g, '') + (slug ? '-' + slug : '');
+    const slug = (detectedAdvertiser || emailSubject || '')
+      .replace(/^\[external\]\s*/i, '').replace(/^(re|fw|fwd):\s*/i, '')
+      .replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    if (slug) $('jobLabel').value = slug;
   }
   const nLinks = matched.filter(m => m.link).length;
   const nEspn = matched.filter(m => m.espn).length;
@@ -2147,7 +2165,7 @@ function linkShape(url) {
 async function downloadLinked() {
   if (!matched || !matched.length) { toast('Run the match first.'); return false; }
   warnStale();
-  const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+  const job = jobSlug();
   const withLinks = matched.filter(m => m.link || m.yangarooUrl);
   if (!withLinks.length) {
     if (client && client.delivery !== 'links') {
@@ -2258,7 +2276,7 @@ async function downloadLinked() {
   }
   const blob = new Blob([buildManifest(job, jobs, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/manifest.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/' + job);
   const nEspnJobs = jobs.filter(j => j.needs_espn).length;
@@ -2676,7 +2694,7 @@ async function downloadFound() {
     }
   }
   if (!fresh.length) { setStage('sdDl', 'warn', skipped ? 'all matches already downloaded' : 'no downloadable links captured'); toast((skipped ? 'All ' + skipped + ' match(es) already downloaded this session' : 'No downloadable links captured') + (noUrl.length ? ' - ' + noUrl.length + ' matched by name only' : '') + '.'); return false; }
-  const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+  const job = jobSlug();
   dlTotal = fresh.length; dlDone = 0; dlFailed = 0; htmlRejects = [];
   updateDlStatus();
   for (const j of fresh) {
@@ -2688,7 +2706,7 @@ async function downloadFound() {
   }
   const blob = new Blob([buildManifest(job, fresh, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/manifest.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   dbg('download found queued', { files: fresh.map(j => j.file), urls: fresh.map(j => j.url) });
   setStage('sdDl', 'ok', fresh.length + ' file(s) queued to Ingest/' + job);
@@ -3459,16 +3477,16 @@ $('verifyIngest').addEventListener('click', async () => {
 // same artifact the Tatari/large-batch workflow already uses.
 $('saveRecords').addEventListener('click', async () => {
   if (!lastIngestRecords.length) return;
-  const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+  const job = jobSlug();
   const payload = JSON.stringify({
     job, realm: ingestRealm(), queried_at: new Date().toISOString(),
     records: lastIngestRecords,
   }, null, 2);
   const blob = new Blob([payload], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/ingest-records.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '/' + job + '-ingest-records.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  toast('Saved ingest-records.json to Ingest/' + job + '/ - attach it to the ticket.');
+  toast('Saved ' + job + '-ingest-records.json to Ingest/' + job + '/ - attach it to the ticket.');
 });
 
 function buildJiraTicket() {
@@ -3506,8 +3524,8 @@ async function capturePortalShot() {
 $('shotPortal').addEventListener('click', async () => {
   try {
     const dataUrl = await capturePortalShot();
-    const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
-    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '/ingest-screenshot.png' });
+    const job = jobSlug();
+    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '/' + job + '-ingest-screenshot.png' });
     toast('Screenshot saved to Ingest/' + job + '/');
   } catch (e) {
     dbg('screenshot failed', e.message);
@@ -3670,16 +3688,16 @@ $('postJira').addEventListener('click', async () => {
     draftWithoutProof = false;
 
     // Keep the same artifacts locally - the job folder gets the proofs too.
-    const job = ($('jobLabel').value || 'job').replace(/[^\w.-]+/g, '-');
+    const job = jobSlug();
     if (records.length) {
       const blob = new Blob([JSON.stringify({ job, realm: ingestRealm(),
         queried_at: new Date().toISOString(), records }, null, 2)], { type: 'application/json' });
       const u = URL.createObjectURL(blob);
-      chrome.downloads.download({ url: u, filename: 'Ingest/' + job + '/ingest-records.json' });
+      chrome.downloads.download({ url: u, filename: 'Ingest/' + job + '/' + job + '-ingest-records.json' });
       setTimeout(() => URL.revokeObjectURL(u), 30000);
     }
     if (shotUrl)
-      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/' + job + '/ingest-screenshot.png' });
+      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/' + job + '/' + job + '-ingest-screenshot.png' });
 
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
     const { issue, newest } = await jiraWeeklyTicket(epic);

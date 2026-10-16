@@ -194,10 +194,10 @@
 
 <details class="s3" open>
   <summary>3 · Match<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
-  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. Files land in ~/Downloads/Ingest/&lt;job&gt;/.</div>
+  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
   <div class="row">
     <button id="match" class="primary">Match</button>
-    <input type="text" id="jobLabel" placeholder="job folder" size="14">
+    <input type="text" id="jobLabel" placeholder="batch label" size="14">
     <button id="download" class="hidden"></button>
     <button id="showSheet" class="hidden">Show on sheet</button>
   </div>

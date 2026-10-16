@@ -117,8 +117,16 @@ def find_downloaded(job_dir: Path, want_name: str):
     return None
 
 
-def load_state(job_dir: Path) -> dict:
-    f = job_dir / ".watcher_state.json"
+def state_file(manifest_path: Path) -> Path:
+    # Per-manifest state: <job>-manifest.json -> .<job>-manifest-state.json.
+    # Legacy plain "manifest.json" keeps the original dotfile name.
+    stem = manifest_path.stem
+    name = ".watcher_state.json" if stem == "manifest" else f".{stem}-state.json"
+    return manifest_path.parent / name
+
+
+def load_state(manifest_path: Path) -> dict:
+    f = state_file(manifest_path)
     if f.exists():
         try:
             return json.loads(f.read_text())
@@ -127,12 +135,16 @@ def load_state(job_dir: Path) -> dict:
     return {"notified": [], "done": [], "failed": []}
 
 
-def save_state(job_dir: Path, state: dict):
-    (job_dir / ".watcher_state.json").write_text(json.dumps(state, indent=2))
+def save_state(manifest_path: Path, state: dict):
+    state_file(manifest_path).write_text(json.dumps(state, indent=2))
 
 
-def write_report(job_dir: Path, report: dict):
-    (job_dir / "report.json").write_text(json.dumps(report, indent=2))
+def write_report(manifest_path: Path, report: dict):
+    # <job>-manifest.json -> <job>-manifest-report.json; legacy "manifest"
+    # keeps "report.json".
+    stem = manifest_path.stem
+    name = "report.json" if stem == "manifest" else f"{stem}-report.json"
+    (manifest_path.parent / name).write_text(json.dumps(report, indent=2))
 
 
 def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bool, str]:
@@ -162,13 +174,13 @@ def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bo
     return False, "espn_ticker.sh failed: " + " | ".join(tail)
 
 
-def process_job(job_dir: Path):
-    manifest_path = job_dir / "manifest.json"
+def process_job(manifest_path: Path):
+    job_dir = manifest_path.parent
     try:
         manifest = json.loads(manifest_path.read_text())
     except Exception:
         return
-    state = load_state(job_dir)
+    state = load_state(manifest_path)
     client = manifest.get("client") or {}
     ticker_suffix = client.get("tickerSuffix") or "_ticker"
     report = {"job": manifest.get("job"), "client": client or None, "files": []}
@@ -228,9 +240,9 @@ def process_job(job_dir: Path):
         changed = True
         report["files"].append(status)
 
-    write_report(job_dir, report)
+    write_report(manifest_path, report)
     if changed:
-        save_state(job_dir, state)
+        save_state(manifest_path, state)
 
 
 def relocate_debug_logs():
@@ -258,8 +270,16 @@ def run_once():
     if not WATCH_DIR.exists():
         return
     relocate_debug_logs()
-    for manifest in sorted(WATCH_DIR.glob("*/manifest.json")):
-        process_job(manifest.parent)
+    # Manifest names: "<job>-manifest.json" (current), "manifest.json" and
+    # Chrome-uniquified "manifest (n).json" (legacy same-folder batches).
+    # "*-report.json" files never match either pattern. Each manifest gets
+    # its own state/report so batches sharing a folder don't collide.
+    manifests = sorted(set(
+        list(WATCH_DIR.glob("*/manifest*.json")) +
+        list(WATCH_DIR.glob("*/*-manifest.json"))
+    ))
+    for manifest in manifests:
+        process_job(manifest)
 
 
 def main():
