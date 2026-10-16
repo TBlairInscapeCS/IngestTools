@@ -443,6 +443,7 @@ var CLIENTS = [
     id: 'lwd',
     name: 'LWD Direct',
     detect: {
+      sheetIds: ['1eR7opu0NPKOCpVLgCD-pu4DpqrtvoEq_'],
       subjects: [/lwd vizio|acr links/i],
       keywords: [/\blwd\b|lw ?direct/i],
       domains: [/lwdirect\.com|attentionarc\.com/i],
@@ -458,7 +459,10 @@ var CLIENTS = [
     id: 'marketing-evolution',
     name: 'Marketing Evolution',
     inactive: true,
-    detect: { keywords: [/marketing evolution/i] },
+    detect: {
+      sheetIds: ['1s1sXAa_xdW1DPxOn2FmTtYr23fMe7fu-nJRyEVGE7xE'],
+      keywords: [/marketing evolution/i],
+    },
     delivery: 'other',
     ingest: { cidMap: 'sheet', note: 'cid_map values come from the Google Sheet they maintain (e.g. Lexus campaign doc).' },
   },
@@ -643,6 +647,7 @@ var CLIENTS = [
     id: 'broadbeam',
     name: 'Broadbeam Media',
     detect: {
+      sheetIds: ['1wv6dcs0Fk_gJgguACdq3v7JRKTDnPYvN'],
       subjects: [/broadbeam/i],
       keywords: [/broadbeam/i],
       domains: [/broadbeammedia\.com/i],
@@ -654,6 +659,7 @@ var CLIENTS = [
     id: 'optimum-a4',
     name: 'Optimum / a4 / Altice',
     detect: {
+      sheetIds: ['1iY7VHZR-2w7OwwUKipTmQzvkwFL4jo9UAauAkNtMA7s'],
       subjects: [/creatives for (re-?)?fingerprinting/i],
       keywords: [/a4media|altice|optimum/i],
       domains: [/optimum\.media|a4media\.com/i],
@@ -665,6 +671,7 @@ var CLIENTS = [
     id: 'pga-tour',
     name: 'PGA Tour',
     detect: {
+      sheetIds: ['12qOs1UYKsJ65k3dNpakSR1r2VKpO7YeakrOi6iUQjsc'],
       subjects: [/vizio \/\/ pga|pga ?t/i],
       keywords: [/pga ?tour/i],
       domains: [/pgatourhq\.com/i],
@@ -789,8 +796,15 @@ function detectClient(sig) {
 }
 
 // Advertiser name out of delivery-notification subjects:
-//   "<Brand> Spot Delivery Notification for Inscape TV"  (Extreme Reach)
-//   "New Media Available from <Brand>: ..."              (Yangaroo)
+//   "<Brand> Spot Delivery Notification for Inscape TV"   (Extreme Reach)
+//   "New Media Available from <Brand>: ..."               (Yangaroo)
+//   "<Brand> | Horizon Media | Creative Ingest Request"   (Horizon)
+//   "InMarket/Inscape - <Brand> C7" / "Inscape x InMarket - <Brand>"  (InMarket)
+//   "<Brand> Creatives added" / "Creative added, <Brand>" (Chief Media)
+//   "Inscape Ingest - <Brand/Show>"                       (Millenia3)
+//   "<Brand> - Creatives for (Re-)Fingerprinting"         (Optimum/a4)
+//   "<Brand> Inscape (Creative )?Ingest(ion)?( Request)?" (misc agencies)
+//   "<Brand> | Inscape Ingestion"                         (Spectrum Resi etc.)
 // Used to aid matching and shown only when the client's ingest spec
 // requires advertiser/brand metadata - the useful identity is normally
 // the agency, not the brand.
@@ -800,6 +814,19 @@ function extractAdvertiser(subject) {
   if (m && m[1].trim()) return m[1].trim();
   m = s.match(/new media available from\s+([^:]+)/i);
   if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/^(.*?)\s*\|\s*horizon media\s*\|/i);
+  if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/(?:inmarket\s*[/x]\s*inscape|inscape\s*x\s*inmarket)\s*-\s*(.+)/i);
+  if (m && m[1].trim()) return m[1].replace(/\s+C\d+\s*$/i, '').trim();
+  m = s.match(/^(.*?)\s+creatives?\s+added/i) || s.match(/creative added,?\s+(.+)/i);
+  if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/inscape\s+ingest\s*-\s*(.+)/i);
+  if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/^(.*?)\s*-\s*creatives for\s+(?:re-?)?fingerprinting/i);
+  if (m && m[1].trim()) return m[1].trim();
+  m = s.match(/^(.*?)\s*\|\s*inscape\s+ingest(?:ion)?/i) ||
+      s.match(/^(.*?)\s*inscape\s+(?:creative\s+)?ingest(?:ion)?(?:\s+request)?\s*$/i);
+  if (m && m[1].trim()) return m[1].replace(/[\s|–—-]+$/, '').replace(/\s+x\s*$/i, '').trim();
   return '';
 }
 
@@ -831,4 +858,10 @@ const JIRA_EPICS = {
   comscore: 'DD-631',
   inmarket: 'DD-800',
   chiefmedia: 'DD-826',
+  // Mined from the weekly-task history: realms that already post weekly
+  // "File Ingests" tasks under these epics.
+  cuebiq: 'DD-604',
+  lwd: 'DD-832', lwdirect: 'DD-832',
+  simulmedia: 'DD-597',
+  dataplusmath: 'DD-495', liveramp: 'DD-495',
 };

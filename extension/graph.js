@@ -148,7 +148,7 @@ async function graphUnread(top) {
   const url = 'https://graph.microsoft.com/v1.0/me/messages' +
     '?$filter=' + encodeURIComponent('isRead eq false') +
     '&$top=' + (top || 25) +
-    '&$select=id,subject,from,receivedDateTime,body,parentFolderId' +
+    '&$select=id,subject,from,receivedDateTime,body,parentFolderId,conversationId' +
     '&$count=true';
   const r = await fetch(url, {
     headers: { Authorization: 'Bearer ' + tok, ConsistencyLevel: 'eventual' },
@@ -188,7 +188,8 @@ const REQ_REPLY_TMPL = /i'?ve ingested|under the following ids|commercial report
 
 // Sender addresses on threads that got a template reply. Scans recent
 // Sent Items for the template, then pulls each thread's senders. Returns
-// { senders: [...], scanned: n } so callers can learn them all.
+// { senders: [...], convs: [...], scanned: n } - convs are the replied
+// conversationIds so callers can mark/skip already-handled threads.
 async function graphLearnedSenders(sinceIso) {
   const q = '/me/mailFolders/sentitems/messages?$top=50' +
     '&$select=subject,conversationId,body,receivedDateTime' +
@@ -210,7 +211,7 @@ async function graphLearnedSenders(sinceIso) {
       });
     } catch (e) { /* skip dead threads */ }
   }
-  return { senders, scanned: sent.length };
+  return { senders, convs: convIds, scanned: sent.length };
 }
 
 // Minimal tag strip for body sniffing (engine's stripHtml isn't loaded

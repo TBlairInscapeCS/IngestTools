@@ -25,6 +25,8 @@ let erBatchAt = 0;         // when a Tatari ER batch notice last surfaced
 const ER_BATCH_WINDOW = 4 * 864e5; // Tatari batches land within a week
 let selfAddr = '';         // user's own address - self-mail isn't a request
 let selfDomain = '';       // own domain - never learned as a sender domain
+let repliedConvs = new Set(); // conversationIds that already got a template reply
+let erDeliveries = [];     // parsed ER "Spot Delivery Notification" registry
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let matchCols = {};        // column picks in effect for the current match
@@ -937,14 +939,28 @@ async function tryLoadTrackerAttachment(msgId) {
 function renderInbox(msgs, quiet) {
   const el = $('inboxList');
   const cands = [];
+  let erDirty = false;
   msgs.forEach(m => {
     const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
     const fromAddr = m.from && m.from.emailAddress && m.from.emailAddress.address;
+    // Every ER "Spot Delivery Notification" gets parsed into the deliveries
+    // registry as it passes through (unread) - agency/advertiser/order +
+    // the ISCI list. The match stage can then check what was actually
+    // delivered when the request mail lands.
+    const er = parseErNotice(m.subject, body, fromAddr);
+    if (er && !erDeliveries.some(x => x.id === m.id)) {
+      erDeliveries.push({ id: m.id, when: m.receivedDateTime, ...er });
+      erDirty = true;
+    }
     const erNotice = isTatariErNotice(m.subject, body, fromAddr) &&
       Date.now() - erBatchAt > ER_BATCH_WINDOW;
     if (erNotice || isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr))
       cands.push({ m, body, erNotice });
   });
+  if (erDirty) {
+    if (erDeliveries.length > 300) erDeliveries = erDeliveries.slice(-300);
+    chrome.storage.local.set({ erDeliveries });
+  }
   // First Tatari ER notice of the batch is shown once - mark the batch so
   // the ~99 delivery notices behind it stay quiet.
   if (cands.some(c => c.erNotice)) {
@@ -956,15 +972,30 @@ function renderInbox(msgs, quiet) {
     if (!quiet) toast('No unread request-like emails.');
     return;
   }
+  // Deliveries-registry summary: how many ER spot deliveries landed per
+  // agency this week. Context for the request mails that follow them.
+  const weekAgo = Date.now() - 7 * 864e5;
+  const erByAgency = {};
+  erDeliveries.forEach(x => {
+    if (new Date(x.when).getTime() < weekAgo) return;
+    const a = x.agency || 'unknown agency';
+    erByAgency[a] = (erByAgency[a] || 0) + (x.codes.length || 1);
+  });
+  const erTally = Object.keys(erByAgency).length
+    ? ' <i>· ER spots delivered this week: ' +
+      Object.entries(erByAgency).map(([a, n]) => esc(a) + ' ×' + n).join(', ') + '</i>'
+    : '';
   el.style.display = 'block';
-  el.innerHTML = '<b>' + cands.length + ' unread request-like email(s):</b>' +
+  el.innerHTML = '<b>' + cands.length + ' unread request-like email(s):</b>' + erTally +
     cands.map((c, i) => {
       const from = (c.m.from && c.m.from.emailAddress && c.m.from.emailAddress.name) || '';
       const when = String(c.m.receivedDateTime || '').replace('T', ' ').slice(5, 16);
       const folder = folderMap[c.m.parentFolderId] || '';
+      const replied = c.m.conversationId && repliedConvs.has(c.m.conversationId);
       return '<div><a href="#" data-ib="' + i + '"><b>load</b></a> ' +
         esc(c.m.subject || '(no subject)') + ' <i>' + esc(from) + ' · ' + esc(when) +
-        (folder ? ' · <b>' + esc(folder) + '</b>' : '') + '</i></div>';
+        (folder ? ' · <b>' + esc(folder) + '</b>' : '') +
+        (replied ? ' · <b>replied ✓</b>' : '') + '</i></div>';
     }).join('');
   el.querySelectorAll('a[data-ib]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
@@ -1003,6 +1034,8 @@ function noteConfirmedSender(addr) {
 }
 chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; });
 chrome.storage.local.get('erBatchAt', d => { erBatchAt = d.erBatchAt || 0; });
+chrome.storage.local.get('msRepliedConvs', d => { repliedConvs = new Set(d.msRepliedConvs || []); });
+chrome.storage.local.get('erDeliveries', d => { erDeliveries = d.erDeliveries || []; });
 // Folder map powers the client tagging on inbox candidates; refresh weekly
 // (the folder tree rarely changes).
 chrome.storage.local.get(['msFolderMap', 'msFolderMapAt'], d => {
@@ -1022,8 +1055,11 @@ chrome.storage.local.get('lastLearnAt', d => {
   const since = new Date(Date.now() - 7 * 864e5).toISOString();
   graphLearnedSenders(since).then(r => {
     (r.senders || []).forEach(noteConfirmedSender);
+    (r.convs || []).forEach(c => repliedConvs.add(c));
+    if (repliedConvs.size > 500) repliedConvs = new Set([...repliedConvs].slice(-500));
+    chrome.storage.local.set({ msRepliedConvs: [...repliedConvs] });
     chrome.storage.local.set({ lastLearnAt: Date.now() });
-    dbg('sender learning', { senders: (r.senders || []).length, scanned: r.scanned });
+    dbg('sender learning', { senders: (r.senders || []).length, convs: (r.convs || []).length, scanned: r.scanned });
   }).catch(e => dbg('sender learning fail', { err: String(e) }));
 });
 chrome.storage.local.get(['msSelfDomain', 'msSelfAddr'], d => {

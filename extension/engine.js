@@ -568,6 +568,27 @@ function isTatariErNotice(subject, body, fromAddr) {
     /trafficked by.{0,120}?tatari/i.test(String(body || '').slice(0, 5000));
 }
 
+// Structured fields out of an Extreme Reach "Spot Delivery Notification"
+// - the notice carries Trafficked By (<name> at <agency>), Advertiser,
+// Brand, Order Number and the ISCI/AdId list. Returns null on non-notices;
+// the deliveries registry these feed lets the match stage sanity-check
+// what an agency actually delivered before the request mail arrives.
+function parseErNotice(subject, body, fromAddr) {
+  if (!/extremereach\.com/i.test(String(fromAddr || '')) ||
+      !/spot delivery notification for inscape/i.test(String(subject || ''))) return null;
+  const t = String(body || '');
+  const field = (re) => { const m = t.match(re); return m ? m[1].trim() : ''; };
+  return {
+    agency: field(/trafficked\s+by.{0,120}?\bat\s+([^\n.]{2,50})/i) ||
+            field(/trafficked\s+by[:\s]+([^\n]{2,60})/i),
+    advertiser: field(/advertiser\s*:\s*([^\n]{1,80})/i),
+    brand: field(/brand\s*:\s*([^\n]{1,80})/i),
+    order: field(/order\s+(?:number|#)\s*:?\s*([A-Z0-9-]{3,20})/i),
+    isci: field(/isci\/?\s*ad\s*id\s*:?\s*([A-Z0-9-]{3,25})/i),
+    codes: detectCodes(t),
+  };
+}
+
 // Code-shaped tokens that survive detection scrutiny: URLs stripped first
 // (SafeLinks/Mimecast tracking params tokenize into fake codes), then
 // require a digit and reject broadcast callsigns (SHOCSHD, WGTADT, D2
