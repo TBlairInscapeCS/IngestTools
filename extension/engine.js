@@ -538,9 +538,19 @@ function mimeWord(s) {
 // match ops noise (CCR "signal ingest", AWS "data ingest") so every
 // alternative needs media context or vendor vocabulary - corpus-verified
 // against ~500 real inbox messages.
-const REQ_INTENT = /please\s+ingest|to\s+be\s+ingest|ingest\w*\s+(?:the\s+|these\s+|this\s+)?(?:following|attached|enclosed|new|below|creative|spot|file|video|clip|asset|commercial)s?\b|\b(?:creative|spot|file|video|clip|asset|commercial)s?\s+(?:to|for|need\w*\s+to\s+be)\s+ingest\w*\b|\b(?:creative|spot|file|video|clip|asset|commercial)s?\s+(?:added|attached|enclosed|inside|for\s+ingest\w*)\b|\bcreative\s+ingest\w*\b|\binscape\s+ingest\w*\b|\bfingerprint(?:ing)?\s+(?:request|needed|required)\b|\bcommercials?\s+uploaded\b|\bnew\s+(?:creative|spot)s?\b|\byangaroo\b|\bextreme\s*reach\b|\bisci\b|\bad-?ids?\b|\bspot\s+(?:delivery|list)s?\b|\btracking\s+(?:sheet|ids?|codes?)\b/i;
+const REQ_INTENT = /please\s+ingest|to\s+be\s+ingest|ingest\w*\s+(?:the\s+|these\s+|this\s+)?(?:following|attached|enclosed|new|below|creative|spot|file|video|clip|asset|commercial)s?\b|\b(?:creative|spot|file|video|clip|asset|commercial)s?\s+(?:to|for|need\w*\s+to\s+be)\s+ingest\w*\b|\b(?:creative|spot|file|video|clip|asset|commercial)s?\s+(?:added|attached|enclosed|inside|for\s+ingest\w*)\b|\bcreative\s+ingest\w*\b|\binscape\s+ingest\w*\b|\bnew\s+(?:creative|spot)s?\b|\byangaroo\b|\bextreme\s*reach\b|\bisci\b|\bad-?ids?\b|\bspot\s+(?:delivery|list)s?\b|\btracking\s+(?:sheet|ids?|codes?)\b/i;
 // POD (proof of delivery) is case-sensitive - lowercase "pod" is Kubernetes.
 const REQ_INTENT_POD = /\bPOD\b/;
+
+// Channel/fingerprinting-side ingest is a different workflow and out of
+// scope. The discriminator is the SUBJECT - channel threads name the work
+// ("Fingerprinting Request", "INSCAPE GRID", "Ad Detection") while file-
+// ingest bodies legitimately mention fingerprinting/ACR as the purpose
+// ("spots fingerprinted for Inscape tracking", "MAX ACR Metadata Tracker").
+// Only server destinations are safe body signals. Fires before every
+// positive tier so trusted senders can't push channel mail through.
+const CHANNEL_SUBJ = /fingerprint|inscape\s+grid|grid\s+review|ad[-\s]?detection|detections?\b|\bkantar\b|\bcomscore\b|\bsimulmedia\b|\bacr\b/i;
+const CHANNEL_BODY = /s3:\/\/|sftp:\/\/|\bbackfill\b/i;
 
 // Code-shaped tokens that survive detection scrutiny: URLs stripped first
 // (SafeLinks/Mimecast tracking params tokenize into fake codes), then
@@ -590,6 +600,9 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   // subject describes the old thread, so replies score on body alone.
   const isReply = /^\s*re\s*:/i.test(s);
   const b = firstSegment(body);
+  // Channel/fingerprinting-side mail stays out even when the sender is
+  // trusted or the words "ingest"/"creative" appear in it.
+  if (CHANNEL_SUBJ.test(s) || CHANNEL_BODY.test(b.slice(0, 2000))) return false;
   if (!isReply && CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
   const weak = detectCodes(b).length >= 1 ||
     /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
