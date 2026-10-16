@@ -3064,7 +3064,8 @@ const FI_ALIASES = { horizon: 'horizonmedia', 'in-market': 'inmarket', itn: 'itn
 
 function ingestRealm() {
   const cid = (client && client.ingest && client.ingest.cidMap) || '';
-  const n = String(cid).toLowerCase().replace(/ /g, '');
+  const first = Array.isArray(cid) ? cid[0] : cid;
+  const n = String(first).toLowerCase().replace(/ /g, '');
   return FI_ALIASES[n] || n;
 }
 
@@ -3166,3 +3167,138 @@ $('shotPortal').addEventListener('click', async () => {
     toast('Screenshot failed: ' + e.message);
   }
 });
+
+// ---------- Jira weekly-repository comment ----------
+
+const JIRA_BASE = 'https://vizio.atlassian.net';
+
+function jiraAuth() {
+  const e = $('jiraEmail').value.trim(), t = $('jiraToken').value.trim();
+  return e && t ? 'Basic ' + btoa(e + ':' + t) : null;
+}
+async function jiraFetch(path, opts) {
+  opts = opts || {};
+  const a = jiraAuth();
+  if (!a) throw new Error('set Jira email + API token in the Settings (gear) panel');
+  const r = await fetch(JIRA_BASE + path, {
+    ...opts,
+    headers: { Authorization: a, Accept: 'application/json', ...(opts.headers || {}) },
+  });
+  if (!r.ok) throw new Error('Jira ' + r.status + ': ' + (await r.text()).slice(0, 160));
+  return r.status === 204 ? null : r.json();
+}
+function jiraEpicFor() {
+  const ing = (client && client.ingest) || {};
+  if (ing.jiraEpic) return ing.jiraEpic;
+  return JIRA_EPICS[ingestRealm()] || null;
+}
+// Weekly repository tickets are named "<Client> - File Ingests - Week of
+// MM/DD/YY" for that week's Monday.
+function weekOfLabel(d) {
+  const t = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+  return (t.getMonth() + 1) + '/' + String(t.getDate()).padStart(2, '0') + '/' + String(t.getFullYear()).slice(2);
+}
+async function jiraWeeklyTicket(epic) {
+  const j = await jiraFetch('/rest/api/3/search/jql?jql=' +
+    encodeURIComponent('parent = ' + epic + ' ORDER BY created DESC') +
+    '&maxResults=12&fields=summary,created');
+  const label = 'Week of ' + weekOfLabel(new Date());
+  return (j.issues || []).find(i => (i.fields.summary || '').includes(label)) || null;
+}
+// ADF mirroring the real comment shape: "Received the following email:"
+// + the request verbatim, two rules, then ingest: + hardBreak-separated
+// reporting IDs (ticker versions included).
+function jiraCommentAdf(wanted) {
+  const para = t => ({ type: 'paragraph', content: [{ type: 'text', text: t || ' ' }] });
+  const content = [para('Received the following email:')];
+  emailEl.value.trim().split(/\r?\n/).forEach(l => content.push(para(l.trim() ? l : ' ')));
+  content.push({ type: 'rule' }, { type: 'rule' });
+  content.push({ type: 'paragraph', content: [{ type: 'text', text: 'ingest:' }]
+    .concat(wanted.flatMap(w => [{ type: 'hardBreak' }, { type: 'text', text: w.reporting }])) });
+  return { version: 1, type: 'doc', content };
+}
+async function jiraAttach(key, name, blob) {
+  const fd = new FormData();
+  fd.append('file', blob, name);
+  const r = await fetch(JIRA_BASE + '/rest/api/3/issue/' + key + '/attachments', {
+    method: 'POST',
+    headers: { Authorization: jiraAuth(), 'X-Atlassian-Token': 'no-check' },
+    body: fd,
+  });
+  if (!r.ok) throw new Error('attach ' + r.status + ': ' + (await r.text()).slice(0, 120));
+  return r.json();
+}
+
+async function postJiraComment(issue, wanted, st) {
+  if (lastIngestRecords.length) {
+    st.textContent = 'Attaching records JSON to ' + issue.key + '…';
+    const payload = new Blob([JSON.stringify({
+      realm: ingestRealm(), queried_at: new Date().toISOString(), records: lastIngestRecords,
+    }, null, 2)], { type: 'application/json' });
+    await jiraAttach(issue.key, 'ingest-records-' + new Date().toISOString().slice(0, 10) + '.json', payload);
+  }
+  const tabs = await chrome.tabs.query({ url: '*://portal.cognet.tv/*' });
+  if (tabs.length) {
+    try {
+      st.textContent = 'Capturing portal screenshot…';
+      await chrome.tabs.update(tabs[0].id, { active: true });
+      await chrome.windows.update(tabs[0].windowId, { focused: true });
+      await new Promise(r => setTimeout(r, 500));
+      const dataUrl = await chrome.tabs.captureVisibleTab(tabs[0].windowId, { format: 'png' });
+      const blob = await (await fetch(dataUrl)).blob();
+      await jiraAttach(issue.key, 'ingest-proof-' + new Date().toISOString().slice(0, 10) + '.png', blob);
+    } catch (e) { /* screenshot is optional proof - never block the post */ }
+  }
+  st.textContent = 'Posting comment on ' + issue.key + '…';
+  await jiraFetch('/rest/api/3/issue/' + issue.key + '/comment', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: jiraCommentAdf(wanted) }),
+  });
+  st.innerHTML = 'Posted to <a href="' + JIRA_BASE + '/browse/' + issue.key + '" target="_blank"><b>' + issue.key + '</b></a>' +
+    (lastIngestRecords.length ? ' - ' + lastIngestRecords.length + ' record(s) attached' : ' - run Verify first next time to attach records');
+}
+
+$('postJira').addEventListener('click', async () => {
+  const epic = jiraEpicFor();
+  if (!epic) return toast('No Jira epic mapped for this client - tell Devin the epic key.');
+  const wanted = ingestReportIds();
+  if (!wanted.length) return toast('No matched rows - run Match first.');
+  const st = $('jiraStatus');
+  try {
+    st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
+    const issue = await jiraWeeklyTicket(epic);
+    if (issue) return await postJiraComment(issue, wanted, st);
+    // No weekly ticket yet - offer to create it under the epic.
+    const epi = await jiraFetch('/rest/api/3/issue/' + epic + '?fields=summary');
+    const label = weekOfLabel(new Date());
+    st.innerHTML = 'No "Week of ' + esc(label) + '" task under ' + esc(epic) +
+      ' - <a href="#" id="jiraCreate"><b>create it</b></a> (' + esc(epi.fields.summary) + ' - File Ingests - Week of ' + esc(label) + ')';
+    $('jiraCreate').addEventListener('click', async ev => {
+      ev.preventDefault();
+      try {
+        st.textContent = 'Creating weekly ticket…';
+        const created = await jiraFetch('/rest/api/3/issue', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: {
+            project: { key: epic.split('-')[0] },
+            summary: epi.fields.summary + ' - File Ingests - Week of ' + label,
+            issuetype: { name: 'Task' },
+            parent: { key: epic },
+          } }),
+        });
+        await postJiraComment({ key: created.key }, wanted, st);
+      } catch (e2) { st.textContent = 'Jira: ' + e2.message; }
+    });
+  } catch (e) {
+    st.textContent = 'Jira: ' + e.message;
+  }
+});
+
+// Jira creds persist like the Graph setup values.
+chrome.storage.local.get(['jiraEmail', 'jiraToken'], d => {
+  if (d.jiraEmail) $('jiraEmail').value = d.jiraEmail;
+  if (d.jiraToken) $('jiraToken').value = d.jiraToken;
+});
+$('jiraEmail').addEventListener('input', e => chrome.storage.local.set({ jiraEmail: e.target.value }));
+$('jiraToken').addEventListener('input', e => chrome.storage.local.set({ jiraToken: e.target.value }));

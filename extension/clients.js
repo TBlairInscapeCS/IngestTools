@@ -270,6 +270,8 @@ var CLIENTS = [
     delivery: 'links',
     note: "Email lists 'CODE  Title' pairs inline (titles feed ingest naming when the sheet lacks a title column); files live in their linked folder + tracking document.",
     ingest: {
+      cidMap: 'chiefmedia',
+      jiraEpic: 'DD-826',
       fingerprint: 'both',
       advertiser: true,
       nameTitle: true,
@@ -287,6 +289,8 @@ var CLIENTS = [
     delivery: 'other',
     note: 'Files arrive via the BSLWeb upload portal ("New Commercials Uploaded" emails) - open the portal link, grab the file list, reconcile, Download found.',
     ingest: {
+      cidMap: 'comscore',
+      jiraEpic: 'DD-631',
       ticker: 'always',
       tickerSuffix: '_t',
       fingerprint: 'video',
@@ -335,7 +339,7 @@ var CLIENTS = [
     name: 'Warner / Hearts & Science',
     detect: { keywords: [/hearts ?(&|and) ?science/i], domains: [/hearts-science\.com/i] },
     delivery: 'other',
-    ingest: { note: 'HBO content ingests for Discovery + Genius Digital customers.' },
+    ingest: { jiraEpic: 'DD-792', note: 'HBO content ingests for Discovery + Genius Digital customers.' },
   },
   {
     // Active - WB theatrical spots under the Warner umbrella. Trafficked
@@ -352,6 +356,7 @@ var CLIENTS = [
     delivery: 'extreme-reach',
     er: { sender: 'omnicom' },  // trafficked by Omnicom per the playbook note
     ingest: {
+      jiraEpic: 'DD-792',
       fingerprint: 'both',
       note: 'Theatrical ACR Doc lives on warnermedia.sharepoint.com; spots deliver same-day via ER.',
     },
@@ -370,6 +375,7 @@ var CLIENTS = [
     },
     delivery: 'links',
     ingest: {
+      jiraEpic: 'DD-792',
       fingerprint: 'both',
       nameTitle: true,
       advertiser: true,
@@ -479,6 +485,8 @@ var CLIENTS = [
     er: { sender: 'tatari', days: 14 },  // Trafficked By "Tatari LLC", weekly cadence
     note: "Weekly batch email carries brand_slug + ISCI pairs inline - 'use as requested IDs' seeds the list. Files deliver on ER per-brand (the ER long-tail IS Tatari's roster); group the job by agency, not brand.",
     ingest: {
+      cidMap: 'tatari',
+      jiraEpic: 'DD-394',
       ticker: 'always',
       note: 'Every file needs a ticker version (ESPN). Ticker ingested fingerprint=video; non-ticker fingerprint=both.',
     },
@@ -601,3 +609,16 @@ function ingestSummary(c) {
   if (ing.note) bits.push(ing.note);
   return bits.join(' · ');
 }
+
+// Jira: customer realm -> the epic that owns the weekly repository
+// tasks ("<Client> - File Ingests - Week of MM/DD/YY"); each ingest is a
+// comment on the current week's task. Clients with no epic yet simply
+// have no Post-to-Jira path.
+const JIRA_EPICS = {
+  horizonmedia: 'DD-657', horizonnext: 'DD-657',
+  tatari: 'DD-394',
+  warnermedia: 'DD-792',
+  comscore: 'DD-631',
+  inmarket: 'DD-800',
+  chiefmedia: 'DD-826',
+};

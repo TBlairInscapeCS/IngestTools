@@ -2,6 +2,8 @@
 __pycache__/
 logs/
 *.crdownload
+local/*.env
+.env
 
 # Internal data dumps — never push (real emails, API responses, client PDFs)
 examples/mail_*.json
