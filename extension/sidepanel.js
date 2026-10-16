@@ -2731,6 +2731,22 @@ function runReconcile() {
   $('manualTools').open = true; // results actions live inside the manual section
   setStage('sdDl', missing.length ? 'warn' : 'ok',
     fileCount + ' files indexed · ' + (missing.length ? missing.length + ' still missing' : 'all requested found'));
+  // Watched-batch arrival can come from the sweep itself: deliveries that
+  // land silently (no notice mail - e.g. the SeaWorld batch) still get
+  // their "arrived" moment when a reconcile finds the watched IDs.
+  const foundIds = new Set(results.filter(r => r.status === 'FOUND')
+    .map(r => String(r.id).toUpperCase()));
+  if (foundIds.size) chrome.storage.local.get('watchedBatches', d => {
+    const live = (d.watchedBatches || [])
+      .filter(b => Date.now() - (b.addedAt || 0) < 14 * 864e5);
+    const hit = live.filter(b => b.codes.some(c => foundIds.has(c)));
+    if (!hit.length) return;
+    chrome.storage.local.set({ watchedBatches: live.filter(b => !hit.includes(b)) });
+    chrome.runtime.sendMessage({ type: 'ding', kind: 'arrived' }).catch(() => {});
+    toast('Watched batch arrived: ' +
+      hit.map(b => [b.clientName, b.advertiser].filter(Boolean).join(' - ') || 'batch').join(', ') +
+      ' - un-armed.');
+  });
   refreshReply();
   return true;
 }
@@ -3824,7 +3840,7 @@ function weeklyTicketName(newest, epicSummary) {
 // first "----" line posts as the received email, each line under it joins
 // the hardBreak-separated ingest list after "ingest:". Edits in the
 // textarea are what actually post.
-function jiraCommentAdf(text) {
+function jiraCommentAdf(text, atts, withMedia) {
   const para = t => ({ type: 'paragraph', content: [{ type: 'text', text: t || ' ' }] });
   const content = [para('Received the following email:')];
   const lines = String(text || '').split(/\r?\n/);
@@ -3837,6 +3853,23 @@ function jiraCommentAdf(text) {
   content.push({ type: 'rule' }, { type: 'rule' });
   content.push({ type: 'paragraph', content: [{ type: 'text', text: 'ingest:' }]
     .concat(items.flatMap(l => [{ type: 'hardBreak' }, { type: 'text', text: l }])) });
+  // Proofs sit INSIDE the comment, right after the ingest list: a media
+  // card per attachment (image renders inline, JSON renders a file card)
+  // plus a plain link line as the universal readable reference.
+  if (atts && atts.length) {
+    if (withMedia) atts.forEach(a => content.push({
+      type: 'mediaSingle', attrs: { layout: 'center' },
+      content: [{ type: 'media',
+        attrs: { type: 'file', id: String(a.id), collection: '' } }],
+    }));
+    content.push({ type: 'paragraph', content:
+      [{ type: 'text', text: 'proof: ' }].concat(atts.flatMap((a, i) =>
+        (i ? [{ type: 'text', text: ' + ' }] : []).concat({
+          type: 'text', text: a.name,
+          marks: [{ type: 'link', attrs: {
+            href: JIRA_BASE + '/secure/attachment/' + a.id + '/' + encodeURIComponent(a.name) } }],
+        }))) });
+  }
   return { version: 1, type: 'doc', content };
 }
 async function jiraAttach(key, name, blob) {
@@ -3856,21 +3889,37 @@ async function jiraAttach(key, name, blob) {
 // proceeds on an empty proof set (the handler gates on it).
 async function postJiraComment(issue, wanted, st, proof) {
   const day = new Date().toISOString().slice(0, 10);
+  // Attachments upload first so the comment can reference their ids
+  // inline (media cards + links), not just pile them at the ticket top.
+  const atts = [];
   if (proof.records.length) {
     st.textContent = 'Attaching records JSON to ' + issue.key + '…';
-    await jiraAttach(issue.key, 'ingest-records-' + day + '.json', new Blob([JSON.stringify({
+    const rn = 'ingest-records-' + day + '.json';
+    const r = await jiraAttach(issue.key, rn, new Blob([JSON.stringify({
       realm: ingestRealm(), queried_at: new Date().toISOString(), records: proof.records,
     }, null, 2)], { type: 'application/json' }));
+    if (r && r[0] && r[0].id) atts.push({ id: r[0].id, name: rn });
   }
   if (proof.shotBlob) {
     st.textContent = 'Attaching portal screenshot to ' + issue.key + '…';
-    await jiraAttach(issue.key, 'ingest-proof-' + day + '.png', proof.shotBlob);
+    const sn = 'ingest-proof-' + day + '.png';
+    const r = await jiraAttach(issue.key, sn, proof.shotBlob);
+    if (r && r[0] && r[0].id) atts.push({ id: r[0].id, name: sn });
   }
   st.textContent = 'Posting comment on ' + issue.key + '…';
-  await jiraFetch('/rest/api/3/issue/' + issue.key + '/comment', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body: jiraCommentAdf($('jiraPreview').value) }),
-  });
+  try {
+    await jiraFetch('/rest/api/3/issue/' + issue.key + '/comment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: jiraCommentAdf($('jiraPreview').value, atts, true) }),
+    });
+  } catch (e) {
+    // Media nodes can reject on some Jira versions - retry with the
+    // inline links only (still inside the comment, still clickable).
+    await jiraFetch('/rest/api/3/issue/' + issue.key + '/comment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: jiraCommentAdf($('jiraPreview').value, atts, false) }),
+    });
+  }
   st.innerHTML = 'Posted to <a href="' + JIRA_BASE + '/browse/' + issue.key + '" target="_blank"><b>' + issue.key + '</b></a> - ' +
     [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
      proof.shotBlob ? 'screenshot' : null].filter(Boolean).join(' + ') + ' attached' +

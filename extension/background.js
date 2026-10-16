@@ -31,13 +31,22 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 // no-op until the user signs in from the panel.
 chrome.alarms.create('inboxPoll', { periodInMinutes: 1 });
 
+let offscreenReadyResolve = null;
 async function ensureOffscreen() {
   if (await chrome.offscreen.hasDocument()) return;
+  // Wait for the doc's 'offscreen-ready' ping - sending 'play' before
+  // its listener registers drops the sound silently. 1.5s cap so a wedged
+  // doc can't stall the alert path forever.
+  const ready = new Promise(r => {
+    offscreenReadyResolve = r;
+    setTimeout(r, 1500);
+  });
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: ['AUDIO_PLAYBACK'],
     justification: 'Audible alert when a new request email arrives.',
   });
+  await ready;
 }
 
 async function alertNewRequest(c, kind) {
@@ -147,6 +156,16 @@ chrome.notifications.onClicked.addListener(async () => {
 let testKindIdx = 0;
 const TEST_KINDS = ['request', 'delivery', 'arrived'];
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'offscreen-ready' && offscreenReadyResolve) offscreenReadyResolve();
+  // Panel-originated sound (e.g. a watched batch found by the sweep):
+  // routed through here so the offscreen doc exists first.
+  if (msg && msg.type === 'ding') {
+    ensureOffscreen()
+      .then(() => chrome.runtime.sendMessage({ play: msg.kind || 'request' }))
+      .then(() => sendResponse(true))
+      .catch(e => sendResponse(String(e)));
+    return true;
+  }
   if (msg && msg.type === 'test-alert') {
     const kind = TEST_KINDS[testKindIdx++ % TEST_KINDS.length];
     alertNewRequest({ id: 'test-' + Date.now(), subject: 'TEST - ' + kind + ' alert',

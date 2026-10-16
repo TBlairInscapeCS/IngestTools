@@ -82,3 +82,8 @@ chrome.runtime.onMessage.addListener(msg => {
   else if (kind === 'arrived') chimeArrived();
   if (msg.stop) stopAll();
 });
+
+// Readiness ping: the service worker waits on this before sending the
+// first 'play' - firing it right after createDocument raced past the
+// listener registration and silently ate the sound.
+chrome.runtime.sendMessage({ type: 'offscreen-ready' }).catch(() => {});
