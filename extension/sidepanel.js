@@ -3182,7 +3182,7 @@ $('saveRecords').addEventListener('click', async () => {
 
 function buildJiraTicket() {
   const wanted = ingestReportIds();
-  const lines = [emailEl.value.trim(), '', '----', '', 'Ingest:'];
+  const lines = [ticketEmail(emailEl.value), '', '----', '', 'Ingest:'];
   wanted.forEach(w => lines.push(w.reporting + (w.title ? ' - ' + w.title : '') + (w.espn ? ' (ESPN)' : '')));
   return lines.join('\n');
 }

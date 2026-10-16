@@ -264,6 +264,40 @@ function greet(sender) {
   return 'Hi' + (sender ? ' ' + sender : '') + ',';
 }
 
+// Slim a request email for the Jira ticket. Keeps everything searchable -
+// greeting, body, links, IDs, sign-off + sender name/title - and drops what
+// record-keeping doesn't need: quoted replies below the first message,
+// legal/disclaimer paragraphs, signature contact/logo/device lines. Body
+// lines (incl. any inline-image placeholder text) are never touched.
+function ticketEmail(text) {
+  const head = String(text || '').split(
+    /\r?\n(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i)[0];
+  // Disclaimers travel as their own blank-separated paragraphs - drop the
+  // whole block when it carries a legal/confidentiality marker.
+  const JUNK_PARA = /intended recipient|confidential|privileged|may not (disclose|distribute|copy)|delete this message|notify the sender|liabilit|property of|transmission|scanned.*(virus|threat)|(virus|threat).*scanned|consider the environment|unsubscribe|accept (no|any) responsibility|does not represent/i;
+  const s = head.split(/\r?\n\s*\r?\n/).filter(p => !JUNK_PARA.test(p)).join('\n\n');
+  const lines = s.split(/\r?\n/);
+  // Only junk-filter INSIDE the signature: find the last sign-off, keep it
+  // plus the next two non-empty lines (name + title), then drop contact
+  // block lines, device footers, social/logo/image placeholders after that.
+  const SIGNOFF = /^(thank you|best regards|warm regards|kind regards|best wishes|respectfully|sincerely|thanks|best|regards|cheers|talk soon|see you|thx|ty|appreciated),?\s*(.*)$/i;
+  const JUNK_TAIL = /^(sent from|get outlook|get it for|follow us|linkedin|twitter|instagram|facebook)\b|^(cid|image|img|logo|banner|icon)[\s:._-]|^[pwmtaeof]\s*[:.]\s|https?:\/\/|www\.|@|\+?[\d(][\d\s().\-]{6,}|\.(png|jpe?g|gif|bmp|svg|webp)\s*$/i;
+  let sig = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (SIGNOFF.test(lines[i].trim())) { sig = i; break; }
+  }
+  if (sig < 0) return s.replace(/\n{3,}/g, '\n\n').trim();
+  const keep = lines.slice(0, sig + 1);
+  let keptAfter = 0;
+  for (let i = sig + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t) { if (keptAfter >= 2) keep.push(''); continue; }
+    if (keptAfter < 2) { keep.push(lines[i]); keptAfter++; continue; }
+    if (!JUNK_TAIL.test(t)) keep.push(lines[i]);
+  }
+  return keep.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function buildExceptionEmail(results, sender) {
   const missing = [], possible = [], ambiguous = [], dupes = [];
   for (const r of results) {
