@@ -558,6 +558,16 @@ const CHANNEL_BODY = /s3:\/\/|sftp:\/\//i;
 // file deliveries feeding that pipeline, not channel ops themselves.
 const FILE_FOR_FP = /\b(?:creatives?|commercials?|spots?|files?|clips?|ads?)\s+for\s+(?:re-?)?(?:finger|detect)\w*/i;
 
+// Tatari drops ~100 individual "Spot Delivery Notification" mails per
+// weekly batch via Extreme Reach. The FIRST is a useful heads-up (the
+// request email follows); the rest are noise. Callers suppress repeats
+// with a batch-seen timestamp - this only identifies them.
+function isTatariErNotice(subject, body, fromAddr) {
+  return /extremereach\.com/i.test(String(fromAddr || '')) &&
+    /spot delivery notification for inscape/i.test(String(subject || '')) &&
+    /trafficked by.{0,120}?tatari/i.test(String(body || '').slice(0, 5000));
+}
+
 // Code-shaped tokens that survive detection scrutiny: URLs stripped first
 // (SafeLinks/Mimecast tracking params tokenize into fake codes), then
 // require a digit and reject broadcast callsigns (SHOCSHD, WGTADT, D2

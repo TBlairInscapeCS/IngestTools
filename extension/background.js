@@ -62,13 +62,23 @@ chrome.alarms.onAlarm.addListener(async a => {
     const msgs = await graphUnread(25);
     // Dedupe across service-worker restarts via storage - each message id
     // alerts once, ever. reqSenders = learned request senders.
-    const { notifiedIds = [], reqSenders = {}, msSelfAddr = '' } =
-      await chrome.storage.local.get(['notifiedIds', 'reqSenders', 'msSelfAddr']);
+    const { notifiedIds = [], reqSenders = {}, msSelfAddr = '', erBatchAt = 0 } =
+      await chrome.storage.local.get(['notifiedIds', 'reqSenders', 'msSelfAddr', 'erBatchAt']);
     const selfAddr = msSelfAddr || '';
     if (!selfAddr) await graphSelfDomain().catch(() => '');
-    const cands = (msgs || []).filter(m =>
-      isRequestCandidate(m.subject, stripHtml((m.body && m.body.content) || ''),
-        m.from && m.from.emailAddress && m.from.emailAddress.address, reqSenders, selfAddr));
+    const batchFresh = Date.now() - erBatchAt > 4 * 864e5;
+    const cands = (msgs || []).filter(m => {
+      const from = m.from && m.from.emailAddress && m.from.emailAddress.address;
+      const body = stripHtml((m.body && m.body.content) || '');
+      return isRequestCandidate(m.subject, body, from, reqSenders, selfAddr) ||
+        (batchFresh && isTatariErNotice(m.subject, body, from));
+    });
+    // One alert per Tatari ER batch - the ~99 notices behind it stay quiet.
+    if (cands.length && batchFresh &&
+        cands.some(m => isTatariErNotice(m.subject,
+          stripHtml((m.body && m.body.content) || ''),
+          m.from && m.from.emailAddress && m.from.emailAddress.address)))
+      await chrome.storage.local.set({ erBatchAt: Date.now() });
     const seen = new Set(notifiedIds);
     const fresh = cands.filter(m => !seen.has(m.id));
     for (const m of fresh) { await alertNewRequest(m); seen.add(m.id); }

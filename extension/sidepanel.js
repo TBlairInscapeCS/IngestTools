@@ -21,6 +21,8 @@ let emailFromAddr = '';    // sender address of the Graph-loaded email
 let emailFolderName = '';  // Outlook folder the loaded email was filed into
 let folderMap = {};        // folderId -> displayName (rules-based client map)
 let reqSenders = {};       // learned request senders (addr -> n, dom:x -> n)
+let erBatchAt = 0;         // when a Tatari ER batch notice last surfaced
+const ER_BATCH_WINDOW = 4 * 864e5; // Tatari batches land within a week
 let selfAddr = '';         // user's own address - self-mail isn't a request
 let selfDomain = '';       // own domain - never learned as a sender domain
 let capturedByName = {};   // file name -> {url, line} from last page capture
@@ -938,8 +940,17 @@ function renderInbox(msgs, quiet) {
   msgs.forEach(m => {
     const body = stripHtmlKeepLinks((m.body && m.body.content) || '');
     const fromAddr = m.from && m.from.emailAddress && m.from.emailAddress.address;
-    if (isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr)) cands.push({ m, body });
+    const erNotice = isTatariErNotice(m.subject, body, fromAddr) &&
+      Date.now() - erBatchAt > ER_BATCH_WINDOW;
+    if (erNotice || isRequestCandidate(m.subject, body, fromAddr, reqSenders, selfAddr))
+      cands.push({ m, body, erNotice });
   });
+  // First Tatari ER notice of the batch is shown once - mark the batch so
+  // the ~99 delivery notices behind it stay quiet.
+  if (cands.some(c => c.erNotice)) {
+    erBatchAt = Date.now();
+    chrome.storage.local.set({ erBatchAt });
+  }
   if (!cands.length) {
     el.style.display = 'none';
     if (!quiet) toast('No unread request-like emails.');
@@ -991,6 +1002,7 @@ function noteConfirmedSender(addr) {
   chrome.storage.local.set({ reqSenders });
 }
 chrome.storage.local.get('reqSenders', d => { reqSenders = d.reqSenders || {}; });
+chrome.storage.local.get('erBatchAt', d => { erBatchAt = d.erBatchAt || 0; });
 // Folder map powers the client tagging on inbox candidates; refresh weekly
 // (the folder tree rarely changes).
 chrome.storage.local.get(['msFolderMap', 'msFolderMapAt'], d => {
