@@ -547,10 +547,12 @@ const REQ_INTENT_POD = /\bPOD\b/;
 // ("Fingerprinting Request", "INSCAPE GRID", "Ad Detection") while file-
 // ingest bodies legitimately mention fingerprinting/ACR as the purpose
 // ("spots fingerprinted for Inscape tracking", "MAX ACR Metadata Tracker").
-// Only server destinations are safe body signals. Fires before every
-// positive tier so trusted senders can't push channel mail through.
+// Only server destinations are safe body signals - "backfill" alone
+// can't reject since an initial request can legitimately ask for
+// backfill spots. Fires before every positive tier so trusted senders
+// can't push channel mail through.
 const CHANNEL_SUBJ = /fingerprint|inscape\s+grid|grid\s+review|ad[-\s]?detection|detections?\b|\bkantar\b|\bcomscore\b|\bsimulmedia\b|\bacr\b/i;
-const CHANNEL_BODY = /s3:\/\/|sftp:\/\/|\bbackfill\b/i;
+const CHANNEL_BODY = /s3:\/\/|sftp:\/\//i;
 
 // Code-shaped tokens that survive detection scrutiny: URLs stripped first
 // (SafeLinks/Mimecast tracking params tokenize into fake codes), then
