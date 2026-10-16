@@ -1710,7 +1710,24 @@ $('showSheet').addEventListener('click', showOnSheet);
 // confirmation when results exist, else the match confirmation) and a
 // line proving every ID the email cited is claimed in it - the user
 // verifies the draft before it ever gets pasted.
-function refreshReply() {
+// The draft is editable - once the user touches it, auto-refresh keeps
+// their text and only updates the self-check line. "↻ Redraft" clears the
+// dirty flag to regenerate from current state.
+let replyDirty = false;
+function updateReplyCheck() {
+  const wanted = [...new Set(extractCodes(latestSegment(emailEl.value)))];
+  const body = normalizeName($('replyPreview').value).replace(/ /g, '');
+  const missing = wanted.filter(c => !body.includes(normalizeName(c).replace(/ /g, '')));
+  $('replyCheck').innerHTML =
+    (emailSender ? 'greeting: "Hi ' + esc(emailSender) + ',"' : 'greeting: "Hi," (sender unknown)') +
+    ' · ' + (wanted.length
+      ? (missing.length
+        ? '<span style="color:#ec9a9a">' + missing.length + ' requested ID(s) NOT in reply: ' + missing.map(esc).join(', ') + '</span>'
+        : 'all ' + wanted.length + ' requested ID(s) in reply')
+      : 'no IDs cited in email');
+}
+
+function refreshReply(force) {
   const area = $('replyArea');
   let text = null;
   if (lastResults) {
@@ -1726,21 +1743,18 @@ function refreshReply() {
   if (!text && matched) text = buildMatchConfirmation(matched, emailSender);
   if (!text) { area.classList.add('hidden'); return; }
   area.classList.remove('hidden');
-  $('replyPreview').textContent = text;
-  const wanted = [...new Set(extractCodes(latestSegment(emailEl.value)))];
-  const body = normalizeName(text).replace(/ /g, '');
-  const missing = wanted.filter(c => !body.includes(normalizeName(c).replace(/ /g, '')));
-  $('replyCheck').innerHTML =
-    (emailSender ? 'greeting: "Hi ' + esc(emailSender) + ',"' : 'greeting: "Hi," (sender unknown)') +
-    ' · ' + (wanted.length
-      ? (missing.length
-        ? '<span style="color:#ec9a9a">' + missing.length + ' requested ID(s) NOT in reply: ' + missing.map(esc).join(', ') + '</span>'
-        : 'all ' + wanted.length + ' requested ID(s) in reply')
-      : 'no IDs cited in email');
+  if (force || !replyDirty) { $('replyPreview').value = text; replyDirty = false; }
+  updateReplyCheck();
 }
 
+$('replyPreview').addEventListener('input', () => { replyDirty = true; updateReplyCheck(); });
+$('redraftReply').addEventListener('click', () => refreshReply(true));
+$('clearReply').addEventListener('click', () => {
+  $('replyPreview').value = ''; replyDirty = false; updateReplyCheck();
+});
+
 $('copyReply').addEventListener('click', () => {
-  const t = $('replyPreview').textContent;
+  const t = $('replyPreview').value;
   if (t) copyText(t, 'Reply');
 });
 $('copyExcReply').addEventListener('click', () => {
@@ -3174,11 +3188,14 @@ function buildJiraTicket() {
 }
 
 $('jiraTicket').addEventListener('click', () => {
-  const t = buildJiraTicket();
-  $('jiraPreview').textContent = t;
+  $('jiraPreview').value = buildJiraTicket();
   $('jiraBox').classList.remove('hidden');
 });
-$('copyTicket').addEventListener('click', () => copyText($('jiraPreview').textContent, 'Jira ticket'));
+$('rebuildTicket').addEventListener('click', () => {
+  $('jiraPreview').value = buildJiraTicket();
+});
+$('clearTicket').addEventListener('click', () => { $('jiraPreview').value = ''; });
+$('copyTicket').addEventListener('click', () => copyText($('jiraPreview').value, 'Jira ticket'));
 
 // Capture the portal tab (activates it for a moment). Throws with the real
 // reason on failure - callers decide whether that's fatal.
@@ -3265,17 +3282,23 @@ function weeklyTicketName(newest, epicSummary) {
   return s.replace(/week of \d{1,2}\/\d{1,2}\/\d{2,4}/i,
     'week of ' + weekLabel(new Date(), m[2].length === 4));
 }
-// ADF mirroring the real comment shape: "Received the following email:"
-// + the request verbatim, two rules, then ingest: + hardBreak-separated
-// reporting IDs (ticker versions included).
-function jiraCommentAdf(wanted) {
+// ADF built from the PREVIEW TEXT (user-editable): everything above the
+// first "----" line posts as the received email, each line under it joins
+// the hardBreak-separated ingest list after "ingest:". Edits in the
+// textarea are what actually post.
+function jiraCommentAdf(text) {
   const para = t => ({ type: 'paragraph', content: [{ type: 'text', text: t || ' ' }] });
   const content = [para('Received the following email:')];
-  emailEl.value.trim().split(/\r?\n/).forEach(l => content.push(para(l.trim() ? l : ' ')));
+  const lines = String(text || '').split(/\r?\n/);
+  const sep = lines.findIndex(l => /^-{3,}\s*$/.test(l.trim()));
+  const emailLines = sep >= 0 ? lines.slice(0, sep) : lines;
+  const items = (sep >= 0 ? lines.slice(sep + 1) : [])
+    .map(l => l.trim())
+    .filter(l => l && !/^ingest:/i.test(l));
+  emailLines.forEach(l => content.push(para(l.trim() ? l : ' ')));
   content.push({ type: 'rule' }, { type: 'rule' });
   content.push({ type: 'paragraph', content: [{ type: 'text', text: 'ingest:' }]
-    .concat(wanted.flatMap(w => [{ type: 'hardBreak' },
-      { type: 'text', text: w.reporting + (w.title ? ' - ' + w.title : '') + (w.espn ? ' (ESPN)' : '') }])) });
+    .concat(items.flatMap(l => [{ type: 'hardBreak' }, { type: 'text', text: l }])) });
   return { version: 1, type: 'doc', content };
 }
 async function jiraAttach(key, name, blob) {
@@ -3308,7 +3331,7 @@ async function postJiraComment(issue, wanted, st, proof) {
   st.textContent = 'Posting comment on ' + issue.key + '…';
   await jiraFetch('/rest/api/3/issue/' + issue.key + '/comment', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body: jiraCommentAdf(wanted) }),
+    body: JSON.stringify({ body: jiraCommentAdf($('jiraPreview').value) }),
   });
   st.innerHTML = 'Posted to <a href="' + JIRA_BASE + '/browse/' + issue.key + '" target="_blank"><b>' + issue.key + '</b></a> - ' +
     [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
@@ -3366,7 +3389,7 @@ $('postJira').addEventListener('click', async () => {
       createName = weeklyTicketName(newest, epi.fields.summary);
     }
     pendingJira = { epic, wanted, proof, issue, createName };
-    $('jiraPreview').textContent = buildJiraTicket();
+    $('jiraPreview').value = buildJiraTicket();
     $('jiraBox').classList.remove('hidden');
     $('jiraApprove').classList.remove('hidden');
     st.innerHTML = '<b>Staged - review the comment below.</b> Target: ' +
