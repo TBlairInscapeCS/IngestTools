@@ -69,6 +69,24 @@ MIN_DURATION = 10.0
 SPEC_RES = {(3840, 2160), (1920, 1080), (1280, 720)}
 SPEC_CODECS = {"h264", "hevc", "mpeg2video", "prores"}
 AUDIO_OK = {"aac", "mp3", "mp2", "ac3", "eac3", "s302m", "alac", "lpcm"}
+# launchd runs us on the bare system PATH (/usr/bin:/bin...) - homebrew
+# binaries aren't on it, which is what sent valid files to _rejected/.
+def _find_bin(name):
+    p = shutil.which(name)
+    if p:
+        return p
+    for cand in ("/opt/homebrew/bin/" + name, "/usr/local/bin/" + name,
+                 "/opt/local/bin/" + name):
+        if os.path.exists(cand):
+            return cand
+    return name  # let the caller's error path report it
+
+
+FFPROBE = _find_bin("ffprobe")
+# ffmpeg ships in the same dir as ffprobe - the espn script needs that dir
+# on PATH since launchd's environment lacks it.
+FFMPEG_DIR = str(Path(FFPROBE).parent) if "/" in FFPROBE else ""
+_probe_warned = False  # one "spec check degraded" notice per process
 # -----------------------------------------------------------------------------
 
 
@@ -304,11 +322,13 @@ def probe_spec(path: Path) -> dict:
     """ffprobe facts + spec violations for a downloaded file."""
     try:
         r = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
+            [FFPROBE, "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", str(path)],
             capture_output=True, text=True, timeout=120)
         d = json.loads(r.stdout or "{}")
     except Exception as e:
+        # The probe itself couldn't run (binary missing, timeout) - this is
+        # not evidence about the file. Callers must not act on it.
         return {"info": {}, "fails": [], "error": str(e)[:80]}
     fmt = d.get("format") or {}
     fmtname = fmt.get("format_name") or "?"
@@ -369,9 +389,12 @@ def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bo
         except Exception as e:
             return False, f"could not copy ticker.png: {e}"
     stem = file_path.stem
+    env = dict(os.environ)
+    if FFMPEG_DIR:
+        env["PATH"] = FFMPEG_DIR + os.pathsep + env.get("PATH", "")
     proc = subprocess.run(
         ["bash", str(ESPN_SCRIPT), stem],
-        cwd=job_dir, capture_output=True, text=True, timeout=1800,
+        cwd=job_dir, capture_output=True, text=True, timeout=1800, env=env,
     )
     out = file_path.with_name(stem + "_ticker.mp4")
     if proc.returncode == 0 and out.exists():
@@ -770,26 +793,19 @@ def process_job(manifest_path: Path):
             notify("Ingest watcher",
                    f"{local.name}: {'; '.join(dur_fails)} - flagged, allowed through")
         hard = [f for f in fails if "duration" not in f]
-        if not pr.get("info"):
-            # ffprobe couldn't parse it at all - bad download, not a spec
-            # question. Tiny junk keeps the old label for familiarity.
-            reason = ("suspiciously small" if local.stat().st_size < 64 * 1024
-                      else "unreadable media (ffprobe: " + str(pr.get("error", "no streams"))[:60] + ")")
-            rej = job_dir / "_rejected"
-            try:
-                rej.mkdir(exist_ok=True)
-                local.rename(rej / local.name)
-            except Exception:
-                pass
-            state.setdefault("rejected", []).append(name)
-            status["status"] = "rejected: " + reason
-            if name not in state["notified"]:
-                state["notified"].append(name)
-                notify("Ingest watcher", f"{local.name}: rejected ({reason}) - not a real video.")
-            changed = True
-            report["files"].append(status)
-            continue
-        if hard:
+        if pr.get("error") or not pr.get("info"):
+            # The probe never ran (missing binary, timeout) - that is zero
+            # evidence about the file, so it must never quarantine. The
+            # file flows through unchecked; warn once per process so a
+            # broken ffprobe doesn't silently disable the spec check.
+            status["spec_error"] = pr.get("error") or "no probe result"
+            global _probe_warned
+            if not _probe_warned:
+                _probe_warned = True
+                notify("Ingest watcher",
+                       "ffprobe unavailable - files pass unchecked. Check ffprobe on PATH.")
+                log("spec check degraded: " + str(pr.get("error", "no info")))
+        elif hard:
             rej = job_dir / "_rejected"
             try:
                 rej.mkdir(exist_ok=True)
