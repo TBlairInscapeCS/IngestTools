@@ -35,7 +35,16 @@
   a { color: #6ea8f0; }
 
   .hint { color: #8b93a1; font-size: 10px; margin-top: 4px; }
+  /* Status messages are the thing you read mid-run - bigger than hints,
+     minimal words. */
+  .msg { color: #cfd4dc; font-size: 12px; line-height: 1.45; margin-top: 5px; }
+  .msg b { color: #fff; }
   .info { font-size: 10px; color: #b8bfca; background: #22262e; border-radius: 4px; padding: 4px 7px; margin-top: 5px; display: none; }
+  /* Secondary control groups collapse behind a quiet "more" toggle. */
+  details.mini { display: inline; }
+  details.mini > summary { text-transform: none; font-weight: 400; display: inline;
+    font-size: 10px; color: #8b93a1; letter-spacing: 0; }
+  details.mini > summary:hover { color: #cfd4dc; }
   /* The alert card: every sound leaves a note - kind, what it was for,
      and the trigger it perceived, so false positives get caught. */
   #alertBox { width: 100%; font-size: 10px; color: #b8bfca; background: #22262e;
@@ -68,7 +77,7 @@
   .mono { font-family: ui-monospace, monospace; }
   .trunc { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 
-  #toast { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #3a414d; color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 11px; display: none; z-index: 9; }
+  #toast { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #3a414d; color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; display: none; z-index: 9; }
   .hidden { display: none !important; }
   label.col { font-size: 10px; color: #8b93a1; }
   #manualTools summary { font-size: 10px; font-weight: 400; text-transform: none; color: #8b93a1; letter-spacing: 0; }
@@ -134,16 +143,21 @@
 
 <details class="s1" open id="sec1">
   <summary>1 · Read the request<span class="ib" data-bubble="b1">?</span><span class="stamp" id="tsEmail"></span><span class="sdot" id="sdEmail"></span></summary>
-  <div class="sub">Pull the request mail - inbox list, Outlook tab, paste or .eml. Detects the client, auto-pulls its tracker, and pre-parses delivery links.</div>
+  <div class="sub">The request email - detects the client and pre-pulls its tracker.</div>
   <div class="bubble hidden" id="b1">The email saying which creatives to ingest. <b>Check inbox</b> reads unread mail via Graph sign-in (no Outlook tab needed; the icon badge counts fresh requests). <b>Grab</b> reads an open Outlook tab; paste/.eml work too. A new email resets the run.</div>
   <textarea id="email" placeholder="Paste the request email, or grab it from the open Outlook tab."></textarea>
   <div class="row">
     <button id="grabEmail">Grab from Outlook</button>
     <button id="checkInbox" data-opt="graph">Check inbox</button>
-    <a href="#" id="testAlert" data-opt="graph" style="font-size:10px;align-self:center" title="Fire a test notification + sound (cycles request/delivery/arrived)">test alert</a>
-    <button id="pasteEmail" data-opt="emailExtra">Paste email</button>
-    <button id="loadEmail" data-opt="emailExtra">Load .eml</button>
-    <button id="clearEmail">Clear</button>
+    <details class="mini">
+      <summary>more</summary>
+      <div class="row">
+        <button id="pasteEmail" data-opt="emailExtra">Paste email</button>
+        <button id="loadEmail" data-opt="emailExtra">Load .eml</button>
+        <button id="clearEmail">Clear</button>
+        <a href="#" id="testAlert" data-opt="graph" style="font-size:10px;align-self:center" title="Fire a test notification + sound (cycles request/delivery/arrived)">test alert</a>
+      </div>
+    </details>
   </div>
   <div class="info hidden" id="msSetup" data-opt="graph">
     Reads your inbox via Microsoft Graph. One-time setup:
@@ -164,24 +178,24 @@
     </div>
   </div>
   <div class="info" id="inboxList" data-opt="graph"></div>
-  <div class="info" id="emailInfo"></div>
+  <div class="info msg" id="emailInfo"></div>
 </details>
 
-<details class="s2" open>
+<details class="s2" open id="sec2">
   <summary>2 · Load the tracker<span class="ib" data-bubble="b2">?</span><span class="stamp" id="tsSheet"></span><span class="sdot" id="sdSheet"></span></summary>
-  <div class="sub">The client's tracking sheet - auto-loads from the email's link or the playbook's known sheet; an open tab, file, or paste works too.</div>
+  <div class="sub">The client tracker - auto-loads from the email's link, or grab a tab.</div>
   <div class="bubble hidden" id="b2">The client tracker - loaded automatically from the email's sheet link, a focused sheet tab, or any open tracker tab (an <b>Airtable tab is read via the app's own copy</b>, which covers every row, not just visible ones). <b>Paste tracker</b> is the manual fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Column mapping auto-detects; adjust under the mapping row if the sheet is unusual.</div>
   <div class="row">
     <button id="grabSheet" class="primary">Grab sheet tab</button>
-    <details style="display:inline">
-      <summary style="text-transform:none;font-weight:400;display:inline;font-size:10px;color:#8b93a1">other sources</summary>
+    <details class="mini">
+      <summary>other sources</summary>
       <div class="row">
         <button id="loadSheet">Load file</button>
         <button id="pasteSheet">Paste tracker</button>
       </div>
     </details>
-    <details id="colDetails" style="display:inline" data-opt="colMap">
-      <summary style="text-transform:none;font-weight:400;display:inline;font-size:10px;color:#8b93a1">columns</summary>
+    <details id="colDetails" class="mini" data-opt="colMap">
+      <summary>columns</summary>
       <div class="row" id="colPicks">
         <label class="col">ID <select id="colId"></select></label>
         <label class="col">Title <select id="colTitle"></select></label>
@@ -199,13 +213,13 @@
     <textarea id="sheetPaste" placeholder="Paste the tracker rows here, then Load pasted" style="height:56px"></textarea>
     <button id="pasteSheetLoad">Load pasted</button>
   </div>
-  <div class="hint" id="colSummary"></div>
-  <div class="info" id="sheetInfo"></div>
+  <div class="msg" id="colSummary"></div>
+  <div class="info msg" id="sheetInfo"></div>
 </details>
 
 <details class="s3" open>
   <summary>3 · Match codes to rows<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
-  <div class="sub">Pairs email codes with tracker rows. Real download links surface here for direct download; portal-held sources (Extreme Reach, Yangaroo) go to step 4.</div>
+  <div class="sub">Match email codes to tracker rows.</div>
   <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
   <div class="row">
     <button id="match" class="primary">Match</button>
@@ -218,7 +232,7 @@
 
 <details class="s4" id="sec4">
   <summary>4 · Download the media<span class="ib" data-bubble="b4">?</span><span class="stamp" id="tsCapture"></span><span class="sdot" id="sdDl"></span></summary>
-  <div class="sub">Fetch the actual files - open delivery pages on screen, or the ER search sweep (no page needed, just an ER login). Each batch gets its own Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ folder.</div>
+  <div class="sub">Get the media - direct links, ER search, or open pages.</div>
   <div class="bubble hidden" id="b4">
     <b>Open pages</b> reads every delivery list open in the browser (ER Spot Deliveries tabs + the focused page) - only what's on screen; flip pages and press again to accumulate.<br>
     <b>ER search</b> queries Extreme Reach directly: every Inscape TV delivery in the day window, all pages. Optional sender filter reads each delivery's "Trafficked By" (e.g. <i>tatari</i>); with matched IDs loaded it only sender-checks those rows. No page needed open - just be logged into ER.
@@ -231,7 +245,7 @@
     <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
     <button id="erSweep">Download from ER search</button>
   </div>
-  <div class="hint" id="capInfo"></div>
+  <div class="msg" id="capInfo"></div>
   <div class="row">
     <button id="recheck">Re-check for delivery</button>
     <span class="hint" id="watchInfo"></span>
@@ -263,7 +277,7 @@
 
 <details class="s5" id="sec5">
   <summary>5 · Fill the portal + report<span class="ib" data-bubble="b5">?</span><span class="stamp" id="tsIngest"></span><span class="sdot" id="sdIngest"></span></summary>
-  <div class="sub">Two jobs: fill the Vizio Inscape Portal ingest queue, then verify the ingest and draft the Jira comment. BEGIN INGEST and Post to Jira stay your clicks.</div>
+  <div class="sub">Fill the portal queue, then verify + draft Jira. Ingest/post stay your clicks.</div>
   <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check portal</b> verifies the customer name against the playbook and lists queued files. <b>Preview fills</b> shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Push fills</b> writes them into the queue cells and keeps watching for files dropped later. <b>_ticker</b> files get fingerprint=video per playbook. Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click.</div>
   <div class="subhd">Fill the ingest queue</div>
   <div class="row">
@@ -272,19 +286,24 @@
     <button id="ingestPush" class="primary hidden">Push fills to queue</button>
     <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - no drag-and-drop">Feed files</button>
   </div>
-  <div class="hint" id="ingestInfo"></div>
+  <div class="msg" id="ingestInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
   <div class="subhd">Verify &amp; report to Jira</div>
   <div class="row">
     <button id="postJira" class="primary">Verify &amp; draft Jira</button>
-    <button id="verifyIngest">Check records</button>
     <button id="jiraTicket">Draft ticket</button>
-    <button id="shotPortal">Screenshot</button>
-    <button id="saveRecords" class="hidden">Save records JSON</button>
+    <details class="mini">
+      <summary>more</summary>
+      <div class="row">
+        <button id="verifyIngest">Check records</button>
+        <button id="shotPortal">Screenshot</button>
+        <button id="saveRecords" class="hidden">Save records JSON</button>
+      </div>
+    </details>
   </div>
-  <div class="hint" id="verifyInfo"></div>
+  <div class="msg" id="verifyInfo"></div>
   <div class="hint" id="portalLive"></div>
-  <div class="hint" id="jiraStatus"></div>
+  <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
     <div class="row"><button id="jiraApprove" class="primary hidden">Post to Jira</button>
       <button id="copyTicket">Copy ticket</button>
@@ -296,7 +315,7 @@
 
 <details class="s6" id="sec6">
   <summary>6 · Reply to requester<span class="ib" data-bubble="b6">?</span><span class="sdot" id="sdReply"></span></summary>
-  <div class="sub">Drafts the answer in your voice. <b>Auto draft</b> picks the variant from the run state - ingested after a good match, not-yet-available after an empty sweep - and the variant menu overrides it when you know better.</div>
+  <div class="sub">Draft the reply - auto variant from the run state, or pick one.</div>
   <div class="bubble hidden" id="b6"><b>Auto draft</b> chooses by what happened: match found files &rarr; "I've ingested&hellip" + IDs; a sweep that found nothing &rarr; "not yet available on Extreme Reach".<br>
     <b>Variant menu</b> is the escape hatch - e.g. the sweep missed files that are actually there (wrong delivery page) &rarr; pick <i>Ingested + IDs</i> to send the confirmation anyway.<br>
     <b>Copy reply</b> puts it on the clipboard; <b>Draft in Outlook</b> creates a reply draft on the original thread (review and send yourself). Edits to the preview are kept until Redraft or Clear.</div>

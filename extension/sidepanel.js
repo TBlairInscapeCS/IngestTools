@@ -1940,6 +1940,7 @@ function loadSheetText(text, sourceLabel) {
 }
 
 function loadSheetRows(wb, sourceLabel) {
+  const fresh = !sheet;   // first load vs a refresh - only collapse on fresh
   const hIdx = detectHeaderRow(wb.rows);
   const nLinks = wb.links ? Object.keys(wb.links).length : 0;
   sheet = { headers: wb.rows[hIdx] || [], allRows: wb.rows, links: wb.links || {}, dataRows: wb.rows.slice(hIdx + 1), groupRow: hIdx > 0 ? wb.rows[hIdx - 1] : null };
@@ -1973,6 +1974,9 @@ function loadSheetRows(wb, sourceLabel) {
     (pendingRows.length
       ? ' <a href="#" id="usePending"><b>' + pendingRows.length + '</b> pending row(s) (fill-back empty) - use as requested IDs</a>'
       : '');
+  // Clean fresh load (ID column mapped) -> collapse step 2, matching is next.
+  // Stays open on a column-pick need or a background refresh.
+  if (fresh && idcNow >= 0) $('sec2').open = false;
   const up = $('usePending');
   if (up) up.addEventListener('click', e => {
     e.preventDefault();
