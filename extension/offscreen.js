@@ -10,6 +10,10 @@
 //   'arrived'  - ascending A-major bell arpeggio: a WATCHED batch's files
 //                finally landed after the "not yet available" wait -
 //                resolution, not new work
+//   'warn'     - descending two-tone (A5 -> E5): a file failed the spec
+//                check - attention needed but not urgent
+//   'fail'     - low descending double thud (E4 -> B3): an operation
+//                straight-up failed - something is broken
 let ac = null, nodes = [];
 
 function stopAll() {
@@ -73,6 +77,10 @@ function chimeArrived() {
   // A5 -> C#6 -> E6 -> A6: rising major arpeggio reads as "resolved".
   [880, 1108.7, 1318.5, 1760].forEach((f, i) => bell(f, t + i * 0.14, 0.5));
 }
+// Warn falls (A5 -> E5), fail drops harder and lower (E4 -> B3, longer
+// decay on the second hit so "broken" is unmistakable).
+function chimeWarn() { const t = ctx(); bell(880, t, 0.55); bell(659.3, t + 0.22, 0.55); }
+function chimeFail() { const t = ctx(); bell(329.6, t, 0.6); bell(246.9, t + 0.3, 0.7); }
 
 chrome.runtime.onMessage.addListener(msg => {
   if (!msg) return;
@@ -80,6 +88,8 @@ chrome.runtime.onMessage.addListener(msg => {
   if (kind === 'request') chimeRequest();
   else if (kind === 'delivery') chimeDelivery();
   else if (kind === 'arrived') chimeArrived();
+  else if (kind === 'warn') chimeWarn();
+  else if (kind === 'fail') chimeFail();
   if (msg.stop) stopAll();
 });
 

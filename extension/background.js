@@ -199,7 +199,7 @@ chrome.notifications.onClicked.addListener(async () => {
 // Panel test path: same alert pipeline, one click verifies sound+banner.
 // Test alert cycles through the three sound kinds so each is audible.
 let testKindIdx = 0;
-const TEST_KINDS = ['request', 'delivery', 'arrived'];
+const TEST_KINDS = ['request', 'delivery', 'arrived', 'warn', 'fail'];
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'offscreen-ready' && offscreenReadyResolve) offscreenReadyResolve();
   // Panel-originated sound (e.g. a watched batch found by the sweep):

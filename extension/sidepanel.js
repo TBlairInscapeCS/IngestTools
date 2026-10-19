@@ -64,11 +64,26 @@ function stamp(id) {
 
 // Traffic-light per stage: grey untouched, green done, orange needs user
 // action, red failed. The tooltip carries the detail (source/counts/why).
+// Audible alerts fire only when the browser window is out of focus - if
+// the user is looking at it, the stage dot/toast IS the alert. Every
+// candidate is logged with the focus flag so a trial period can measure
+// how often each kind would have fired before widening what triggers it.
+async function alertSound(kind, reason) {
+  let focused = true;
+  try { focused = (await chrome.windows.getCurrent()).focused; } catch (e) {}
+  dbg('alert:' + kind, { reason: String(reason || '').slice(0, 200), focused, sounded: !focused });
+  if (focused) return;
+  chrome.runtime.sendMessage({ type: 'ding', kind }).catch(() => {});
+}
+
+let dlFailAlerted = false; // one fail chime per download batch
+
 function setStage(id, cls, tip) {
   const el = $(id);
   if (!el) return;
   el.className = 'sdot' + (cls ? ' ' + cls : '');
   el.title = tip || '';
+  if (cls === 'fail') alertSound('fail', id + ': ' + (tip || cls));
 }
 
 // ---------- Helpers ----------
@@ -2416,11 +2431,23 @@ async function checkSpecFails() {
     list = ((await r.json()) || {}).failures || [];
   } catch (e) { list = null; }
   if (list === null) return false;      // watcher not reachable - keep stale
+  const prevIds = new Set((specFails || []).map(f => f.id));
+  const fresh = list.filter(f => !prevIds.has(f.id));
   const changed = specFailsJob !== job ||
     JSON.stringify(list.map(f => f.id)) !== JSON.stringify((specFails || []).map(f => f.id));
   specFails = list; specFailsJob = job;
+  if (fresh.length) {
+    const msg = fresh.map(f => f.id).join(', ') + ' failed the spec check';
+    setStage('sdDl', 'warn', msg);
+    toast('Spec check: ' + msg + ' - "Spec failure" reply variant covers it.');
+    alertSound('warn', 'spec_fail ' + fresh.map(f => f.id).join(','));
+  }
   return changed;
 }
+
+// Spec rejects land in the watcher while the panel sits open - poll so
+// the warning (and the unfocused chime) surfaces without a refresh.
+setInterval(() => { if (jobSlug()) checkSpecFails(); }, 30000);
 
 function manualReply(kind) {
   const rows = (matched || []).filter(m => m.matchType !== 'ROW (out of range)');
@@ -2753,7 +2780,7 @@ async function downloadLinked() {
   dbg('linked download queued', { files: jobs.map(j => j.file), problems: problems.length });
   flushLog(true);
 
-  dlTotal = jobs.length; dlDone = 0; dlFailed = 0; htmlRejects = [];
+  dlTotal = jobs.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
   updateDlStatus();
   for (const j of jobs) {
     try {
@@ -2785,6 +2812,10 @@ $('download').addEventListener('click', downloadLinked);
 function updateDlStatus() {
   const d = $('dateFilterHint');
   if (dlTotal) d.textContent = 'Downloads: ' + dlDone + '/' + dlTotal + ' complete' + (dlFailed ? ', ' + dlFailed + ' failed' : '');
+  if (dlTotal && dlFailed && dlDone + dlFailed >= dlTotal && !dlFailAlerted) {
+    dlFailAlerted = true;
+    alertSound('fail', dlFailed + ' of ' + dlTotal + ' download(s) failed');
+  }
 }
 
 // Downloads that came back as HTML (auth walls, SharePoint viewer wrappers,
@@ -3227,7 +3258,7 @@ async function downloadFound() {
   }
   if (!fresh.length) { setStage('sdDl', 'warn', skipped ? 'all matches already downloaded' : 'no downloadable links captured'); toast((skipped ? 'All ' + skipped + ' match(es) already downloaded this session' : 'No downloadable links captured') + (noUrl.length ? ' - ' + noUrl.length + ' matched by name only' : '') + '.'); return false; }
   const job = jobSlug();
-  dlTotal = fresh.length; dlDone = 0; dlFailed = 0; htmlRejects = [];
+  dlTotal = fresh.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
   updateDlStatus();
   for (const j of fresh) {
     queuedUrls.add(j.dkey || j.url);

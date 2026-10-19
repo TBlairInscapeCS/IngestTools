@@ -605,6 +605,7 @@ def archive_done(job_dir: Path, manifest: dict, state: dict, report: dict, clien
         return False
     suffix = client.get("tickerSuffix") or "_ticker"
     moved = []
+    skipped = []
     archived = state.setdefault("archived", {})
     # Work from the report's resolved filenames - a zip entry's real media
     # is its extracted member (downloaded_as/zip_extracted), not the
@@ -632,16 +633,29 @@ def archive_done(job_dir: Path, manifest: dict, state: dict, report: dict, clien
             if p.exists() and p not in cands:
                 cands.append(p)
         for f in cands:
+            target = dest_dir / f.name
+            if target.exists():
+                # No renames in the archive - the already-filed copy is
+                # the one the ID search finds. A same-name file stays in
+                # Ingest/ for the user to reconcile by hand.
+                skipped.append(f.name)
+                state.setdefault("arch_skip", []).append(name)
+                log(f"archive skip (name already filed): {f.name}")
+                continue
             try:
-                f.replace(uniquified(dest_dir / f.name))
+                f.replace(target)
                 moved.append(f.name)
             except Exception as e:
                 log(f"archive move failed {f.name}: {e}")
         archived[name] = dest_dir.name
-    report["archive"] = f"moved {len(moved)} file(s) -> {dest_dir}"
+    report["archive"] = f"moved {len(moved)} file(s) -> {dest_dir}" + \
+        (f", left {len(skipped)} same-name file(s) in Ingest/" if skipped else "")
     if moved:
         notify("Ingest watcher", f"Archived {len(moved)} file(s) to Customer Content/{dest_dir.name}")
         log(f"archived {moved} -> {dest_dir}")
+    if skipped:
+        notify("Ingest watcher",
+               f"{len(skipped)} file(s) already exist in Customer Content/{dest_dir.name} - left in Ingest/")
     return True
 
 
@@ -704,6 +718,13 @@ def process_job(manifest_path: Path):
             # flagged, never re-prompts, never feeds the portal.
             sf = (state.get("specfail") or {}).get(name)
             status["status"] = ("spec_fail: " + "; ".join(sf) + " (kept in place)") if sf else "rejected (kept in place)"
+            status["downloaded_as"] = local.name
+            report["files"].append(status)
+            continue
+        if local is not None and name in state.get("arch_skip", []):
+            # Archived under a duplicate name - left here on purpose,
+            # don't reprocess it as a fresh download every pass.
+            status["status"] = "name exists in archive - left in Ingest/"
             status["downloaded_as"] = local.name
             report["files"].append(status)
             continue
