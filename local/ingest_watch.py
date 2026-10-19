@@ -130,6 +130,15 @@ def start_log_server():
             elif u.path == "/spec-failures":
                 self._send(200, json.dumps({"failures": spec_failures((q.get("job") or [""])[0])}).encode(),
                            "application/json")
+            elif u.path == "/watch-events":
+                # Alert events the panel didn't see: notification pops and
+                # afplay verdicts make sound with no in-panel explanation.
+                try:
+                    since = float((q.get("since") or ["0"])[0] or 0)
+                except ValueError:
+                    since = 0
+                ev = [e for e in ALERT_EVENTS if e["t"] > since]
+                self._send(200, json.dumps({"events": ev}).encode(), "application/json")
             elif u.path == "/ingest-file":
                 p = resolve_job_file((q.get("job") or [""])[0], (q.get("name") or [""])[0])
                 if not p:
@@ -183,7 +192,19 @@ def log(msg):
         pass
 
 
+# Ring buffer of alert-worthy events. Notifications and afplay verdicts
+# make sound with no in-panel explanation - the extension polls
+# /watch-events so the alert box can say what fired and why.
+ALERT_EVENTS = []
+
+
+def alert_event(kind, msg):
+    ALERT_EVENTS.append({"t": time.time(), "kind": kind, "msg": str(msg)[:200]})
+    del ALERT_EVENTS[:-50]
+
+
 def notify(title, msg):
+    alert_event("notify", f"{title}: {msg}")
     try:
         # No timeout previously: a hung osascript (e.g. a notification
         # permission prompt) wedged the whole watch loop silently.
@@ -197,6 +218,7 @@ def notify(title, msg):
 
 def play_sound(path):
     """afplay a sound file, fire-and-forget - the loop never waits on it."""
+    alert_event("sound", Path(path).stem)
     try:
         subprocess.Popen(["afplay", path],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

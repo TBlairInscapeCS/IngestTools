@@ -36,6 +36,13 @@
 
   .hint { color: #8b93a1; font-size: 10px; margin-top: 4px; }
   .info { font-size: 10px; color: #b8bfca; background: #22262e; border-radius: 4px; padding: 4px 7px; margin-top: 5px; display: none; }
+  /* The alert card: every sound leaves a note - kind, what it was for,
+     and the trigger it perceived, so false positives get caught. */
+  #alertBox { width: 100%; font-size: 10px; color: #b8bfca; background: #22262e;
+    border-left: 3px solid #8b93a1; border-radius: 4px; padding: 4px 7px; margin-top: 6px; }
+  #alertBox.warn, #alertBox.fail { border-left-color: #ec9a9a; }
+  #alertBox.arrived { border-left-color: #9adfa8; }
+  #alertBox a { float: right; text-decoration: none; }
   .chip { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; margin-right: 4px; }
   .FOUND { background: #234a2e; color: #9adfa8; }
   .POSSIBLE { background: #4d4423; color: #ecd98a; }
@@ -101,6 +108,7 @@
   <a href="#" id="msStatus" class="hidden" title="" style="color:#ec9a9a;font-weight:700">inbox offline - click to sign in</a>
   <button id="clearAll" title="Wipe the email, tracker, match, downloads and drafts - sign-ins and settings stay">Clear all</button>
   <button id="settingsGear" title="Choose which tools show" aria-expanded="false">&#9881; Settings</button>
+  <div id="alertBox" class="hidden"></div>
 </div>
 <div id="settingsPanel" class="hidden" role="dialog" aria-label="Panel settings">
   <div style="font-weight:700;margin-bottom:4px">Show in panel</div>
@@ -224,6 +232,10 @@
     <button id="erSweep">Download from ER search</button>
   </div>
   <div class="hint" id="capInfo"></div>
+  <div class="row">
+    <button id="recheck">Re-check for delivery</button>
+    <span class="hint" id="watchInfo"></span>
+  </div>
   <div class="hint" id="dateFilterHint"></div>
   <div id="counts"></div>
   <div class="hint" id="missingNote" style="color:#ec9a9a"></div>

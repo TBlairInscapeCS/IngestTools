@@ -40,6 +40,8 @@ let pendingRows = [];      // sheet rows with empty fill-back columns
 let emailPairs = [];       // code+title pairs from the email (Chief Media)
 let emailSpots = [];       // row#/title/code/link blocks from the email (AMC)
 let yangaroo = null;       // {spots, orderName, orderId} from delivery email
+let deliveryWatch = null;  // setInterval id while polling for a delivery
+let watchSince = 0;        // watcher alert events already surfaced (epoch s)
 let lastExtras = [];       // files present but not requested (reconcile)
 let client = null;         // active playbook from clients.js
 let clientSource = '';     // 'sheet' | 'email' | 'manual'
@@ -69,10 +71,26 @@ function stamp(id) {
 // gets attention; the spoken line (say) names WHAT broke. Every
 // candidate is logged with the focus flag so a trial period can measure
 // how often each kind would have fired before widening what triggers it.
+// Every sound leaves a visible note: what kind, what it was for, the
+// trigger it perceived, and whether it actually chimed - so a tone heard
+// in the background is identifiable and false positives get caught.
+function showAlertBox(kind, what, why, silent) {
+  const el = $('alertBox');
+  if (!el) return;
+  el.className = kind;
+  const t = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  el.innerHTML = '<a href="#">×</a><b>' + esc(kind) + ' alert</b> ' +
+    '<span class="hint">' + t + (silent ? ' · window focused - silent' : ' · sounded') + '</span><br>' +
+    esc(what || '') +
+    (why ? '<div class="hint">trigger: ' + esc(why) + '</div>' : '');
+  el.querySelector('a').addEventListener('click', e => { e.preventDefault(); el.classList.add('hidden'); });
+}
+
 async function alertSound(kind, reason, say) {
   let focused = true;
   try { focused = (await chrome.windows.getCurrent()).focused; } catch (e) {}
   dbg('alert:' + kind, { reason: String(reason || '').slice(0, 200), focused, sounded: !focused });
+  showAlertBox(kind, say || reason, reason, focused);
   if (focused) return;
   chrome.runtime.sendMessage({ type: 'ding', kind }).catch(() => {});
   if (say) chrome.runtime.sendMessage({ type: 'speak', text: say }).catch(() => {});
@@ -253,6 +271,7 @@ function esc(s) {
 function resetRun() {
   matched = null; matchedFor = ''; lastResults = null; lastExtras = [];
   specFails = null; specFailsJob = '';
+  disarmDeliveryWatch();
   yangaroo = null;
   idsEl.value = ''; filesEl.value = '';
   capturedByName = {}; queuedUrls.clear(); lastCapTab = null;
@@ -1032,9 +1051,9 @@ async function checkInbox(quiet) {
   catch (e) {
     dbg('graph inbox fail', { err: String(e) });
     if (!quiet) toast('Inbox check failed: ' + e);
-    return;
+    return 0;
   }
-  renderInbox(msgs || [], quiet);
+  return renderInbox(msgs || [], quiet);
 }
 
 // Graph bodies arrive as HTML: anchors carry the real hrefs that innerText
@@ -1213,6 +1232,7 @@ function renderInbox(msgs, quiet) {
   const fresh = cands.filter(c => !inboxSeen.has(c.m.id));
   inboxSeen = new Set(cands.map(c => c.m.id));
   if (quiet && fresh.length) toast(fresh.length + ' new request-like email(s) in inbox.');
+  return fresh.length;
 }
 
 // While the panel is open, poll quietly every 5 min so a fresh request
@@ -2507,7 +2527,24 @@ async function checkSpecFails() {
 
 // Spec rejects land in the watcher while the panel sits open - poll so
 // the warning (and the unfocused chime) surfaces without a refresh.
-setInterval(() => { if (jobSlug()) checkSpecFails(); }, 30000);
+setInterval(() => { if (jobSlug()) checkSpecFails(); pollWatchEvents(); }, 30000);
+
+// Watcher-side alert events (notification pops, afplay verdicts) make
+// sound with no in-panel explanation - surface each in the alert box so
+// a heard tone is identifiable after the fact. Panel-open timestamp
+// seeds `since` so historical events don't flood the box.
+watchSince = Date.now() / 1000;
+async function pollWatchEvents() {
+  try {
+    const r = await fetch('http://127.0.0.1:8770/watch-events?since=' + watchSince);
+    if (!r.ok) return;
+    const j = await r.json();
+    (j.events || []).forEach(e => {
+      watchSince = Math.max(watchSince, e.t);
+      showAlertBox('watcher', e.msg, 'watcher ' + e.kind + ' · already sounded', false);
+    });
+  } catch (e) { /* watcher down - stay silent */ }
+}
 
 function manualReply(kind) {
   const rows = (matched || []).filter(m => m.matchType !== 'ROW (out of range)');
@@ -3627,7 +3664,9 @@ async function sweepAndDownload() {
     toast('API missed some IDs - falling back to the delivery sweep for the rest…');
   }
   const kept = await sweepEr();
-  if (!kept) return false;
+  // Nothing delivered yet and a request is pending -> keep re-checking
+  // every 5 min; the 'arrived' chime fires when files land.
+  if (!kept) { maybeArmWatch(); return false; }
   // Sender-only sweep (no requested IDs): treat every kept row as wanted
   // so reconcile marks them all FOUND and downloads the lot.
   const ids = idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -3640,6 +3679,47 @@ async function sweepAndDownload() {
 }
 
 $('erSweep').addEventListener('click', sweepAndDownload);
+
+// ---------- Delivery watch ----------
+// A delivery search that comes back empty arms a 5-minute re-check: the
+// poll runs while the panel is open and sounds 'arrived' when files
+// land. resetRun disarms it - a new email is a different wait.
+
+async function recheckDelivery(quiet) {
+  if (!quiet) toast('Re-checking for deliveries…');
+  const got = (client && client.delivery === 'extreme-reach')
+    ? !!(await sweepAndDownload())
+    : (await checkInbox(quiet)) > 0;
+  const pending = ((matched || []).length > 0) || !!idsEl.value.trim();
+  if (!got && pending) armDeliveryWatch(client ? client.name : 'request');
+  else if (got) disarmDeliveryWatch();
+  return got;
+}
+
+function maybeArmWatch() {
+  const pending = ((matched || []).length > 0) || !!idsEl.value.trim();
+  if (pending) armDeliveryWatch(client ? client.name : 'request');
+}
+
+function armDeliveryWatch(why) {
+  if (deliveryWatch) return;
+  const w = $('watchInfo'); if (w) w.textContent = 'watching every 5 min for ' + why;
+  deliveryWatch = setInterval(async () => {
+    const got = await recheckDelivery(true);
+    if (got) {
+      disarmDeliveryWatch();
+      alertSound('arrived', 'delivery found for ' + why, 'Delivery arrived for ' + why);
+      toast('Delivery arrived - ' + why + ' - check the results.');
+    }
+  }, 5 * 60 * 1000);
+}
+
+function disarmDeliveryWatch() {
+  if (deliveryWatch) { clearInterval(deliveryWatch); deliveryWatch = null; }
+  const w = $('watchInfo'); if (w) w.textContent = '';
+}
+
+$('recheck').addEventListener('click', () => recheckDelivery(false));
 
 // One-shot delivery-page flow: scan every open delivery tab (focused page
 // + all ER tabs), reconcile against the requested IDs already loaded from
