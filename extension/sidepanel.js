@@ -1979,14 +1979,16 @@ async function doMatch() {
   if (!sheet) { toast('Load a tracking sheet first (step 2).'); setStage('sdMatch', 'warn', 'needs a tracking sheet'); return false; }
   if (!emailEl.value.trim()) { toast('Add the request email first (step 1).'); setStage('sdMatch', 'warn', 'needs the request email'); return false; }
   let cols = currentCols();
-  if (cols.id < 0) { toast('Pick the ID column.'); setStage('sdMatch', 'warn', 'pick the ID column'); return false; }
-
   // Wrong-tab guard: score every workbook tab against the requested
   // codes BEFORE matching - a tab holding none of them produces only
   // guesswork that looks like matches. Best coverage wins; the open
   // sheet follows the switch so the flip is visible, not silent.
-  const reqCodes = [...new Set(extractCodes(latestSegment(emailEl.value))
-    .concat(idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)))];
+  // Score the email's own cited codes only: idsEl is repopulated from the
+  // previous match's IDs, and those stale codes can out-score the freshly
+  // grabbed tab and drag the sheet back to the old request's tab.
+  const emailCodes = extractCodes(latestSegment(emailEl.value));
+  const reqCodes = [...new Set(emailCodes.length ? emailCodes
+    : idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
   const scores = await sheetTabScores(reqCodes);
   if (scores) {
     const cur = scores.find(s => s.name === sheetTabName) || { name: sheetTabName, hits: 0 };
@@ -1996,12 +1998,16 @@ async function doMatch() {
         cur.hits + ' of ' + reqCodes.length + ' requested IDs were on "' + cur.name +
         '", ' + best.hits + ' are on "' + best.name + '"');
       cols = currentCols();
-      if (cols.id < 0) { toast('Pick the ID column on the new tab.'); setStage('sdMatch', 'warn', 'pick the ID column'); return false; }
     } else if (reqCodes.length && best && best.hits === 0) {
       dbg('match guard: requested codes appear on no tab',
         { codes: reqCodes.length, tabs: scores.map(s => s.name) });
     }
   }
+
+  // An unmapped ID column must not block matching - code needles hit
+  // whole rows regardless. The user picks it afterward for clean IDs.
+  const idUnmapped = cols.id < 0;
+  if (idUnmapped) toast('No ID column mapped - matching anyway; pick it for correct tracking IDs.');
 
   const headerRow = Math.max(1, parseInt($('headerRow').value, 10) || 1);
   const dataRows = sheet.allRows.slice(headerRow);
@@ -2034,7 +2040,21 @@ async function doMatch() {
       dbg('match retry: explicit hits found in older thread text');
     }
   }
-  if (!fresh.length) { setStage('sdMatch', 'fail', 'no rows matched'); toast('No sheet rows matched anything in that email.'); return false; }
+  if (!fresh.length) {
+    // A cited code above the detected header row gets sliced out of
+    // dataRows before matching - say so instead of a bare no-match.
+    const ndl = extractCodes(matchText)
+      .map(c => normalizeName(c).replace(/[\s:_-]+/g, '')).filter(n => n.length >= 6);
+    const sliced = sheet.allRows.slice(0, headerRow)
+      .map((r, i) => ndl.some(n => normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '').includes(n)) ? i + 1 : 0)
+      .filter(Boolean);
+    setStage('sdMatch', 'fail', 'no rows matched');
+    toast(sliced.length
+      ? 'Cited code(s) sit at row ' + sliced.slice(0, 5).join(', ') + ' - above the detected header (row ' +
+        headerRow + '). Lower the Header row and re-match.'
+      : 'No sheet rows matched anything in that email.');
+    return false;
+  }
   // Rows whose fill-back columns are already filled = previously ingested.
   // pendingIdx only exists when fill-back columns were identified.
   if (pendingIdx) {
@@ -2060,6 +2080,9 @@ async function doMatch() {
   if (fresh.every(m => m.matchType === 'GUESS')) { setStage('sdMatch', 'warn', 'confirm the guessed rows below'); presentGuessPicker(fresh); return 'guess'; }
   matched = mergeMatches(fresh);
   presentMatches();
+  if (idUnmapped) {
+    setStage('sdMatch', 'warn', 'matched, but no ID column mapped - pick it for correct tracking IDs');
+  }
   return true;
 }
 
@@ -2641,14 +2664,16 @@ async function downloadLinked() {
     for (const l of qlLinks) qlRes[l] = await resolveQuickLink(l);
   }
 
-  // files.com share links (A&E's aenetworks.files.com) are viewer pages -
-  // the "second click" on their Download button. Resolve each in a hidden
-  // tab to the real file URL (deduped per link).
+  // files.com share links (A&E's aenetworks.files.com) and CreativeHub
+  // Share links (AMC's creativehub.amcnetworks.com/Share/...) are viewer
+  // pages - the "second click" on their Download button. Resolve each in
+  // a hidden tab to the real file URL (deduped per link).
+  const SHARE_PAGE_RE = /files\.com\/|creativehub\.|amcnetworks\.com\/Share/i;
   const fsLinks = [...new Set(withLinks.map(m => m.link)
-    .filter(l => /files\.com\//i.test(l || '')))];
+    .filter(l => SHARE_PAGE_RE.test(l || '')))];
   const fsRes = {};
   if (fsLinks.length) {
-    toast('Resolving ' + fsLinks.length + ' files.com share link(s)…');
+    toast('Resolving ' + fsLinks.length + ' share page link(s)…');
     for (const l of fsLinks) fsRes[l] = await resolveFileShare(l);
   }
 
@@ -2673,10 +2698,10 @@ async function downloadLinked() {
       jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, pick.name), url: pick.url });
       continue;
     }
-    if (/files\.com\//i.test(m.link || '')) {
+    if (SHARE_PAGE_RE.test(m.link || '')) {
       const r = fsRes[m.link];
       if (!r || !r.url) {
-        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): files.com share link could not be resolved - ' +
+        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): share page could not be resolved - ' +
           (r && r.error || 'no download URL') + ' - open the link and download manually');
         continue;
       }
