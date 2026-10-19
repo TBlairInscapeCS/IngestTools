@@ -839,7 +839,30 @@ function extractDates(text) {
   const re4 = new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(' + mon + ')[a-z]*\\.?[,\\s]+(\\d{4})\\b', 'gi');
   while ((m = re4.exec(t))) out.add(iso(m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1]));
 
+  // 19-Oct-26 / 19-Oct-2026 and Oct-19-2026 - tracker cells write
+  // month names with dashes too (Kantar's Inscape Creative Tracker).
+  const re5 = new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?[-\\s]+(' + mon + ')[a-z]*\\.?[-\\s,]+(\\d{2,4})\\b', 'gi');
+  while ((m = re5.exec(t))) out.add(iso(m[3], MONTHS[m[2].slice(0, 3).toLowerCase()], +m[1]));
+  const re6 = new RegExp('\\b(' + mon + ')[a-z]*\\.?[-\\s]+(\\d{1,2})(?:st|nd|rd|th)?[-\\s,]+(\\d{2,4})\\b', 'gi');
+  while ((m = re6.exec(t))) out.add(iso(m[3], MONTHS[m[1].slice(0, 3).toLowerCase()], +m[2]));
+
   return [...out].sort();
+}
+
+// Sheet date-cell -> ms at noon (Excel serial or text); NaN when the
+// cell holds nothing parseable. Self-contained so the harness, which
+// skips xlsx.js, resolves it too.
+function cellDateMs(v) {
+  const s = String(v == null ? '' : v).trim();
+  let iso = '';
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const d = new Date(Math.round((Number(s) - 25569) * 86400) * 1000);
+    iso = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') +
+      '-' + String(d.getUTCDate()).padStart(2, '0');
+  } else {
+    iso = extractDates(s)[0] || '';
+  }
+  return iso ? new Date(iso + 'T12:00:00').getTime() : NaN;
 }
 
 // Keep captured file entries whose line has no date, or a date in the set.
@@ -1237,6 +1260,20 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
   // a row - completed rows can carry the code only in a fill-back column
   // (Inscape Tracking ID), or the source column with extra suffix text.
   const needles = extractCodes(emailText).map(c => normalizeName(c).replace(/[\s:_-]+/g, ''));
+  // Distinctiveness guard: count how many rows share each id/file/title
+  // value. 'Same as column C'-style placeholders and generic labels repeat
+  // across hundreds of rows - substring-matching one floods the match
+  // with every historical row carrying the text (the Kantar 1597-row
+  // FILE flood). A value on 8+ rows can't be THE row the email names.
+  const freq = {};
+  rows.forEach(r => {
+    [cols.id, cols.file, cols.title].forEach(c => {
+      if (c < 0) return;
+      const v = normalizeName(String(r[c] || '').trim()).replace(/ /g, '');
+      if (v) freq[v] = (freq[v] || 0) + 1;
+    });
+  });
+  const rare = v => (freq[v] || 0) < 8;
   const matched = [];
   rows.forEach((r, i) => {
     const get = c => (c >= 0 ? String(r[c] || '').trim() : '');
@@ -1255,7 +1292,7 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       // File Name "NEXT"/"DDT"/"LINK" slot labels live inside everyday
       // email text ("NEXT tab", "link") and false-match whole row blocks.
       // Require a digit (codes all carry one) or a long distinctive word.
-      const hit = n => n.length >= 4 && hay.includes(n) && (/\d/.test(n) || n.length >= 10);
+      const hit = n => n.length >= 4 && hay.includes(n) && (/\d/.test(n) || n.length >= 10) && rare(n);
       const tN = normalizeName(title).replace(/ /g, '');
       if (hit(idN)) matchType = 'ID';
       else if (needles.length && needles.some(c => c.length >= 6 &&
@@ -1301,6 +1338,32 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       matched.push({ row: n, id: '', title: '', trackingId: '', fileName: '', brand: '', matchType: 'ROW (out of range)', linkText: '', link: '', access: null, espn: false, date: '' });
     }
   });
+  // Date narrowing: implicit matches (FILE/TITLE) flooding the sheet -
+  // shared placeholders substring-match all over history. When the email
+  // cites dates and the sheet has a date column, rows far from every
+  // cited date can't be this request. Explicit refs (ID/ROW codes the
+  // email named) stand regardless - a re-request of an old spot is real.
+  // Undated rows pass: no evidence either way.
+  {
+    const dayMs = 864e5;
+    const explicitTypes = { 'ID': 1, 'ROW': 1, 'ROW (out of range)': 1, 'EMAIL': 1 };
+    const implicit = matched.filter(m => !explicitTypes[m.matchType]);
+    if (cols.date >= 0 && implicit.length > 10) {
+      const toMs = d => new Date(d + 'T12:00:00').getTime();
+      const dts = extractDates(emailText).map(toMs).filter(t => !isNaN(t));
+      if (dts.length) {
+        const near = implicit.filter(m => {
+          const t = cellDateMs(m.date);
+          return isNaN(t) || dts.some(d => Math.abs(t - d) <= 3 * dayMs);
+        });
+        if (near.length) {
+          const keep = matched.filter(m => explicitTypes[m.matchType]);
+          matched.length = 0;
+          matched.push(...keep, ...near);
+        }
+      }
+    }
+  }
   // Clue-finding fallback: nothing explicit - the request is whatever's
   // pending on the sheet (fill-back cols empty = not yet ingested, per
   // "there are new files to ingest, and that's it"). Score each candidate

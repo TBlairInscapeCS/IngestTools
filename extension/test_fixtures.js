@@ -151,6 +151,38 @@ eq('refs none', extractRowRefs('please ingest these spots'), []);
   eq('explicit still wins', explicit.filter(m => m.matchType !== 'GUESS').map(m => m.id), ['GFXR2026074H']);
 }
 
+// Dash-separated month dates (Kantar tracker cells write 19-Oct-26).
+eq('date day-mon-yy', extractDates('sent 19-Oct-26'), ['2026-10-19']);
+eq('date mon-day-yyyy', extractDates('due Oct-19-2026'), ['2026-10-19']);
+
+// Distinctiveness guard: 'Same as column C' shared across hundreds of
+// rows can't be the named row - one real hit among placeholder noise
+// used to FILE-match every row carrying the text (Kantar flood).
+{
+  const cols = { id: 0, title: 1, file: 2, link: -1, brand: 3, access: -1, espn: -1, date: 4 };
+  const rows = [
+    ['REALID99H', 'Laundry spot', 'ATT_CFB_Laundry_30_Final_Cut', 'AT&T', '19-Oct-26'],
+    ...Array.from({ length: 12 }, (_, i) =>
+      ['OLD' + i, 'old', 'Same as column C', 'AT&T', '1/2/2020']),
+  ];
+  const email = 'one more asset: Same as column C, ATT_CFB_Laundry_30_Final_Cut, AT&T, ATTCFBLAUNDRY30, :30, Kantar, 19-Oct-26';
+  const m = matchEmailToSheet(email, rows, cols, { headerRow: 1 });
+  eq('placeholder no flood', m.filter(x => x.matchType === 'FILE').length, 0);
+  eq('real row still hits', m.some(x => x.id === 'REALID99H'), true);
+}
+
+// Date narrowing: 12 distinct filenames all cited in the email, 11 on
+// stale rows - the request's own date keeps only the near one.
+{
+  const cols = { id: 0, title: 1, file: 2, link: -1, brand: 3, access: -1, espn: -1, date: 4 };
+  const files = Array.from({ length: 11 }, (_, i) => 'old_spot_file_' + i);
+  const rows = files.map((f, i) => ['OLD' + i, 'old', f, 'AT&T', '1/2/2020'])
+    .concat([['NEW1', 'new', 'fresh_spot_file_x', 'AT&T', '19-Oct-26']]);
+  const email = 'assets: ' + files.join(', ') + ', fresh_spot_file_x, 19-Oct-26';
+  const m = matchEmailToSheet(email, rows, cols, { headerRow: 1 });
+  eq('date narrows flood', m.map(x => x.id), ['NEW1']);
+}
+
 // latestSegment: pasted threads only extract from the newest message
 {
   const thread = 'Hi Tim\nPlease ingest these.\nNEWCODE123H\n\nFrom: Tim Blair <Tim.Blair@vizio.com>\nSent: Friday\nSubject: Re: req\nIngested OLDCODE456H thanks';
