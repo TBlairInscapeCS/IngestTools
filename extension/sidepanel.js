@@ -41,6 +41,7 @@ let emailPairs = [];       // code+title pairs from the email (Chief Media)
 let emailSpots = [];       // row#/title/code/link blocks from the email (AMC)
 let yangaroo = null;       // {spots, orderName, orderId} from delivery email
 let deliveryWatch = null;  // setInterval id while polling for a delivery
+let watchCtx = null;       // {why, clientId, codes} the watch verifies against
 let watchSince = 0;        // watcher alert events already surfaced (epoch s)
 let lastExtras = [];       // files present but not requested (reconcile)
 let client = null;         // active playbook from clients.js
@@ -1194,14 +1195,14 @@ async function checkInbox(quiet) {
       su.style.display = 'block'; // .info is display:none in CSS
       toast('Sign in to read the inbox (one-time app registration, below).');
     }
-    return;
+    return { n: 0, hits: [] };
   }
   let msgs;
   try { msgs = await graphUnread(25); }
   catch (e) {
     dbg('graph inbox fail', { err: String(e) });
     if (!quiet) toast('Inbox check failed: ' + e);
-    return 0;
+    return { n: 0, hits: [] };
   }
   return renderInbox(msgs || [], quiet);
 }
@@ -1382,7 +1383,20 @@ function renderInbox(msgs, quiet) {
   const fresh = cands.filter(c => !inboxSeen.has(c.m.id));
   inboxSeen = new Set(cands.map(c => c.m.id));
   if (quiet && fresh.length) toast(fresh.length + ' new request-like email(s) in inbox.');
-  return fresh.length;
+  // Structured hits for the delivery watch: what each fresh mail cites
+  // (codes/spot ids) and which client it looks like - an unrelated
+  // request mail must NOT count as 'delivery arrived'.
+  return {
+    n: fresh.length,
+    hits: fresh.map(c => ({
+      subject: c.m.subject || '',
+      clientId: (detectClient({ emailText: c.body, subject: c.m.subject,
+        folderName: folderMap[c.m.parentFolderId] || '' }) || {}).id || '',
+      codes: extractCodes(c.body).concat((c.dl || []).map(s => s.id)).filter(Boolean),
+      hasDl: !!c.dl,
+      erNotice: !!c.erNotice,
+    })),
+  };
 }
 
 // While the panel is open, poll quietly every 5 min so a fresh request
@@ -3888,38 +3902,68 @@ $('erSweep').addEventListener('click', sweepAndDownload);
 // A delivery search that comes back empty arms a 5-minute re-check: the
 // poll runs while the panel is open and sounds 'arrived' when files
 // land. resetRun disarms it - a new email is a different wait.
+// Mail-channel watches VERIFY the arrival: a fresh inbox mail only counts
+// when it cites the watched IDs, or carries delivery evidence (download
+// links / an ER notice) under the watched client - an unrelated request
+// mail must never ring the bell.
+
+function watchCtxFor() {
+  const codes = [...new Set(
+    (matched || []).map(m => m.id || m.trackingId)
+      .concat(idsEl.value.split(/\r?\n/).map(s => s.trim()))
+      .filter(Boolean))];
+  return { why: client ? client.name : 'request',
+           clientId: client ? client.id : '', codes };
+}
+
+const normWatchCode = c => normalizeName(c).replace(/[\s:_-]+/g, '');
 
 async function recheckDelivery(quiet) {
   if (!quiet) toast('Re-checking for deliveries…');
-  const got = (client && client.delivery === 'extreme-reach')
-    ? !!(await sweepAndDownload())
-    : (await checkInbox(quiet)) > 0;
+  let arrived = null;
+  if (client && client.delivery === 'extreme-reach') {
+    if (await sweepAndDownload()) arrived = 'ER delivery sweep';
+  } else {
+    const inbox = await checkInbox(quiet) || { n: 0, hits: [] };
+    const w = watchCtx || watchCtxFor();
+    const wc = (w.codes || []).map(normWatchCode);
+    const hit = (inbox.hits || []).find(h => {
+      const hc = (h.codes || []).map(normWatchCode);
+      return (wc.length && hc.some(c => wc.includes(c))) ||
+             (w.clientId && h.clientId === w.clientId && (h.hasDl || h.erNotice));
+    });
+    if (hit) arrived = 'mail: ' + (hit.subject || '(no subject)');
+    else if (!w.clientId && !wc.length && inbox.n) arrived = 'new request-like mail';
+  }
   const pending = ((matched || []).length > 0) || !!idsEl.value.trim();
-  if (!got && pending) armDeliveryWatch(client ? client.name : 'request');
-  else if (got) disarmDeliveryWatch();
-  return got;
+  if (!arrived && pending) armDeliveryWatch(watchCtxFor());
+  else if (arrived) disarmDeliveryWatch();
+  return arrived;
 }
 
 function maybeArmWatch() {
   const pending = ((matched || []).length > 0) || !!idsEl.value.trim();
-  if (pending) armDeliveryWatch(client ? client.name : 'request');
+  if (pending) armDeliveryWatch(watchCtxFor());
 }
 
-function armDeliveryWatch(why) {
+function armDeliveryWatch(ctx) {
   if (deliveryWatch) return;
-  const w = $('watchInfo'); if (w) w.textContent = 'watching every 5 min for ' + why;
+  watchCtx = ctx;
+  const w = $('watchInfo'); if (w) w.textContent = 'watching every 5 min for ' + ctx.why;
   deliveryWatch = setInterval(async () => {
-    const got = await recheckDelivery(true);
-    if (got) {
+    const arrived = await recheckDelivery(true);
+    if (arrived) {
       disarmDeliveryWatch();
-      alertSound('arrived', 'delivery found for ' + why, 'Delivery arrived for ' + why);
-      toast('Delivery arrived - ' + why + ' - check the results.');
+      alertSound('arrived', 'delivery found for ' + ctx.why + ' (' + arrived + ')',
+        'Delivery arrived for ' + ctx.why);
+      toast('Delivery arrived - ' + ctx.why + ' - ' + arrived);
     }
   }, 5 * 60 * 1000);
 }
 
 function disarmDeliveryWatch() {
   if (deliveryWatch) { clearInterval(deliveryWatch); deliveryWatch = null; }
+  watchCtx = null;
   const w = $('watchInfo'); if (w) w.textContent = '';
 }
 
