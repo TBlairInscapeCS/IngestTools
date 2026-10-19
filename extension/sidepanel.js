@@ -266,14 +266,14 @@ async function loadSharePointUrl(url) {
     const r = await fetch(url, { credentials: 'include' });
     const u = r.url || url;
     if (!/\.sharepoint(-df)?\.com/i.test(u)) return false;
-    return await loadSpDownload(u, 'SharePoint (email link)');
+    return await loadSpDownload(u, 'SharePoint (email link)', url);
   } catch (e) {
     dbg('sharepoint url fetch fail', { url: url.slice(0, 80), err: String(e) });
     return false;
   }
 }
 
-async function loadSpDownload(u, sourceLabel) {
+async function loadSpDownload(u, sourceLabel, src) {
   try {
     const dl = u + (u.includes('?') ? '&' : '?') + 'download=1';
     const r = await fetch(dl, { credentials: 'include' });
@@ -288,7 +288,9 @@ async function loadSpDownload(u, sourceLabel) {
     sheetTabs = wb.sheetNames || [];
     sheetTabName = wb.sheetName;
     loadSheetRows(wb, sourceLabel);
-    lastSheetRef = { spUrl: u };
+    // spSrc = the email link that produced this load (wrapper URL) - a
+    // request re-citing the same link can skip the redundant re-download.
+    lastSheetRef = { spUrl: u, spSrc: src || u };
     chrome.storage.local.set({ msLastSheet: lastSheetRef });
     rememberSheet();
     return true;
@@ -327,17 +329,36 @@ async function resolveSheetLinks() {
   return false;
 }
 
-// Persist the sheet that just loaded under the detected client - next
-// request from the same client auto-loads the same tracker even when the
-// email carries no usable link and no tracker tab is open.
+// Persist the sheet that just loaded under the detected client profile -
+// a small recency list (clients fan out into per-brand/per-format docs:
+// WB theatrical vs TV, Horizon's brand sheets). Next request auto-loads
+// the remembered trackers in order until one covers the request's codes.
 function rememberSheet() {
   if (!client || !lastSheetRef) return;
   chrome.storage.local.get('sheetByClient', d => {
     const m = d.sheetByClient || {};
-    if (JSON.stringify(m[client.id]) === JSON.stringify(lastSheetRef)) return;
-    m[client.id] = lastSheetRef;
+    const old = m[client.id];
+    const prev = Array.isArray(old) ? old : old ? [old] : [];
+    const ref = JSON.stringify(lastSheetRef);
+    const list = [lastSheetRef]
+      .concat(prev.filter(r => JSON.stringify(r) !== ref)).slice(0, 3);
+    if (JSON.stringify(prev) === JSON.stringify(list)) return;
+    m[client.id] = list;
     chrome.storage.local.set({ sheetByClient: m });
   });
+}
+
+// Can the loaded sheet plausibly cover this request? True when nothing
+// was requested by code (no way to tell) or some tab/row holds one of
+// the request's IDs - the wrong-doc check behind remembered loads.
+async function sheetCoversRequest() {
+  if (!sheet) return false;
+  const codes = extractCodes(latestSegment(emailEl.value));
+  if (!codes.length) return true;
+  const scores = await sheetTabScores(codes);
+  if (scores) return scores.some(s => s.hits > 0);
+  const hay = normalizeName(sheet.allRows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '');
+  return codes.some(c => hay.includes(normalizeName(c).replace(/[\s:_-]+/g, '')));
 }
 
 // Job naming: flat ~/Downloads/Ingest/ layout - media lands at the top
@@ -1473,18 +1494,24 @@ function onEmailChange() {
   const aeApi = client && client.id === 'ae-media' && hasAtToken() && !sheetIsCurrent;
   if (client && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
-    // Fallback when the playbook has no doc (or its pull fails): the sheet
-    // remembered from this client's last run - email link needn't repeat.
-    const tryRemembered = () => new Promise(resolve => {
-      chrome.storage.local.get('sheetByClient', d => {
-        const mem = (d.sheetByClient || {})[client.id];
-        const label = client.name + ' tracker (remembered)';
-        if (mem && mem.spUrl) resolve(loadSpDownload(mem.spUrl, label));
-        else if (mem && mem.airtable) resolve(fetchAirtableTracker(label));
-        else if (mem && mem.id) resolve(loadSheetDoc(mem.id, mem.gid, '', label));
-        else resolve(false);
-      });
-    });
+    // Fallback when the playbook has no doc (or its pull fails): remembered
+    // trackers for this client profile, most recent first - but a doc only
+    // counts when it actually covers the request's IDs (theatrical vs TV
+    // docs can share one family).
+    const tryRemembered = async () => {
+      const list = await new Promise(res => chrome.storage.local.get('sheetByClient', d => {
+        const v = (d.sheetByClient || {})[client.id];
+        res(Array.isArray(v) ? v : v ? [v] : []);
+      }));
+      const label = client.name + ' tracker (remembered)';
+      for (const mem of list) {
+        const ok = mem.spUrl ? await loadSpDownload(mem.spUrl, label, mem.spSrc)
+                 : mem.airtable ? await fetchAirtableTracker(label)
+                 : mem.id ? await loadSheetDoc(mem.id, mem.gid, '', label) : false;
+        if (ok && await sheetCoversRequest()) return true;
+      }
+      return false;
+    };
     (aeApi ? fetchAirtableTracker(client.name + ' tracker')
            : sids.length ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok => ok || tryRemembered())
            : tryRemembered())
@@ -1655,7 +1682,7 @@ async function refreshSheet(quiet) {
     return ok;
   }
   if (lastSheetRef.spUrl) {
-    const ok = await loadSpDownload(lastSheetRef.spUrl, 'sheet refresh');
+    const ok = await loadSpDownload(lastSheetRef.spUrl, 'sheet refresh', lastSheetRef.spSrc);
     if (!quiet) toast(ok ? 'Sheet refreshed from SharePoint.' : 'Sheet refresh failed.');
     return ok;
   }
@@ -1976,8 +2003,14 @@ $('grabSheet').addEventListener('click', async () => {
   // brand tab's pending view directly (no copy-paste, real link URLs).
   if (client && client.id === 'ae-media' && hasAtToken() &&
       await fetchAirtableTracker('Airtable API')) return;
-  const st = pickTrackerTab(cands, active);
-  if (st) { await grabTrackerTab(st); return; }
+  // A tab on a host the email links to IS the email's doc in view - grab
+  // it before reaching for the email ref itself.
+  const hosts = emailLinkHosts();
+  const linked = cands.find(t =>
+    hosts.some(h => h && (t.url || '').toLowerCase().includes(h)));
+  if (linked) { await grabTrackerTab(linked); return; }
+  // The email's own tracker link outranks stray tracker tabs - the doc it
+  // names is the doc this request means.
   const ref = emailSheetRefs()[0];
   if (ref) {
     applyClient(detectClient({ sheetId: ref.id }), 'sheet');
@@ -1986,6 +2019,7 @@ $('grabSheet').addEventListener('click', async () => {
   for (const u of emailSharePointUrls()) {
     if (await loadSharePointUrl(u)) return;
   }
+  if (cands.length) { await grabTrackerTab(cands[0]); return; }
   if (await resolveSheetLinks()) return;
   setStage('sdSheet', 'fail', 'no tracker found');
   toast('No tracker found - open the sheet tab or load a file.');
@@ -3916,25 +3950,23 @@ $('runAll').addEventListener('click', async () => {
   if (ot) await grabEmailFrom(ot);
   if (!emailEl.value.trim()) return toast('No request email - open it in Outlook or paste it.');
 
-  // 2 · Sheet: open tracker tabs win - they ride the user's own session,
-  // so no auth guessing. The email-linked doc fetch is the fallback when
-  // no tracker tab is open (Airtable tabs feed the app's own copy).
+  // 2 · Sheet: the email's own tracker link is request-scoped - it
+  // outranks open tabs and remembered sheets (WB theatrical vs TV, or two
+  // Horizon brand docs, can share one client family). Tabs come next
+  // (host-matched to the email), then remembered docs, then resolution.
   const st = pickTrackerTab(cls.sheet.concat(cls.sharepoint, cls.airtable), active);
-  if (st) await grabTrackerTab(st);
-  if (!sheet) {
-    const ref = emailSheetRefs()[0];
-    if (ref) {
-      applyClient(detectClient({ sheetId: ref.id }), 'sheet');
-      await loadSheetDoc(ref.id, ref.gid, '', 'email-linked tracker');
-    }
+  const ref = emailSheetRefs()[0];
+  if (ref && (!sheet || !lastSheetRef || lastSheetRef.id !== ref.id)) {
+    applyClient(detectClient({ sheetId: ref.id }), 'sheet');
+    await loadSheetDoc(ref.id, ref.gid, '', 'email-linked tracker');
   }
-  if (!sheet) {
-    // SharePoint/guest-access link in the email - no tab needed, the share
-    // URL serves the workbook with ?download=1.
-    for (const u of emailSharePointUrls()) {
-      if (await loadSharePointUrl(u)) break;
-    }
+  for (const u of emailSharePointUrls()) {
+    // SharePoint/guest-access links resolve at fetch - skip only when the
+    // loaded sheet provably came from THIS link already.
+    if (sheet && lastSheetRef && lastSheetRef.spSrc === u) continue;
+    if (await loadSharePointUrl(u)) break;
   }
+  if (!sheet && st) await grabTrackerTab(st);
   if (!sheet) await resolveSheetLinks();
   if (!sheet) return toast('No tracking sheet - open its tab or load a file.');
 
