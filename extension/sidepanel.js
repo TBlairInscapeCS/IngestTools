@@ -1623,7 +1623,9 @@ async function fetchAirtableTracker(label) {
     const meta = await airtableApi('meta/bases');
     const bases = meta.bases || [];
     const want = ($('atBase').value || '').trim();
+    // The A&E tracker base is known - its interface URL gave the id up.
     const base = (want && bases.find(b => b.id === want)) ||
+      bases.find(b => b.id === 'appGgCqIhAQcNBCTX') ||
       bases.find(b => /inscape|tracker/i.test(b.name)) ||
       (bases.length === 1 ? bases[0] : null);
     if (!base) throw new Error('no matching base - set Base ID in Settings (' +
@@ -1640,18 +1642,32 @@ async function fetchAirtableTracker(label) {
       const view = (t.views || []).find(v => /pending/i.test(v.name)) ||
         (t.views || [])[0];
       if (!view) { dbg('airtable: no view', { table: t.name }); continue; }
-      plan.push({ t, view,
+      // Pending filtering may live in the Interface page, not a named
+      // grid view - in that case find a status-ish select field whose
+      // options name a pending state and filter server-side.
+      let formula = '';
+      if (!/pending/i.test(view.name)) {
+        const sf = (t.fields || []).find(f =>
+          (f.type === 'singleSelect' || f.type === 'multipleSelects') &&
+          /status|state|stage|queue|ingest/i.test(f.name));
+        const opt = sf && (sf.options && sf.options.choices || [])
+          .find(c => /pend|queue|new|to.?ingest|await/i.test(c.name || ''));
+        if (sf && opt) formula = '{' + sf.name + '}="' + opt.name + '"';
+        else dbg('airtable: no pending view or status field', { table: t.name, view: view.name });
+      }
+      plan.push({ t, view, formula,
         urlCols: (t.fields || []).filter(f => f.type === 'url').map(f => hdr[f.name]) });
-      dbg('airtable table', { table: t.name, view: view.name, views: (t.views || []).map(v => v.name) });
+      dbg('airtable table', { table: t.name, view: view.name, formula });
     }
     // Pass 2: pull records per table/view (paged), tag rows with the tab.
     const rows = [headers], links = {};
     let recs = 0;
-    for (const { t, view, urlCols } of plan) {
+    for (const { t, view, formula, urlCols } of plan) {
       let offset = '';
       do {
         const page = await airtableApi(base.id + '/' + encodeURIComponent(t.id) +
           '?view=' + encodeURIComponent(view.id) + '&pageSize=100' +
+          (formula ? '&filterByFormula=' + encodeURIComponent(formula) : '') +
           (offset ? '&offset=' + encodeURIComponent(offset) : ''));
         for (const rec of page.records || []) {
           const row = new Array(headers.length).fill('');
