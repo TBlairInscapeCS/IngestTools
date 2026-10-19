@@ -54,6 +54,7 @@ FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
 ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
                             # New-Ingest un-gray lag is ~20s per the user)
+ARCHIVE_ASK_AGAIN = 30 * 60  # re-prompt a declined archive after this
 # Standard ingest spec (user-supplied): H.264/H.265/MPEG-2 (+ ProRes -
 # the portal demonstrably accepts it, dozens of files completed), the
 # three listed 16:9 resolutions, 24-30fps, 10s minimum runtime.
@@ -190,6 +191,41 @@ def notify(title, msg):
         )
     except Exception:
         pass
+
+
+# No silent file moves - the policy is prompt-first. A file relocated
+# mid-upload breaks the path the ingest portal is holding open, and a
+# wrongly-quarantined file is worse than one left where it landed.
+def confirm_move(msg, timeout=300):
+    """Modal Move/Leave-in-place dialog. Timeout or cancel = don't move."""
+    script = (
+        'display dialog ' + json.dumps(msg) +
+        ' with title "Ingest watcher" buttons {"Leave in place", "Move"}'
+        ' default button "Move" cancel button "Leave in place"'
+        ' giving up after ' + str(int(timeout)))
+    try:
+        r = subprocess.run(["osascript", "-e", script],
+                           capture_output=True, text=True, timeout=timeout + 20)
+        # gave-up output has an empty "button returned:" - checking the
+        # button name alone is sufficient.
+        return "button returned:Move" in r.stdout
+    except Exception:
+        return False
+
+
+def quarantine(job_dir: Path, path: Path, state: dict, name: str, reason: str):
+    """Ask before moving a bad file into _rejected/. 'kept' files stay put
+    and are marked so the entry loop won't re-prompt or re-feed them."""
+    if confirm_move(f"{path.name}\n{reason}\n\nMove it to _rejected/?"):
+        rej = job_dir / "_rejected"
+        try:
+            rej.mkdir(exist_ok=True)
+            path.rename(rej / path.name)
+            return "moved"
+        except Exception:
+            pass
+    state.setdefault("kept", []).append(name)
+    return "kept"
 
 
 def find_downloaded(job_dir: Path, want_name: str):
@@ -649,12 +685,7 @@ def process_job(manifest_path: Path):
             pair_members(members, list(sibling_expected), job_dir)
         except Exception:
             members = []
-            try:
-                rej = job_dir / "_rejected"
-                rej.mkdir(exist_ok=True)
-                zp.rename(rej / zp.name)
-            except Exception:
-                pass
+            quarantine(job_dir, zp, state, zp.name, "unreadable zip - not real media")
         udone.add(zp.name)
         uz_changed = True
         notify("Ingest watcher",
@@ -668,6 +699,14 @@ def process_job(manifest_path: Path):
         status = {"file": name, "needs_espn": entry.get("needs_espn", False)}
 
         local = find_downloaded(job_dir, name)
+        if local is not None and name in state.get("kept", []):
+            # Rejected but the move was declined - stays put, stays
+            # flagged, never re-prompts, never feeds the portal.
+            sf = (state.get("specfail") or {}).get(name)
+            status["status"] = ("spec_fail: " + "; ".join(sf) + " (kept in place)") if sf else "rejected (kept in place)"
+            status["downloaded_as"] = local.name
+            report["files"].append(status)
+            continue
         if local is None:
             if name in state.get("rejected", []):
                 sf = (state.get("specfail") or {}).get(name)
@@ -704,14 +743,11 @@ def process_job(manifest_path: Path):
             try:
                 members = unzip_media(local, job_dir)
             except Exception as e:
-                rej = job_dir / "_rejected"
-                try:
-                    rej.mkdir(exist_ok=True)
-                    local.rename(rej / local.name)
-                except Exception:
-                    pass
+                where = quarantine(job_dir, local, state, name,
+                                   "unreadable zip - " + str(e)[:80])
                 state.setdefault("rejected", []).append(name)
-                status["status"] = "rejected: unreadable zip - " + str(e)[:80]
+                status["status"] = "rejected: unreadable zip - " + str(e)[:80] + \
+                    (" (moved to _rejected/)" if where == "moved" else " (kept in place)")
                 notify("Ingest watcher", f"{local.name}: rejected (unreadable zip) - not real media.")
                 changed = True
                 report["files"].append(status)
@@ -756,14 +792,10 @@ def process_job(manifest_path: Path):
 
         bad = sniff_bad_media(local)
         if bad:
-            rej = job_dir / "_rejected"
-            try:
-                rej.mkdir(exist_ok=True)
-                local.rename(rej / local.name)
-            except Exception:
-                pass
+            where = quarantine(job_dir, local, state, name, bad + " - not a real video")
             state.setdefault("rejected", []).append(name)
-            status["status"] = "rejected: " + bad
+            status["status"] = "rejected: " + bad + \
+                (" (moved to _rejected/)" if where == "moved" else " (kept in place)")
             if name not in state["notified"]:
                 state["notified"].append(name)
                 notify("Ingest watcher", f"{local.name}: rejected ({bad}) - not a real video.")
@@ -806,20 +838,18 @@ def process_job(manifest_path: Path):
                        "ffprobe unavailable - files pass unchecked. Check ffprobe on PATH.")
                 log("spec check degraded: " + str(pr.get("error", "no info")))
         elif hard:
-            rej = job_dir / "_rejected"
-            try:
-                rej.mkdir(exist_ok=True)
-                local.rename(rej / local.name)
-            except Exception:
-                pass
+            where = quarantine(job_dir, local, state, name,
+                               "fails ingest spec: " + "; ".join(hard))
             state.setdefault("rejected", []).append(name)
             state.setdefault("specfail", {})[name] = hard
-            status["status"] = "spec_fail: " + "; ".join(hard)
+            status["status"] = "spec_fail: " + "; ".join(hard) + \
+                (" (moved to _rejected/)" if where == "moved" else " (kept in place)")
             status["spec"] = pr.get("info")
             if name not in state["notified"]:
                 state["notified"].append(name)
                 notify("Ingest watcher",
-                       f"{local.name}: fails ingest spec ({'; '.join(hard)}) - moved to _rejected/.")
+                       f"{local.name}: fails ingest spec ({'; '.join(hard)})" +
+                       (" - moved to _rejected/." if where == "moved" else " - left in place."))
             changed = True
             report["files"].append(status)
             continue
@@ -856,13 +886,25 @@ def process_job(manifest_path: Path):
         report["files"].append(status)
 
     # All entries settled -> portal gate (SIDMAP terminal statuses + rest
-    # beat) -> file the job's media under Customer Content. Rejected /
-    # espn_failed count as settled; missing/downloading hold the job.
+    # beat) -> ask before filing the job's media under Customer Content.
+    # Rejected / espn_failed count as settled; missing/downloading hold
+    # the job. Declining snoozes the prompt for ARCHIVE_ASK_AGAIN.
     if report["files"] and not state.get("archived_all") and all(
             s.get("status") not in ("missing", "downloading") for s in report["files"]):
         if portal_gate(manifest_path, job_dir, manifest, state, report, client):
-            if archive_done(job_dir, manifest, state, report, client):
-                state["archived_all"] = True
+            snoozed = state.get("archive_snoozed", 0)
+            if snoozed and time.time() - snoozed < ARCHIVE_ASK_AGAIN:
+                report["archive"] = "archive declined - files stay in Ingest/ (re-asks in ~30m)"
+            else:
+                dest = client_folder(client.get("name", ""))
+                if confirm_move(
+                        f"Job {manifest.get('job')}: all portal ingests are terminal.\n\n"
+                        f"Move the job's media to Customer Content/{dest.name if dest else '?'}?"):
+                    if archive_done(job_dir, manifest, state, report, client):
+                        state["archived_all"] = True
+                else:
+                    state["archive_snoozed"] = time.time()
+                    report["archive"] = "archive declined - files stay in Ingest/ (re-asks in ~30m)"
         changed = True  # portal_gate timestamps live in state
 
     write_report(manifest_path, report)
@@ -933,8 +975,12 @@ def job_media_files(slug: str) -> list[str]:
     mp, m = find_manifest_for_job(slug)
     if not m:
         return []
+    # A rejected row that was "kept in place" still exists on disk - the
+    # manifest name alone must not qualify it for the portal feed.
+    rejected = set(load_state(mp).get("rejected") or [])
     return [e["file"] for e in m.get("files", [])
-            if e.get("file") and Path(e["file"]).suffix.lower() in MEDIA_EXTS
+            if e.get("file") and e["file"] not in rejected
+            and Path(e["file"]).suffix.lower() in MEDIA_EXTS
             and (mp.parent / e["file"]).exists()]
 
 
@@ -1023,14 +1069,23 @@ def scoop_downloads():
         if ext in MEDIA_EXTS:
             for job_dir, wants in pending.items():
                 match = next((w for w in wants if stem_match(w, p.name)), None)
-                if match:
-                    try:
-                        p.replace(job_dir / match)
-                    except Exception:
-                        continue
-                    notify("Ingest watcher", f"{p.name} -> {job_dir.name}/{match}")
-                    log(f"scooped {p.name} into {job_dir.name} as {match}")
+                if not match:
+                    continue
+                # Ask before relocating - a manually-downloaded file can be
+                # mid-upload to the portal, and moving it breaks the path.
+                if not confirm_move(
+                        f"{p.name} looks like \"{match}\" (job {job_dir.name}).\n\n"
+                        "Move it from Downloads into the Ingest folder?\n"
+                        "Leave it if it's mid-ingest on the portal."):
+                    log(f"scoop declined/timeout: {p.name} stays in Downloads")
                     break
+                try:
+                    p.replace(job_dir / match)
+                except Exception:
+                    continue
+                notify("Ingest watcher", f"{p.name} -> {job_dir.name}/{match}")
+                log(f"scooped {p.name} into {job_dir.name} as {match}")
+                break
             _seen_dl.add(p.name)
         elif ext == ".zip":
             try:
@@ -1043,12 +1098,17 @@ def scoop_downloads():
             hit = next((jd for jd, wants in pending.items()
                         if any(stem_match(w, m) for m in med for w in wants)), None)
             if hit:
-                try:
-                    p.replace(hit / p.name)
-                    notify("Ingest watcher", f"{p.name} -> {hit.name}/ (zip matched pending rows)")
-                    log(f"scooped zip {p.name} into {hit.name}")
-                except Exception:
-                    pass
+                if confirm_move(
+                        f"{p.name} holds media matching job {hit.name}.\n\n"
+                        "Move the zip from Downloads into the Ingest folder?"):
+                    try:
+                        p.replace(hit / p.name)
+                        notify("Ingest watcher", f"{p.name} -> {hit.name}/ (zip matched pending rows)")
+                        log(f"scooped zip {p.name} into {hit.name}")
+                    except Exception:
+                        pass
+                else:
+                    log(f"scoop declined/timeout: {p.name} stays in Downloads")
             _seen_dl.add(p.name)
 
 
