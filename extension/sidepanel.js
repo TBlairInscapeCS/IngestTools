@@ -2319,7 +2319,10 @@ async function doMatch() {
     toast(sliced.length
       ? 'Cited code(s) sit at row ' + sliced.slice(0, 5).join(', ') + ' - above the detected header (row ' +
         headerRow + '). Lower the Header row and re-match.'
-      : 'No sheet rows matched anything in that email.');
+      : ndl.length
+        ? 'No rows matched - the email cites ' + ndl.length +
+          ' code(s) absent from this sheet. Wrong tracker, or rows not added yet?'
+        : 'No sheet rows matched anything in that email.');
     return false;
   }
   // Rows whose fill-back columns are already filled = previously ingested.

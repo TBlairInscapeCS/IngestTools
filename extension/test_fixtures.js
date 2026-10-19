@@ -205,6 +205,24 @@ eq('detect wb-theatrical', detect('[EXTERNAL] RE: WB Theatrical Spots for Inscap
 eq('detect wbd-usn', detect('[EXTERNAL] WBD USN X INSCAPE GRID | 10/13 REVIEW | CNN', 'From: jasmine.bocanegra@publicismedia.com To: Katie.Morrissey@wbdcontractor.com'), 'wbd-usn');
 eq('detect icon', detect('[EXTERNAL] Vizio - Ingestion', 'From: nikon@iconmediadirect.com'), 'icon-media');
 eq('detect sheet->umbrella', (() => { const h = detectClient({ sheetId: '1zPD9LkK_SzWYDhGYRKAwR-eWLIkS-SENRkNvWFdZugQ' }); return h ? h.id : null; })(), 'horizon-next');
+// "Kohl's Inscape POD" used to land on horizon-next - its generic /inscape
+// pod/ subject pattern ran before kohls' keywords were ever consulted.
+eq('detect kohls pod', detect("[EXTERNAL] Kohl's Inscape POD 10/14/2026", ''), 'horizon-kohls');
+// ...but a Yangaroo delivery naming Kohl's must stay yangaroo-delivery.
+eq('detect kohls delivery', detect("[EXTERNAL] Inscape TV - New Media Available from Kohl's: Kohl's - Fall", ''), 'yangaroo-delivery');
+// Pasted without subject or tracker link, the WB mail still says
+// "theatrical doc" in the body - keywords must cover what subjects+domains miss.
+eq('detect theatrical body', detect('', 'Hi Inscape Team,\n\nThe below spots have been added to the theatrical doc below.\nWRCH8815000H'), 'wb-theatrical');
+
+// Named-but-absent refs suppress GUESS: an email citing codes that appear
+// nowhere in the sheet is the wrong-tracker case - returning pending rows
+// would silently match garbage. Vague emails still get the clue fallback.
+{
+  const cols = { id: 0, title: 1, file: 2, link: -1, brand: 3, access: -1, espn: -1, date: 4 };
+  const rows = [['PEND1', 'new spot', 'file_a', 'Advertiser', '19-Oct-26']];
+  const m = matchEmailToSheet('ingest MISSINGCODE99H please', rows, cols, { headerRow: 1, pendingIdx: [0] });
+  eq('named code absent -> no guess', m.length, 0);
+}
 
 // ---------- Inline code extraction (prose-embedded IDs) ----------
 {

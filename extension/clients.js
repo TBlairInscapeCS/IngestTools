@@ -67,6 +67,10 @@ var CLIENTS = [
     id: 'horizon-kohls',
     name: "Horizon / Kohl's",
     detect: {
+      // "Kohl's Inscape ..." must beat horizon-next's generic /inscape pod/
+      // - but stay adjacent so Yangaroo's "New Media Available from Kohl's"
+      // still lands on yangaroo-delivery.
+      subjects: [/kohl'?s inscape\b/i],
       keywords: [/kohl'?s/i],
       domains: [/horizonmedia\.com|horizon-next\.com/i],
     },
@@ -364,6 +368,7 @@ var CLIENTS = [
     name: 'Warner / WB Theatrical',
     detect: {
       subjects: [/theatrical/i],
+      keywords: [/theatrical/i],  // body says "theatrical doc" even when subject/link are lost in a paste
       domains: [/wbd\.com|warnermedia\.sharepoint\.com/i],
     },
     delivery: 'extreme-reach',

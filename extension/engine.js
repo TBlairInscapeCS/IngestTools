@@ -1371,7 +1371,12 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
   // request date against the email; strongest scores first, newest rows
   // win ties. These come back tagged GUESS - the panel asks the user to
   // confirm before downloading.
-  if (!matched.length) {
+  // But only when the email is genuinely vague: if it cites codes, row
+  // refs or filename IDs and NONE appear anywhere in this sheet, guessing
+  // pending rows would silently match the wrong tracker - return empty so
+  // the panel can say "cited IDs not found; wrong sheet?"
+  const namedRefs = needles.length + rowRefs.size + extractFileIds(emailText).length;
+  if (!matched.length && !namedRefs) {
     const STOP = new Set(('ingest ingestion please these those spot spots file files have been ' +
       'sent via with from that this your will would could should when what they them then than ' +
       'also just very more some into about their there which where who whom email mail hello ' +
