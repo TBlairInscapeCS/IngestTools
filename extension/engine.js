@@ -953,6 +953,26 @@ function extractCodes(text) {
   return out;
 }
 
+// Filename-style identifiers the code extractor rejects - isCodeToken
+// wants uppercase. Sheetless clients (Comscore BSLWeb "File Name" lists,
+// portal deliveries) cite ids like "p350325959795_7130" or bare media
+// filenames. Catches: tokens carrying a media extension (id = stem), and
+// digit-run + underscore-group tokens. Sheetless-only - it would over-fire
+// inside prose matching.
+function extractFileIds(text) {
+  const seen = new Set(), out = [];
+  const re = /\b[\w.-]*\.(?:mp4|mxf|mov|ts|mpg|mpeg|mkv|wmv|avi|m4v|zip)\b|\b[a-zA-Z]*\d{4,}[a-zA-Z0-9]*(?:_[a-zA-Z0-9]+)+\b/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const tok = m[0].replace(/\.(?:mp4|mxf|mov|ts|mpg|mpeg|mkv|wmv|avi|m4v|zip)$/i, '')
+      .replace(/[.:;,!_]+$/, '');
+    if (!/\d/.test(tok) || tok.replace(/[_\-.]/g, '').length < 6) continue;
+    if (isCodeToken(tok)) continue; // the code extractor already claims it
+    if (!seen.has(tok)) { seen.add(tok); out.push(tok); }
+  }
+  return out;
+}
+
 // Same-line code + title pairs (Chief Media style:
 // "FRGPATLRN30H          Fragrance Patricia Learn More 30"). Code must sit
 // left of >=2 spaces; the rest of the line is the spot title.

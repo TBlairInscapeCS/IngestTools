@@ -1999,7 +1999,13 @@ function currentCols() {
 // is committed (results shown), 'guess' when it stopped at the confirm
 // picker, false on failure (a toast already explains why).
 async function doMatch() {
-  if (!sheet) { toast('Load a tracking sheet first (step 2).'); setStage('sdMatch', 'warn', 'needs a tracking sheet'); return false; }
+  if (!sheet) {
+    // Sheetless path (Comscore + tracker-less clients): the email's own
+    // cited IDs become the match set - downloads, portal fill, Jira and
+    // replies all consume `matched` downstream either way.
+    if (!emailEl.value.trim()) { toast('Add the request email first (step 1).'); setStage('sdMatch', 'warn', 'needs the request email'); return false; }
+    return doEmailMatch();
+  }
   if (!emailEl.value.trim()) { toast('Add the request email first (step 1).'); setStage('sdMatch', 'warn', 'needs the request email'); return false; }
   let cols = currentCols();
   // Wrong-tab guard: score every workbook tab against the requested
@@ -2106,6 +2112,44 @@ async function doMatch() {
   if (idUnmapped) {
     setStage('sdMatch', 'warn', 'matched, but no ID column mapped - pick it for correct tracking IDs');
   }
+  return true;
+}
+
+// Sheetless matching: no tracker at all. Build pseudo-rows from the
+// email itself - spot blocks (code+title+link), code+title pairs, bare
+// codes, then filename-style ids (Comscore "File Name" lists). Richest
+// sources first so titles/links land on the same row object. Everything
+// downstream (downloads, manifest, portal fill, Jira, replies) reads
+// `matched` generically - row 0 just means "not a sheet row".
+function doEmailMatch() {
+  const matchText = latestSegment(emailEl.value) || emailEl.value;
+  const found = new Map();
+  const put = (id, o) => {
+    const k = normalizeName(id).replace(/[\s:_-]+/g, '');
+    if (!k) return;
+    const cur = found.get(k) ||
+      { id, trackingId: id, title: '', link: '', fileName: String(id), matchType: 'EMAIL', row: 0, espn: tickerAlways() };
+    if (o && o.title && !cur.title) cur.title = o.title;
+    if (o && o.link && !cur.link) cur.link = o.link;
+    found.set(k, cur);
+  };
+  (emailSpots || []).forEach(s => put(s.id, { title: s.title, link: s.url }));
+  (emailPairs || []).forEach(p => put(p.id, { title: p.title }));
+  extractCodes(matchText).forEach(c => put(c));
+  extractFileIds(matchText).forEach(c => put(c));
+  const fresh = [...found.values()];
+  if (!fresh.length) {
+    setStage('sdMatch', 'warn', 'email cites no IDs');
+    toast('Nothing citable in that email - no IDs or filenames to build rows from.');
+    return false;
+  }
+  matchCols = {};
+  stamp('tsMatch');
+  dbg('email match', { rows: fresh.length, client: client && client.id,
+    ids: fresh.slice(0, 15).map(m => m.id) });
+  matched = mergeMatches(fresh);
+  presentMatches();
+  setStage('sdMatch', 'ok', fresh.length + ' row(s) from email (no tracker)');
   return true;
 }
 
@@ -2238,6 +2282,13 @@ function presentMatches() {
     dlBtn.textContent = 'Download ' + nDl + ' linked';
     dlBtn.classList.remove('hidden');
     $('sec4').open = false;
+  } else if (matched.length) {
+    // No downloadable links but rows are committed: the button still
+    // writes the manifest so the watcher reconciles manual drops (FTP,
+    // portal, viewer downloads) and builds ticker versions on arrival.
+    dlBtn.textContent = 'Write manifest - ' + matched.length + ' file(s) manual';
+    dlBtn.classList.remove('hidden');
+    $('sec4').open = true;
   } else {
     dlBtn.classList.add('hidden');
     $('sec4').open = true;
@@ -2671,13 +2722,10 @@ async function downloadLinked() {
   warnStale();
   const job = jobSlug();
   const withLinks = matched.filter(m => m.link || m.yangarooUrl);
-  if (!withLinks.length) {
-    if (client && client.delivery !== 'links') {
-      toast('No sheet links - expected for ' + client.name + '. ' + client.note);
-    } else {
-      toast('No links in the matched rows - is the Link column set?');
-    }
-    return false;
+  // No links at all isn't fatal anymore: every matched row becomes a
+  // manifest entry below so the watcher reconciles manual drops.
+  if (!withLinks.length && client && client.delivery !== 'links') {
+    toast('No sheet links - expected for ' + client.name + '. ' + client.note);
   }
 
   // Resolve Drive folder links -> the single matching file in each folder.
@@ -2780,13 +2828,31 @@ async function downloadLinked() {
     }
   }
 
-  if (!jobs.length) {
+  // Matched rows that produced no download (no link, or an unresolvable
+  // one) still get manifest entries - the watcher reconciles manual drops
+  // (FTP/CyberDuck, portal, viewer downloads) against expected names and
+  // builds ticker versions on arrival. Sheetless clients like Comscore
+  // run entirely on this path.
+  const queuedIds = new Set(jobs.map(j => normalizeName(j.tracking_id || '').replace(/[\s:_-]+/g, '')));
+  const manual = [];
+  matched.forEach(m => {
+    const tid = m.trackingId || m.id;
+    const k = normalizeName(tid || '').replace(/[\s:_-]+/g, '');
+    if (!k || queuedIds.has(k) || manual.some(x => x._k === k)) return;
+    const df = /\.[a-z0-9]{2,5}$/i.test(m.fileName || '') ? m.fileName : String(m.fileName || tid || 'file') + '.mp4';
+    manual.push({ row: m.row, tracking_id: tid, title: m.title || '', expected_name: m.fileName || '',
+      needs_espn: m.espn || tickerAlways(), url: null, _k: k, file: nameForIngest(tid, m.title || '', df) });
+  });
+  manual.forEach(x => delete x._k);
+  const entries = jobs.concat(manual);
+
+  if (!entries.length) {
     toast('Nothing to download - ' + problems.length + ' problem row(s): ' + (problems[0] || 'no resolvable links'));
     $('matchResults').innerHTML += problems.map(p => '<div class="hint">' + esc(p) + '</div>').join('');
     setStage('sdDl', 'warn', problems.length + ' row(s) had unresolvable links');
     return false;
   }
-  dbg('linked download queued', { files: jobs.map(j => j.file), problems: problems.length });
+  dbg('linked download queued', { files: jobs.map(j => j.file), manual: manual.length, problems: problems.length });
   flushLog(true);
 
   dlTotal = jobs.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
@@ -2801,14 +2867,17 @@ async function downloadLinked() {
       if (id != null) ourDlIds.add(id);
     } catch (e) { dlFailed++; updateDlStatus(); }
   }
-  const blob = new Blob([buildManifest(job, jobs, clientInfo())], { type: 'application/json' });
+  const blob = new Blob([buildManifest(job, entries, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/');
-  const nEspnJobs = jobs.filter(j => j.needs_espn).length;
-  toast('Queued ' + jobs.length + ' download(s) + manifest to ~/Downloads/Ingest/' +
-    (nEspnJobs ? ' — ' + nEspnJobs + ' ESPN ticker version(s) auto-build on arrival' : '') +
+  setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/' +
+    (manual.length ? ' · ' + manual.length + ' awaiting manual drop' : ''));
+  const nEspnJobs = entries.filter(j => j.needs_espn).length;
+  toast((jobs.length ? 'Queued ' + jobs.length + ' download(s) + manifest to ~/Downloads/Ingest/' :
+      'Manifest written to ~/Downloads/Ingest/ - drop the file(s) in there') +
+    (manual.length && jobs.length ? ' — ' + manual.length + ' row(s) awaiting manual drop' : '') +
+    (nEspnJobs ? ' — ' + nEspnJobs + ' ticker version(s) auto-build on arrival' : '') +
     (problems.length ? ' — ' + problems.length + ' row(s) skipped' : ''));
   if (problems.length) {
     $('matchResults').innerHTML += problems.map(p => '<div class="hint">' + esc(p) + '</div>').join('');
@@ -3787,7 +3856,7 @@ function renderIngestPreview() {
   }
   const ing = (client && client.ingest) || {};
   const lines = [
-    "Reporting ID ← '" + (ingestColName('id') || '?') + "' col" + (plan.opts.tickerSuffix ? " (+" + plan.opts.tickerSuffix + " on _ticker files)" : ''),
+    "Reporting ID ← '" + (ingestColName('id') || 'email') + "'" + (plan.opts.tickerSuffix ? " (+" + plan.opts.tickerSuffix + " on _ticker files)" : ''),
     plan.opts.nameTitle ? "Title ← '" + (ingestColName('title') || '?') + "' col" : 'Title — playbook leaves default',
     plan.opts.advertiser ? "Advertiser/Brand/Vertical ← '" + (ingestColName('brand') || '?') + "' col" : 'Advertiser/Brand/Vertical — playbook leaves default',
     'Fingerprint — video on _ticker files, otherwise untouched',

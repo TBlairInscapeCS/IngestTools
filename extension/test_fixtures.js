@@ -91,6 +91,15 @@ eq('wb spots', extractSpotBlocks('Clayface\nWRCA75B3000H\nMonster Rev 30\nWRCA47
   const s = extractSpotBlocks('70% OFF Flooring - :30 - OG Jingle + Contact - TV\nEMPR0158000H\n:30\n10/17/2026');
   eq('empire spot', s.length === 1 ? [s[0].id, s[0].title, s[0].len] : s, ['EMPR0158000H', '70% OFF Flooring - :30 - OG Jingle + Contact - TV', '30']);
 }
+// Comscore BSLWeb: "File Name" list carries lowercase filename-style ids
+// the code extractor legitimately rejects - extractFileIds claims them.
+eq('comscore fileids', extractFileIds(
+  'Comscore has uploaded new commercial(s) MP4 file to this videos bucket location: csps-inscape\\inscape/videos\n\nFile Name\np350325959795_7130'),
+  ['p350325959795_7130']);
+eq('fileids media ext', extractFileIds('delivered as abc_delivery_99.mov and spot.mxf'),
+  ['abc_delivery_99']);
+eq('fileids dedup vs codes', extractFileIds('QWERTY12345.mp4 listed again as QWERTY12345'), []);
+eq('fileids no digits', extractFileIds('random_words_here in prose'), []);
 // Horizon row refs: comma thousands, 'lines'/'rows' synonyms, ranges
 eq('refs lines comma', extractRowRefs('NEXT tab lines 13,286-13,289'), [13286, 13287, 13288, 13289]);
 eq('refs rows range', extractRowRefs('(rows 13294 - 13297)'), [13294, 13295, 13296, 13297]);

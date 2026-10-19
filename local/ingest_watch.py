@@ -239,7 +239,7 @@ def quarantine(job_dir: Path, path: Path, state: dict, name: str, reason: str):
     return "kept"
 
 
-def find_downloaded(job_dir: Path, want_name: str):
+def find_downloaded(job_dir: Path, want_name: str, needle: str = ""):
     """Locate the downloaded file, tolerating Chrome's ' (n)' uniquify suffix."""
     exact = job_dir / want_name
     if exact.exists() and not (job_dir / (want_name + ".crdownload")).exists():
@@ -253,6 +253,33 @@ def find_downloaded(job_dir: Path, want_name: str):
     for p in job_dir.glob("*.crdownload"):
         if p.name.startswith(stem[:20]):
             return None
+    # Manual drops (FTP/CyberDuck, portal, viewer downloads) arrive under
+    # their delivered names: claim a media file whose stem contains the
+    # tracking id and rename it to the canonical manifest name, keeping
+    # the delivered extension. Skips partial copies, ticker outputs, and
+    # anything touched in the last few seconds.
+    key = norm_stem(needle)
+    if len(key) >= 6:
+        try:
+            hits = [
+                p for p in job_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in MEDIA_EXTS
+                and key in norm_stem(p.name)
+                and not p.stem.lower().endswith(("_t", "_ticker"))
+                and time.time() - p.stat().st_mtime > 5
+            ]
+        except OSError:
+            hits = []
+        if hits:
+            hit = min(hits, key=lambda p: len(norm_stem(p.name)))
+            target = job_dir / (stem + hit.suffix.lower())
+            if hit != target:
+                try:
+                    hit.rename(target)
+                    hit = target
+                except OSError:
+                    pass
+            return hit
     return None
 
 
@@ -721,9 +748,13 @@ def process_job(manifest_path: Path):
 
     for entry in manifest.get("files", []):
         name = entry.get("file", "")
+        # A url-less manual entry may carry only a tracking id - the
+        # canonical expectation is "<id>.mp4", ext swapped on arrival.
+        if not name:
+            name = (entry.get("tracking_id") or "file") + ".mp4"
         status = {"file": name, "needs_espn": entry.get("needs_espn", False)}
 
-        local = find_downloaded(job_dir, name)
+        local = find_downloaded(job_dir, name, entry.get("tracking_id") or "")
         if local is not None and name in state.get("kept", []):
             # Rejected but the move was declined - stays put, stays
             # flagged, never re-prompts, never feeds the portal.
@@ -884,6 +915,7 @@ def process_job(manifest_path: Path):
                 notify("Ingest watcher",
                        f"{local.name}: fails ingest spec ({'; '.join(hard)})" +
                        (" - moved to _rejected/." if where == "moved" else " - left in place."))
+                play_sound(SOUND_REJECT)
             changed = True
             report["files"].append(status)
             continue
@@ -1068,7 +1100,7 @@ def pending_expectations():
                 continue
             if state.get("archived_all") or name in state.get("archived", {}):
                 continue
-            if find_downloaded(job_dir, name) is not None:
+            if find_downloaded(job_dir, name, e.get("tracking_id") or "") is not None:
                 continue
             jobs.setdefault(job_dir, []).append(name)
     return jobs
