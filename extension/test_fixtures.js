@@ -100,6 +100,14 @@ eq('fileids media ext', extractFileIds('delivered as abc_delivery_99.mov and spo
   ['abc_delivery_99']);
 eq('fileids dedup vs codes', extractFileIds('QWERTY12345.mp4 listed again as QWERTY12345'), []);
 eq('fileids no digits', extractFileIds('random_words_here in prose'), []);
+// Wrapper classification: mimecast domain= and Proofpoint urldefense u=
+// both reveal the destination host without resolving the link.
+eq('link mimecast sharepoint',
+  extractLinks('doc https://url.us.m.mimecastprotect.com/s/abc123?domain=warnermedia.sharepoint.com end')
+    .map(l => l.type), ['sharepoint']);
+eq('link proofpoint sharepoint',
+  extractLinks('doc https://urldefense.proofpoint.com/v2/url?u=https-3A__warnermedia.sharepoint.com_:x:_r_sites_x&d=abc&e=def end')
+    .map(l => l.type), ['sharepoint']);
 // Horizon row refs: comma thousands, 'lines'/'rows' synonyms, ranges
 eq('refs lines comma', extractRowRefs('NEXT tab lines 13,286-13,289'), [13286, 13287, 13288, 13289]);
 eq('refs rows range', extractRowRefs('(rows 13294 - 13297)'), [13294, 13295, 13296, 13297]);

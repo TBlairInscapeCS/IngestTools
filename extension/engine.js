@@ -784,8 +784,11 @@ function extractLinks(text) {
     if (seen.has(url)) continue;
     seen.add(url);
     let type = 'link';
-    // Mimecast/similar protection wrappers: classify by the real domain param.
-    const wrapped = url.match(/[?&]domain=([a-z0-9.-]+)/i);
+    // Mimecast/similar protection wrappers: classify by the real domain.
+    // domain= covers mimecast; u=...-3A__host covers Proofpoint urldefense
+    // v2 (https-3A__example.com encodes https://example.com).
+    const wrapped = url.match(/[?&]domain=([a-z0-9.-]+)/i) ||
+                    url.match(/[?&]u=[^&]*?-3A__([a-z0-9.-]+)/i);
     const host = wrapped ? wrapped[1] : url;
     if (/drive\.google\.com|docs\.google\.com/i.test(host)) type = 'google-drive';
     else if (/extremereach\.com/i.test(host)) type = 'extreme-reach';

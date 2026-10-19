@@ -290,11 +290,54 @@ async function loadSpDownload(u, sourceLabel) {
     loadSheetRows(wb, sourceLabel);
     lastSheetRef = { spUrl: u };
     chrome.storage.local.set({ msLastSheet: lastSheetRef });
+    rememberSheet();
     return true;
   } catch (e) {
     dbg('sharepoint download fail', { url: u.slice(0, 80), err: String(e) });
     return false;
   }
+}
+
+// Last-resort sheet discovery: follow wrapped/short email links to their
+// destination - a landing on docs.google.com or sharepoint.com turns the
+// link into a loadable tracker ref. Wrapper-level clicks only (mimecast/
+// proofpoint redirect pages); delivery/download links are skipped so no
+// single-use tokens get consumed.
+async function resolveSheetLinks() {
+  const types = { 'wrapped-link': 1, 'link': 1, 'sharepoint': 1, 'google-drive': 1 };
+  const links = extractLinks(latestSegment(emailEl.value))
+    .filter(l => types[l.type]).slice(0, 6);
+  for (const l of links) {
+    let u = l.url;
+    const w = u.match(/[?&]url=([^&]+)/i);
+    if (w && /safelinks|protection\.outlook/i.test(u)) u = decodeURIComponent(w[1]);
+    if (/docs\.google\.com|\.sharepoint(-df)?\.com/i.test(u)) continue; // direct paths handled elsewhere
+    try {
+      const r = await fetch(u, { credentials: 'include', redirect: 'follow' });
+      const f = r.url || '';
+      const gm = f.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (gm) {
+        applyClient(detectClient({ sheetId: gm[1] }), 'sheet');
+        if (await loadSheetDoc(gm[1], (f.match(/[#?&]gid=(\d+)/) || [])[1] || '', '', 'email-linked tracker')) return true;
+      } else if (/\.sharepoint(-df)?\.com/i.test(f) && await loadSpDownload(f, 'SharePoint (email link)')) {
+        return true;
+      }
+    } catch (e) { /* wrapper blocked or offline - skip */ }
+  }
+  return false;
+}
+
+// Persist the sheet that just loaded under the detected client - next
+// request from the same client auto-loads the same tracker even when the
+// email carries no usable link and no tracker tab is open.
+function rememberSheet() {
+  if (!client || !lastSheetRef) return;
+  chrome.storage.local.get('sheetByClient', d => {
+    const m = d.sheetByClient || {};
+    if (JSON.stringify(m[client.id]) === JSON.stringify(lastSheetRef)) return;
+    m[client.id] = lastSheetRef;
+    chrome.storage.local.set({ sheetByClient: m });
+  });
 }
 
 // Job naming: flat ~/Downloads/Ingest/ layout - media lands at the top
@@ -1420,15 +1463,31 @@ function onEmailChange() {
   // request email no longer needs to carry the sheet link. Skipped when
   // the right doc (or a manual load) is already in place.
   const sids = sheetIdsFor(client);
+  // A loaded sheet counts as current when it's the playbook doc, an
+  // Airtable pull, or any SharePoint load - auto-pull must not stomp a
+  // tracker the user (or the email link) already put in place.
   const sheetIsCurrent = sheet && lastSheetRef &&
-    (sids.includes(lastSheetRef.id) || lastSheetRef.airtable);
+    (sids.includes(lastSheetRef.id) || lastSheetRef.airtable || lastSheetRef.spUrl);
   // A&E keeps its tracker in Airtable - pull the pending views via API
   // when a token is configured, same auto-load slot as doc trackers.
   const aeApi = client && client.id === 'ae-media' && hasAtToken() && !sheetIsCurrent;
-  if ((aeApi || (sids.length && !sheetIsCurrent)) && client && sheetAutoLoaded !== client.id) {
+  if (client && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
+    // Fallback when the playbook has no doc (or its pull fails): the sheet
+    // remembered from this client's last run - email link needn't repeat.
+    const tryRemembered = () => new Promise(resolve => {
+      chrome.storage.local.get('sheetByClient', d => {
+        const mem = (d.sheetByClient || {})[client.id];
+        const label = client.name + ' tracker (remembered)';
+        if (mem && mem.spUrl) resolve(loadSpDownload(mem.spUrl, label));
+        else if (mem && mem.airtable) resolve(fetchAirtableTracker(label));
+        else if (mem && mem.id) resolve(loadSheetDoc(mem.id, mem.gid, '', label));
+        else resolve(false);
+      });
+    });
     (aeApi ? fetchAirtableTracker(client.name + ' tracker')
-           : loadSheetDoc(sids[0], 0, '', client.name + ' tracker'))
+           : sids.length ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok => ok || tryRemembered())
+           : tryRemembered())
       .then(ok => {
         if (!ok) return;
         toast('Auto-loaded the ' + client.name + ' tracker.');
@@ -1569,6 +1628,7 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
     // reloads, navigation, or being closed can't break the pull anymore.
     lastSheetRef = { id, gid: gid || 0, tabName: wb.sheetName };
     chrome.storage.local.set({ msLastSheet: lastSheetRef });
+    rememberSheet();
     return true;
   } catch (e) {
     dbg('xlsx fetch fail', { id: id.slice(0, 12), err: String(e) });
@@ -1651,6 +1711,7 @@ async function grabSheetTab(tab) {
           // and clobbers this sheet on every match-time refresh.
           lastSheetRef = { spUrl: u };
           chrome.storage.local.set({ msLastSheet: lastSheetRef });
+          rememberSheet();
           sheetSourceTab = tab;
           return true;
         }
@@ -1833,6 +1894,7 @@ async function fetchAirtableTracker(label) {
     sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
     loadSheetRows({ rows, links, sheetName: base.name }, label + ' (' + base.name + ')');
     lastSheetRef = { airtable: true, baseName: base.name };
+    rememberSheet();
     dbg('airtable loaded', { base: base.name, tables: plan.length, records: recs, links: Object.keys(links).length });
     return true;
   } catch (e) {
@@ -1924,6 +1986,7 @@ $('grabSheet').addEventListener('click', async () => {
   for (const u of emailSharePointUrls()) {
     if (await loadSharePointUrl(u)) return;
   }
+  if (await resolveSheetLinks()) return;
   setStage('sdSheet', 'fail', 'no tracker found');
   toast('No tracker found - open the sheet tab or load a file.');
 });
@@ -3872,6 +3935,7 @@ $('runAll').addEventListener('click', async () => {
       if (await loadSharePointUrl(u)) break;
     }
   }
+  if (!sheet) await resolveSheetLinks();
   if (!sheet) return toast('No tracking sheet - open its tab or load a file.');
 
   // 3 · Match ('guess' stops at the confirm picker - that's the user step).
