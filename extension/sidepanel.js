@@ -199,6 +199,34 @@ function pickTab(cands, activeId) {
   return cands.find(t => t.id === activeId) || cands[0] || null;
 }
 
+// Hosts the request email links to - SafeLinks unwrapped via url=,
+// mimecast-style wrappers via their domain= param. Lets tab picking prefer
+// the tracker the email actually names over any stray sheet tab.
+function emailLinkHosts() {
+  const hosts = [];
+  extractLinks(latestSegment(emailEl.value)).forEach(l => {
+    let u = l.url;
+    const w = u.match(/[?&]url=([^&]+)/i);
+    if (w && /safelinks|protection\.outlook/i.test(u)) u = decodeURIComponent(w[1]);
+    const d = u.match(/[?&]domain=([a-z0-9.-]+)/i);
+    if (d) hosts.push(d[1].toLowerCase());
+    try { hosts.push(new URL(u).hostname.toLowerCase()); } catch (e) { /* malformed */ }
+  });
+  return hosts;
+}
+
+// Tracker-tab pick: focused tab > tab on a host the email links to > first.
+// Without the host pass, any open Google Sheet shadows the real SharePoint
+// tracker whenever the focused tab isn't a tracker.
+function pickTrackerTab(cands, activeId) {
+  const focused = cands.find(t => t.id === activeId);
+  if (focused) return focused;
+  const hosts = emailLinkHosts();
+  const hit = cands.find(t =>
+    hosts.some(h => h && (t.url || '').toLowerCase().includes(h)));
+  return hit || cands[0] || null;
+}
+
 // Google Sheets doc refs the request email links to (SafeLinks-unwrapped).
 // Lets the tracker load with NO sheet tab open - the doc id + gid are all
 // the export fetch needs.
@@ -212,6 +240,60 @@ function emailSheetRefs() {
     if (m) refs.push({ id: m[1], gid: (u.match(/[#?&]gid=(\d+)/) || [])[1] || '' });
   });
   return refs;
+}
+
+// SharePoint/OneDrive links in the request email (extractLinks already
+// unwraps mimecast-style wrappers for typing; the raw URL is kept since a
+// fetch follows the wrapper's redirect to the real sharepoint.com URL).
+function emailSharePointUrls() {
+  const out = [];
+  extractLinks(latestSegment(emailEl.value)).forEach(l => {
+    if (l.type !== 'sharepoint') return;
+    let u = l.url;
+    const w = u.match(/[?&]url=([^&]+)/i);
+    if (w && /safelinks|protection\.outlook/i.test(u)) u = decodeURIComponent(w[1]);
+    out.push(u);
+  });
+  return out;
+}
+
+// Fetch a workbook off a SharePoint URL with no tab open. Wrapper links
+// (mimecast etc.) redirect to the real URL; guest-access share pages serve
+// the file once ?download=1 is appended. lastSheetRef keeps the resolved
+// URL so refreshSheet re-downloads the same way.
+async function loadSharePointUrl(url) {
+  try {
+    const r = await fetch(url, { credentials: 'include' });
+    const u = r.url || url;
+    if (!/\.sharepoint(-df)?\.com/i.test(u)) return false;
+    return await loadSpDownload(u, 'SharePoint (email link)');
+  } catch (e) {
+    dbg('sharepoint url fetch fail', { url: url.slice(0, 80), err: String(e) });
+    return false;
+  }
+}
+
+async function loadSpDownload(u, sourceLabel) {
+  try {
+    const dl = u + (u.includes('?') ? '&' : '?') + 'download=1';
+    const r = await fetch(dl, { credentials: 'include' });
+    const ab = await r.arrayBuffer();
+    const b = new Uint8Array(ab);
+    if (b[0] !== 0x50 || b[1] !== 0x4b) return false; // viewer page, not a workbook
+    sheetBuf = ab;
+    sheetSourceTab = null;
+    scoreCache = { key: '', scores: null };
+    const wb = await readXlsx(ab, '');
+    sheetTabs = wb.sheetNames || [];
+    sheetTabName = wb.sheetName;
+    loadSheetRows(wb, sourceLabel);
+    lastSheetRef = { spUrl: u };
+    chrome.storage.local.set({ msLastSheet: lastSheetRef });
+    return true;
+  } catch (e) {
+    dbg('sharepoint download fail', { url: u.slice(0, 80), err: String(e) });
+    return false;
+  }
 }
 
 // Job naming: flat ~/Downloads/Ingest/ layout - media lands at the top
@@ -542,7 +624,10 @@ function grabSheetLoc() {
 // Inside sharepoint.com: locate the workbook (sourcedoc GUID + site) -
 // same reason as above, the REST download happens in extension context.
 function grabSharePointLoc() {
-  const sd = (location.search + location.href).match(/sourcedoc=(?:%7B|\{)?([0-9a-fA-F-]{36})/i);
+  const sd = (location.search + location.href).match(/sourcedoc=(?:%7B|\{)?([0-9a-fA-F-]{36})/i)
+    // Guest-access viewer pages carry no sourcedoc in the URL - the file's
+    // GUID sits in embedded viewer markup/scripts instead.
+    || document.documentElement.innerHTML.match(/sourcedoc[^0-9a-fA-F-]{0,20}([0-9a-fA-F-]{36})/i);
   const site = location.pathname.match(/(\/(?:sites|teams)\/[^/]+)/i) ||
                location.href.match(/sharepoint\.com\/((?:sites|teams)\/[^/:]+)/i);
   return {
@@ -1508,6 +1593,11 @@ async function refreshSheet(quiet) {
     if (!quiet) toast(ok ? 'Sheet refreshed from Airtable.' : 'Sheet refresh failed.');
     return ok;
   }
+  if (lastSheetRef.spUrl) {
+    const ok = await loadSpDownload(lastSheetRef.spUrl, 'sheet refresh');
+    if (!quiet) toast(ok ? 'Sheet refreshed from SharePoint.' : 'Sheet refresh failed.');
+    return ok;
+  }
   const ok = await loadSheetDoc(lastSheetRef.id, lastSheetRef.gid, lastSheetRef.tabName, 'sheet refresh');
   if (!quiet) toast(ok ? 'Sheet refreshed from Google.' : 'Sheet refresh failed.');
   return ok;
@@ -1815,11 +1905,15 @@ $('grabSheet').addEventListener('click', async () => {
   // brand tab's pending view directly (no copy-paste, real link URLs).
   if (client && client.id === 'ae-media' && hasAtToken() &&
       await fetchAirtableTracker('Airtable API')) return;
-  if (cands.length) { await grabTrackerTab(cands[0]); return; }
+  const st = pickTrackerTab(cands, active);
+  if (st) { await grabTrackerTab(st); return; }
   const ref = emailSheetRefs()[0];
   if (ref) {
     applyClient(detectClient({ sheetId: ref.id }), 'sheet');
     if (await loadSheetDoc(ref.id, ref.gid, '', 'email-linked tracker')) return;
+  }
+  for (const u of emailSharePointUrls()) {
+    if (await loadSharePointUrl(u)) return;
   }
   setStage('sdSheet', 'fail', 'no tracker found');
   toast('No tracker found - open the sheet tab or load a file.');
@@ -3753,13 +3847,20 @@ $('runAll').addEventListener('click', async () => {
   // 2 · Sheet: open tracker tabs win - they ride the user's own session,
   // so no auth guessing. The email-linked doc fetch is the fallback when
   // no tracker tab is open (Airtable tabs feed the app's own copy).
-  const st = pickTab(cls.sheet.concat(cls.sharepoint, cls.airtable), active);
+  const st = pickTrackerTab(cls.sheet.concat(cls.sharepoint, cls.airtable), active);
   if (st) await grabTrackerTab(st);
   if (!sheet) {
     const ref = emailSheetRefs()[0];
     if (ref) {
       applyClient(detectClient({ sheetId: ref.id }), 'sheet');
       await loadSheetDoc(ref.id, ref.gid, '', 'email-linked tracker');
+    }
+  }
+  if (!sheet) {
+    // SharePoint/guest-access link in the email - no tab needed, the share
+    // URL serves the workbook with ?download=1.
+    for (const u of emailSharePointUrls()) {
+      if (await loadSharePointUrl(u)) break;
     }
   }
   if (!sheet) return toast('No tracking sheet - open its tab or load a file.');
