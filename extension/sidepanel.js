@@ -34,6 +34,7 @@ let erDeliveries = [];     // parsed ER "Spot Delivery Notification" registry
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
 let portalLiveTimer = null; // 30s records-API poller in step 5
+const portalFailAlerted = new Set(); // INGEST_FAILED ids already chimed this run
 let matchCols = {};        // column picks in effect for the current match
 let detectedAdvertiser = ''; // brand from delivery-notification subjects
 let pendingRows = [];      // sheet rows with empty fill-back columns
@@ -433,6 +434,7 @@ function resetRun() {
   const rk = $('replyKind'); if (rk) rk.value = 'auto';
   $('capInfo').innerHTML = '';
   stopPortalLive();
+  portalFailAlerted.clear();
   const pl = $('portalLive'); if (pl) pl.textContent = '';
   ourDlIds.clear();
   // Request-specific draft/proof state must not bleed into the next job:
@@ -3246,7 +3248,9 @@ async function capturePage(tab) {
     return kept.length > 0 || total > 0;
   } catch (e) {
     dbg('capture fail', { err: String(e), page: (tab && tab.url || '').slice(0, 120) });
-    toast('Cannot read this page. Select the list manually instead.');
+    toast(/extremereach\.com/i.test(tab && tab.url || '')
+      ? 'Cannot read this ER page - if it just bounced to a login/SSO screen, sign into Extreme Reach first, then grab again.'
+      : 'Cannot read this page. Select the list manually instead.');
     return false;
   }
 }
@@ -3807,6 +3811,12 @@ function erSenderOf(html) {
   return m ? m[1].trim() : '';
 }
 
+// ER's ASP.NET login page ALSO carries a __RequestVerificationToken field,
+// so a truthy token can't prove a session - detect the login form itself.
+function erLoggedOut(html) {
+  return /type=["']password|\/Account\/Log(on|in)|login\.aspx|\bsign[\s-]?in\b/i.test(String(html || ''));
+}
+
 async function sweepEr() {
   const senderFilter = $('erSender').value.trim().toLowerCase();
   const days = Math.min(Math.max(parseInt($('erDays').value, 10) || 14, 1), 90);
@@ -3814,13 +3824,21 @@ async function sweepEr() {
   // Fresh anti-forgery token from the deliveries landing page.
   const landing = await (await fetch(ER_APP + '/Delivery', { credentials: 'include' })).text();
   const token = (landing.match(/name="__RequestVerificationToken"[^>]*value="([^"]+)"/) || [])[1];
-  if (!token) { toast('No ER session - log into Extreme Reach in this browser first.'); return false; }
+  if (!token || erLoggedOut(landing)) {
+    toast('No ER session - log into Extreme Reach in this browser first.');
+    $('capInfo').innerHTML = '<i>ER sweep needs a signed-in Extreme Reach session - log in, then sweep again.</i>';
+    return false;
+  }
   // Pull every page in the window (pageSize is capped at 100 server-side).
   const entries = [];
   let p = 1;
   for (; p <= 12; p++) {
     const html = await erSearchPage(token, p, days);
     if (p === 1) dbg('erSweep page1', { len: html.length, head: html.slice(0, 200) });
+    if (erLoggedOut(html)) {
+      toast('ER session expired mid-sweep - log into Extreme Reach and try again.');
+      return false;
+    }
     const rows = parseErRows(new DOMParser().parseFromString(html, 'text/html'));
     if (!rows.length) break;
     entries.push(...rows);
@@ -4373,10 +4391,24 @@ async function portalLiveTick() {
         ? ' ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
       const res = rec && rec.detection_result && rec.detection_result !== 'pass'
         ? '/' + rec.detection_result : '';
-      return { id: w.reporting, st: st + (stage ? ' (' + stage + ')' : '') + pct + res, done: !!rec && (st === 'DETECTION_COMPLETED' || st.indexOf('INGEST_FAILED') === 0) };
+      const failed = !!rec && (st.indexOf('INGEST_FAILED') === 0 ||
+        (!!rec.detection_result && rec.detection_result !== 'pass'));
+      return { id: w.reporting, st: st + (stage ? ' (' + stage + ')' : '') + pct + res, failed,
+        done: !!rec && (st === 'DETECTION_COMPLETED' || st.indexOf('INGEST_FAILED') === 0) };
     });
     const done = info.filter(i => i.done).length;
+    const fails = info.filter(i => i.failed);
+    // Failed records used to count silently as "done" - a ticker ingest
+    // could die with zero surfacing. Name them and chime once per ID.
+    fails.forEach(f => {
+      if (portalFailAlerted.has(f.id)) return;
+      portalFailAlerted.add(f.id);
+      alertSound('warn', 'portal ingest failed: ' + f.id,
+        'Portal ingest ' + f.id + ' - ' + f.st);
+    });
     box.innerHTML = 'portal ingest: <b>' + done + '/' + wanted.length + '</b>' +
+      (fails.length ? ' · <span style="color:#ec9a9a">' + fails.length + ' failed: ' +
+        esc(fails.map(f => f.id).join(', ')) + '</span>' : '') +
       (done < wanted.length ? '<br>' + info.filter(i => !i.done).slice(0, 10).map(i => esc(i.id + ' · ' + i.st)).join('<br>') : ' · all in');
     if (done === wanted.length) stopPortalLive();
   } catch (e) { box.textContent = 'portal status: ' + e.message; }

@@ -468,7 +468,7 @@ function buildReconConfirmation(results, espnIds, sender) {
   const seed = hashStr(found.join('|') + '::' + missing.join('|'));
   const lines = [greet(sender), '',
     pick(CONF_COUNT, seed)(found.length, requested) +
-    (tickers.length ? ' and ticker versions' : '') +
+    (tickers.length ? ', plus ticker versions,' : '') +
     ' to appear in the commercial reports:'];
   found.concat(tickers).forEach(id => lines.push(id));
   if (missing.length) {
