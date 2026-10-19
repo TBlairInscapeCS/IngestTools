@@ -115,6 +115,10 @@
   <div style="font-weight:700;margin:8px 0 4px">Jira (post comment)</div>
   <label class="opt">Email <input type="text" id="jiraEmail" placeholder="you@vizio.com" autocomplete="off" style="width:97%;margin-top:2px"></label>
   <label class="opt">API token <input type="password" id="jiraToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <div style="font-weight:700;margin:8px 0 4px">Airtable (tracker API)</div>
+  <div class="opt" style="font-weight:400;color:#8b93a1">Personal access token - airtable.com/create/tokens, scopes <i>data.records:read</i> + <i>schema.bases:read</i>. Lets Grab pull the pending view of every brand tab directly - no copy-paste, real link URLs.</div>
+  <label class="opt">Token <input type="password" id="atToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <label class="opt">Base ID <input type="text" id="atBase" placeholder="app… (blank = auto-pick)" autocomplete="off" style="width:97%;margin-top:2px"></label>
   <div class="row"><a href="#" id="settingsReset">reset to defaults</a></div>
 </div>
 <div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then downloads: direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>

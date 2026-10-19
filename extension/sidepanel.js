@@ -1291,10 +1291,15 @@ function onEmailChange() {
   // request email no longer needs to carry the sheet link. Skipped when
   // the right doc (or a manual load) is already in place.
   const sids = sheetIdsFor(client);
-  const sheetIsCurrent = sheet && lastSheetRef && sids.includes(lastSheetRef.id);
-  if (sids.length && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
+  const sheetIsCurrent = sheet && lastSheetRef &&
+    (sids.includes(lastSheetRef.id) || lastSheetRef.airtable);
+  // A&E keeps its tracker in Airtable - pull the pending views via API
+  // when a token is configured, same auto-load slot as doc trackers.
+  const aeApi = client && client.id === 'ae-media' && hasAtToken() && !sheetIsCurrent;
+  if ((aeApi || (sids.length && !sheetIsCurrent)) && client && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
-    loadSheetDoc(sids[0], 0, '', client.name + ' tracker')
+    (aeApi ? fetchAirtableTracker(client.name + ' tracker')
+           : loadSheetDoc(sids[0], 0, '', client.name + ' tracker'))
       .then(ok => {
         if (!ok) return;
         toast('Auto-loaded the ' + client.name + ' tracker.');
@@ -1455,6 +1460,11 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
 // the data is always current at the moment it matters.
 async function refreshSheet(quiet) {
   if (!lastSheetRef) return false;
+  if (lastSheetRef.airtable) {
+    const ok = await fetchAirtableTracker('sheet refresh');
+    if (!quiet) toast(ok ? 'Sheet refreshed from Airtable.' : 'Sheet refresh failed.');
+    return ok;
+  }
   const ok = await loadSheetDoc(lastSheetRef.id, lastSheetRef.gid, lastSheetRef.tabName, 'sheet refresh');
   if (!quiet) toast(ok ? 'Sheet refreshed from Google.' : 'Sheet refresh failed.');
   return ok;
@@ -1587,6 +1597,146 @@ async function grabAirtableTab(tab) {
   }
 }
 
+// ---------- Airtable REST API ----------
+// The clipboard path is fragile and drops link hrefs; the API needs only
+// a personal access token. For each table in the base (the three brand
+// tabs) we pull the view named like "pending" - the grid is pre-filtered
+// to actionable rows - so all three brands arrive in one sheet, tagged
+// by table, with real URLs in link fields.
+function hasAtToken() { return !!(($('atToken') || {}).value || '').trim(); }
+
+async function airtableApi(path) {
+  const tok = $('atToken').value.trim();
+  const r = await fetch('https://api.airtable.com/v0/' + path,
+    { headers: { Authorization: 'Bearer ' + tok } });
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const j = await r.json(); if (j.error && j.error.message) msg = j.error.message; } catch (e) {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+async function fetchAirtableTracker(label) {
+  label = label || 'Airtable';
+  try {
+    const meta = await airtableApi('meta/bases');
+    const bases = meta.bases || [];
+    const want = ($('atBase').value || '').trim();
+    const base = (want && bases.find(b => b.id === want)) ||
+      bases.find(b => /inscape|tracker/i.test(b.name)) ||
+      (bases.length === 1 ? bases[0] : null);
+    if (!base) throw new Error('no matching base - set Base ID in Settings (' +
+      bases.map(b => b.name).join(', ') + ')');
+    const schema = await airtableApi('meta/bases/' + base.id + '/tables');
+    const tables = schema.tables || [];
+    // Pass 1: union headers across tables + pick each table's pending view.
+    const headers = ['Table'], hdr = {};
+    const plan = [];
+    for (const t of tables) {
+      (t.fields || []).forEach(f => {
+        if (!(f.name in hdr)) { hdr[f.name] = headers.length; headers.push(f.name); }
+      });
+      const view = (t.views || []).find(v => /pending/i.test(v.name)) ||
+        (t.views || [])[0];
+      if (!view) { dbg('airtable: no view', { table: t.name }); continue; }
+      plan.push({ t, view,
+        urlCols: (t.fields || []).filter(f => f.type === 'url').map(f => hdr[f.name]) });
+      dbg('airtable table', { table: t.name, view: view.name, views: (t.views || []).map(v => v.name) });
+    }
+    // Pass 2: pull records per table/view (paged), tag rows with the tab.
+    const rows = [headers], links = {};
+    let recs = 0;
+    for (const { t, view, urlCols } of plan) {
+      let offset = '';
+      do {
+        const page = await airtableApi(base.id + '/' + encodeURIComponent(t.id) +
+          '?view=' + encodeURIComponent(view.id) + '&pageSize=100' +
+          (offset ? '&offset=' + encodeURIComponent(offset) : ''));
+        for (const rec of page.records || []) {
+          const row = new Array(headers.length).fill('');
+          row[0] = t.name;
+          for (const [fname, val] of Object.entries(rec.fields || {})) {
+            const ci = hdr[fname];
+            if (ci == null) continue;
+            const v = Array.isArray(val)
+              ? val.map(x => (x && (x.url || x.text || x.filename)) || String(x)).join(', ')
+              : (val && typeof val === 'object' ? (val.url || val.text || '') : val);
+            row[ci] = String(v == null ? '' : v);
+          }
+          const ri = rows.length;
+          urlCols.forEach(ci => { if (/^https?:/i.test(row[ci])) links[ri + ',' + ci] = row[ci]; });
+          rows.push(row); recs++;
+        }
+        offset = page.offset || '';
+      } while (offset);
+    }
+    if (rows.length < 2) throw new Error('pending views returned no records');
+    sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
+    loadSheetRows({ rows, links, sheetName: base.name }, label + ' (' + base.name + ')');
+    lastSheetRef = { airtable: true, baseName: base.name };
+    dbg('airtable loaded', { base: base.name, tables: plan.length, records: recs, links: Object.keys(links).length });
+    return true;
+  } catch (e) {
+    dbg('airtable api fail', { err: String((e && e.message) || e) });
+    setStage('sdSheet', 'fail', 'Airtable: ' + ((e && e.message) || e));
+    return false;
+  }
+}
+
+// files.com share pages (aenetworks.files.com/...) are viewers - the real
+// binary sits behind a Download click. Open the share in a hidden tab,
+// look for a direct download anchor; when the page only exposes a
+// scripted button, click it, capture the download's finalUrl, then
+// cancel so the caller can re-queue it with the manifest's filename.
+async function resolveFileShare(url) {
+  const tab = await chrome.tabs.create({ url, active: false });
+  try {
+    for (let i = 0; i < 24; i++) { // ~12s for the SPA to render controls
+      await new Promise(r => setTimeout(r, 500));
+      const res = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const MEDIA = /\.(mp4|mov|mxf|mpg|mpeg|mkv|avi|wmv|m2ts|ts|zip)(\?|#|"|$)/i;
+          for (const a of document.querySelectorAll('a[href]')) {
+            if (MEDIA.test(a.href) || /\/download|\bdownload=/.test(a.href))
+              return { url: a.href, name: decodeURIComponent(a.href.split('/').pop().split('?')[0]) };
+          }
+          const btn = [...document.querySelectorAll('a,button,[role="button"],input[type="button"],input[type="submit"]')]
+            .find(b => /download/i.test((b.innerText || b.value || b.getAttribute('aria-label') || '').trim()));
+          return btn ? { click: true } : { pending: true };
+        }});
+      const r = res && res[0] && res[0].result;
+      if (r && r.url) return r;
+      if (r && r.click) {
+        const got = new Promise(resolve => {
+          const onDl = item => { chrome.downloads.onCreated.removeListener(onDl); resolve(item); };
+          chrome.downloads.onCreated.addListener(onDl);
+          setTimeout(() => { chrome.downloads.onCreated.removeListener(onDl); resolve(null); }, 15000);
+        });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => {
+          const btn = [...document.querySelectorAll('a,button,[role="button"],input[type="button"],input[type="submit"]')]
+            .find(b => /download/i.test((b.innerText || b.value || b.getAttribute('aria-label') || '').trim()));
+          if (btn) btn.click();
+        }});
+        const item = await got;
+        if (item) {
+          const out = { url: item.finalUrl || item.url,
+                        name: (item.filename || '').split(/[\\/]/).pop() };
+          await chrome.downloads.cancel(item.id).catch(() => {});
+          await chrome.downloads.erase({ id: item.id }).catch(() => {});
+          if (out.url && /^https?:/i.test(out.url)) return out;
+        }
+        return { error: 'download click produced nothing' };
+      }
+      if (!await chrome.tabs.get(tab.id).catch(() => null)) break;
+    }
+    return { error: 'no download control on share page' };
+  } finally {
+    chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
 // Route a tracker tab to its loader: Google/SharePoint fetch the workbook
 // by URL; Airtable goes through the app's own copy handler.
 function grabTrackerTab(tab) {
@@ -1602,6 +1752,10 @@ $('grabSheet').addEventListener('click', async () => {
   // tracker tab is open at all.
   const focused = cands.find(t => t.id === active);
   if (focused) { await grabTrackerTab(focused); return; }
+  // A&E's tracker is an Airtable base - with a token the API pulls every
+  // brand tab's pending view directly (no copy-paste, real link URLs).
+  if (client && client.id === 'ae-media' && hasAtToken() &&
+      await fetchAirtableTracker('Airtable API')) return;
   if (cands.length) { await grabTrackerTab(cands[0]); return; }
   const ref = emailSheetRefs()[0];
   if (ref) {
@@ -2471,6 +2625,17 @@ async function downloadLinked() {
     for (const l of qlLinks) qlRes[l] = await resolveQuickLink(l);
   }
 
+  // files.com share links (A&E's aenetworks.files.com) are viewer pages -
+  // the "second click" on their Download button. Resolve each in a hidden
+  // tab to the real file URL (deduped per link).
+  const fsLinks = [...new Set(withLinks.map(m => m.link)
+    .filter(l => /files\.com\//i.test(l || '')))];
+  const fsRes = {};
+  if (fsLinks.length) {
+    toast('Resolving ' + fsLinks.length + ' files.com share link(s)…');
+    for (const l of fsLinks) fsRes[l] = await resolveFileShare(l);
+  }
+
   const jobs = [];
   const problems = [];
   for (const m of withLinks) {
@@ -2490,6 +2655,16 @@ async function downloadLinked() {
       }
       const pick = pickQuickLinkAsset(r.assets, m);
       jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, pick.name), url: pick.url });
+      continue;
+    }
+    if (/files\.com\//i.test(m.link || '')) {
+      const r = fsRes[m.link];
+      if (!r || !r.url) {
+        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): files.com share link could not be resolved - ' +
+          (r && r.error || 'no download URL') + ' - open the link and download manually');
+        continue;
+      }
+      jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, r.name || base.expected_name || 'download'), url: r.url });
       continue;
     }
     const fid = driveFolderId(m.link);
@@ -4201,9 +4376,13 @@ $('jiraApprove').addEventListener('click', async () => {
 });
 
 // Jira creds persist like the Graph setup values.
-chrome.storage.local.get(['jiraEmail', 'jiraToken'], d => {
+chrome.storage.local.get(['jiraEmail', 'jiraToken', 'atToken', 'atBase'], d => {
   if (d.jiraEmail) $('jiraEmail').value = d.jiraEmail;
   if (d.jiraToken) $('jiraToken').value = d.jiraToken;
+  if (d.atToken) $('atToken').value = d.atToken;
+  if (d.atBase) $('atBase').value = d.atBase;
 });
 $('jiraEmail').addEventListener('input', e => chrome.storage.local.set({ jiraEmail: e.target.value }));
 $('jiraToken').addEventListener('input', e => chrome.storage.local.set({ jiraToken: e.target.value }));
+$('atToken').addEventListener('input', e => chrome.storage.local.set({ atToken: e.target.value }));
+$('atBase').addEventListener('input', e => chrome.storage.local.set({ atBase: e.target.value }));
