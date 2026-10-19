@@ -282,6 +282,7 @@ async function loadSpDownload(u, sourceLabel) {
     if (b[0] !== 0x50 || b[1] !== 0x4b) return false; // viewer page, not a workbook
     sheetBuf = ab;
     sheetSourceTab = null;
+    sheetGids = {};
     scoreCache = { key: '', scores: null };
     const wb = await readXlsx(ab, '');
     sheetTabs = wb.sheetNames || [];
@@ -1642,7 +1643,15 @@ async function grabSheetTab(tab) {
           sheetBuf = ab;
           sheetTabs = wb.sheetNames || [];
           sheetTabName = wb.sheetName;
+          sheetGids = {};
+          scoreCache = { key: '', scores: null };
           loadSheetRows(wb, 'SharePoint workbook');
+          // The winning download URL IS the refresh handle - without it the
+          // stale prior ref (e.g. another client's Google doc) re-fetches
+          // and clobbers this sheet on every match-time refresh.
+          lastSheetRef = { spUrl: u };
+          chrome.storage.local.set({ msLastSheet: lastSheetRef });
+          sheetSourceTab = tab;
           return true;
         }
       } catch (e) { /* try next candidate */ }
