@@ -6,6 +6,13 @@
       "env": {
         "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       }
+    },
+    "airtable": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": ["-y", "mcp-remote", "https://mcp.airtable.com/mcp"],
+      "env": {
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
     }
   }
 }

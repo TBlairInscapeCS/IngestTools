@@ -771,34 +771,40 @@ function airtableCopyAll(doCopy) {
       const n = c.querySelector('.name');
       return (n && n.textContent || '').trim();
     });
-  let okCopy = false;
+  let okCopy = false, cellId = '';
   if (doCopy) {
-    const grid = document.querySelector('[data-testid="grid"], [role="grid"], .dataRows, .dataPane')
-             || document.body;
-    const cell = grid.querySelector('[data-testid^="gridCell"], .cell') || grid;
-    // Select-all only works when a grid CELL owns focus - the manual flow
-    // is click-inside-the-table then Cmd+A. Pointer events + real focus
-    // first, then a keystroke carrying keyCode (React handlers read that,
-    // which a plain KeyboardEvent doesn't set).
-    ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
-      cell.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
-    });
-    cell.click();
-    if (cell.focus) cell.focus();
-    const keyA = t => {
-      const ev = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', metaKey: true, bubbles: true, cancelable: true });
-      Object.defineProperty(ev, 'keyCode', { value: 65 });
-      Object.defineProperty(ev, 'which', { value: 65 });
-      t.dispatchEvent(ev);
-    };
-    keyA(cell);
-    keyA(document.activeElement || cell);
-    keyA(document);
-    okCopy = document.execCommand('copy');
+    // Only a DATA cell registers the app's selection model - the earlier
+    // container fallback landed on header/row-actions cells and the click
+    // went nowhere (log showed focus:BODY, selected:0). Interface pages
+    // have no role=grid/dataRows wrapper, so address the cell directly.
+    const cell = document.querySelector('.dataRow [data-testid="gridCell-0:0"]')
+              || document.querySelector('.dataRow [data-testid^="gridCell-"]');
+    if (cell) {
+      cellId = cell.getAttribute('data-testid') || '';
+      const r = cell.getBoundingClientRect();
+      const ev = { bubbles: true, cancelable: true, view: window, button: 0,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
+        cell.dispatchEvent(type.startsWith('pointer')
+          ? new PointerEvent(type, ev) : new MouseEvent(type, ev));
+      });
+      cell.click();
+      cell.focus();
+      const keyA = t => {
+        const kev = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', metaKey: true, bubbles: true, cancelable: true });
+        Object.defineProperty(kev, 'keyCode', { value: 65 });
+        Object.defineProperty(kev, 'which', { value: 65 });
+        t.dispatchEvent(kev);
+      };
+      keyA(cell);
+      if (document.activeElement && document.activeElement !== cell) keyA(document.activeElement);
+      keyA(document);
+      okCopy = document.execCommand('copy');
+    }
   }
-  return { okCopy, headers,
+  return { okCopy, headers, cellId,
     selected: document.querySelectorAll('[aria-selected="true"], .selected, [class*="cellSelected"]').length,
-    focus: document.activeElement ? document.activeElement.tagName : '',
+    focus: document.activeElement ? document.activeElement.tagName + ':' + (document.activeElement.getAttribute && document.activeElement.getAttribute('data-testid') || '') : '',
     domSel: String(window.getSelection ? window.getSelection() : '').length };
 }
 
@@ -1591,7 +1597,7 @@ async function grabAirtableTab(tab) {
     [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: airtableCopyAll, args: [true] });
   } catch (e) { dbg('airtable inject fail', { err: String(e) }); return false; }
   const r = (res && res.result) || {};
-  dbg('airtable copy attempt', { okCopy: r.okCopy, headers: (r.headers || []).length, selected: r.selected, focus: r.focus, domSel: r.domSel });
+  dbg('airtable copy attempt', { okCopy: r.okCopy, cell: r.cellId, headers: (r.headers || []).length, selected: r.selected, focus: r.focus, domSel: r.domSel });
   if (!r.okCopy) {
     toast('Airtable blocked the auto-copy - click the grid, Cmd+A, Cmd+C, then Paste tracker.');
     setStage('sdSheet', 'warn', 'Airtable needs a manual copy-paste');
