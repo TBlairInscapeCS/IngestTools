@@ -88,6 +88,8 @@ FFPROBE = _find_bin("ffprobe")
 # on PATH since launchd's environment lacks it.
 FFMPEG_DIR = str(Path(FFPROBE).parent) if "/" in FFPROBE else ""
 _probe_warned = False  # one "spec check degraded" notice per process
+# Real sound for watcher-side rejection alerts - any file afplay can read.
+SOUND_REJECT = "/System/Library/Sounds/Funk.aiff"
 # -----------------------------------------------------------------------------
 
 
@@ -189,6 +191,15 @@ def notify(title, msg):
             ["osascript", "-e", f'display notification {json.dumps(msg)} with title {json.dumps(title)}'],
             check=False, capture_output=True, timeout=15,
         )
+    except Exception:
+        pass
+
+
+def play_sound(path):
+    """afplay a sound file, fire-and-forget - the loop never waits on it."""
+    try:
+        subprocess.Popen(["afplay", path],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 
@@ -770,6 +781,7 @@ def process_job(manifest_path: Path):
                 status["status"] = "rejected: unreadable zip - " + str(e)[:80] + \
                     (" (moved to _rejected/)" if where == "moved" else " (kept in place)")
                 notify("Ingest watcher", f"{local.name}: rejected (unreadable zip) - not real media.")
+                play_sound(SOUND_REJECT)
                 changed = True
                 report["files"].append(status)
                 continue
@@ -820,6 +832,7 @@ def process_job(manifest_path: Path):
             if name not in state["notified"]:
                 state["notified"].append(name)
                 notify("Ingest watcher", f"{local.name}: rejected ({bad}) - not a real video.")
+                play_sound(SOUND_REJECT)
             changed = True
             report["files"].append(status)
             continue

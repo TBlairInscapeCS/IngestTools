@@ -190,6 +190,7 @@ chrome.alarms.onAlarm.addListener(async a => {
 // open is allowed) and silences the chime.
 chrome.notifications.onClicked.addListener(async () => {
   chrome.runtime.sendMessage({ stop: true });
+  try { chrome.tts.stop(); } catch (e) {}
   try {
     const w = await chrome.windows.getLastFocused();
     if (w) await chrome.sidePanel.open({ windowId: w.id });
@@ -211,11 +212,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(e => sendResponse(String(e)));
     return true;
   }
+  // Spoken alert: the service worker can TTS directly - no offscreen doc
+  // needed. The chime says "look", the voice says WHAT broke.
+  if (msg && msg.type === 'speak' && msg.text) {
+    try { chrome.tts.speak(String(msg.text).slice(0, 280), { rate: 1.05, volume: 0.95 }); } catch (e) {}
+    sendResponse(true);
+    return true;
+  }
   if (msg && msg.type === 'test-alert') {
     const kind = TEST_KINDS[testKindIdx++ % TEST_KINDS.length];
     alertNewRequest({ id: 'test-' + Date.now(), subject: 'TEST - ' + kind + ' alert',
       from: { emailAddress: { name: 'Ingest Tools' } } }, kind)
-      .then(() => sendResponse(true))
+      .then(() => {
+        // warn/fail alerts ride with a spoken reason - audition it too.
+        if (kind === 'warn' || kind === 'fail')
+          try { chrome.tts.speak('Test ' + kind + ' alert on JENNIFERWEB6S'); } catch (e) {}
+        sendResponse(true);
+      })
       .catch(e => sendResponse(String(e)));
     return true; // async response
   }

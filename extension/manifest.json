@@ -3,7 +3,7 @@
   "name": "Ingest Streamlined",
   "version": "0.1.0",
   "description": "Match request emails to tracking sheets, pull delivered files (Extreme Reach, share lists), and flag what's missing or already ingested.",
-  "permissions": ["sidePanel", "contextMenus", "storage", "scripting", "downloads", "cookies", "clipboardRead", "alarms", "notifications", "offscreen"],
+  "permissions": ["sidePanel", "contextMenus", "storage", "scripting", "downloads", "cookies", "clipboardRead", "alarms", "notifications", "offscreen", "tts"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "side_panel": { "default_path": "sidepanel.html" },

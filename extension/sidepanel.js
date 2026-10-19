@@ -65,15 +65,17 @@ function stamp(id) {
 // Traffic-light per stage: grey untouched, green done, orange needs user
 // action, red failed. The tooltip carries the detail (source/counts/why).
 // Audible alerts fire only when the browser window is out of focus - if
-// the user is looking at it, the stage dot/toast IS the alert. Every
+// the user is looking at it, the stage dot/toast IS the alert. The chime
+// gets attention; the spoken line (say) names WHAT broke. Every
 // candidate is logged with the focus flag so a trial period can measure
 // how often each kind would have fired before widening what triggers it.
-async function alertSound(kind, reason) {
+async function alertSound(kind, reason, say) {
   let focused = true;
   try { focused = (await chrome.windows.getCurrent()).focused; } catch (e) {}
   dbg('alert:' + kind, { reason: String(reason || '').slice(0, 200), focused, sounded: !focused });
   if (focused) return;
   chrome.runtime.sendMessage({ type: 'ding', kind }).catch(() => {});
+  if (say) chrome.runtime.sendMessage({ type: 'speak', text: say }).catch(() => {});
 }
 
 let dlFailAlerted = false; // one fail chime per download batch
@@ -83,7 +85,7 @@ function setStage(id, cls, tip) {
   if (!el) return;
   el.className = 'sdot' + (cls ? ' ' + cls : '');
   el.title = tip || '';
-  if (cls === 'fail') alertSound('fail', id + ': ' + (tip || cls));
+  if (cls === 'fail') alertSound('fail', id + ': ' + (tip || cls), 'Ingest error: ' + (tip || id));
 }
 
 // ---------- Helpers ----------
@@ -2440,7 +2442,8 @@ async function checkSpecFails() {
     const msg = fresh.map(f => f.id).join(', ') + ' failed the spec check';
     setStage('sdDl', 'warn', msg);
     toast('Spec check: ' + msg + ' - "Spec failure" reply variant covers it.');
-    alertSound('warn', 'spec_fail ' + fresh.map(f => f.id).join(','));
+    alertSound('warn', 'spec_fail ' + fresh.map(f => f.id).join(','),
+      'Spec check failed on ' + fresh.map(f => f.id).join(', '));
   }
   return changed;
 }
@@ -2814,7 +2817,8 @@ function updateDlStatus() {
   if (dlTotal) d.textContent = 'Downloads: ' + dlDone + '/' + dlTotal + ' complete' + (dlFailed ? ', ' + dlFailed + ' failed' : '');
   if (dlTotal && dlFailed && dlDone + dlFailed >= dlTotal && !dlFailAlerted) {
     dlFailAlerted = true;
-    alertSound('fail', dlFailed + ' of ' + dlTotal + ' download(s) failed');
+    alertSound('fail', dlFailed + ' of ' + dlTotal + ' download(s) failed',
+      dlFailed + ' of ' + dlTotal + ' downloads failed');
   }
 }
 
