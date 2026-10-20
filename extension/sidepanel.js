@@ -4562,13 +4562,12 @@ function ingestRealm() {
 
 // Reporting IDs exactly as pushed to the portal: bare id per row, plus
 // id+suffix for rows flagged for a ticker version.
-// Standalone record lookup: answer "was this creative ingested / is it
-// detecting?" for arbitrary IDs without running a job. Realm defaults to
-// the detected client's cidMap; the datalist offers every known customer.
-// Each found record also offers an "impr sql" link copying the two-step
-// Databricks impression-count queries with that record's commercial_cid
-// and ingest date already filled in.
-let lastRecLookup = new Map();
+// Standalone record lookup: "was this creative ingested / is it
+// detecting?" for arbitrary IDs, independent of any run. The separate
+// "impression counts" block below it resolves reporting IDs to
+// commercial_cids through the same records API, then counts impressions
+// in the Databricks firehose (or hands back the SQL when unconfigured).
+// Both share one persisted "last customer" realm.
 {
   const realms = new Set();
   (typeof CLIENTS !== 'undefined' ? CLIENTS : []).forEach(c =>
@@ -4576,8 +4575,64 @@ let lastRecLookup = new Map();
   Object.keys(FI_ALIASES).forEach(k => { realms.add(k); realms.add(FI_ALIASES[k]); });
   $('realmList').innerHTML = [...realms].sort().map(v => '<option value="' + esc(v) + '">').join('');
 }
-chrome.storage.local.get('recRealm', d => { if (d.recRealm) $('recRealm').value = d.recRealm; });
-$('recRealm').addEventListener('input', e => chrome.storage.local.set({ recRealm: e.target.value }));
+chrome.storage.local.get('recRealm', d => {
+  if (d.recRealm) { $('recRealm').value = d.recRealm; $('impRealm').value = d.recRealm; }
+});
+['recRealm', 'impRealm'].forEach(id => $(id).addEventListener('input',
+  e => chrome.storage.local.set({ recRealm: e.target.value.trim() })));
+function lookupRealm() {
+  const v = ($('recRealm').value.trim() || $('impRealm').value.trim() ||
+    (client ? ingestRealm() : '') || '').toLowerCase().replace(/ /g, '');
+  if (!v) return '';
+  $('recRealm').value = $('impRealm').value = v;
+  return FI_ALIASES[v] || v;
+}
+// IDs lead filenames in this workflow ("DSBK2966000H SBK_..._30.mp4") -
+// codes/file-ids first, first-token-per-line as the fallback.
+function parseLookupIds(raw) {
+  let ids = extractCodes(raw).concat(extractFileIds(raw));
+  if (!ids.length) ids = raw.split(/[\r\n,;]+/).map(s => (s.trim().split(/\s+/)[0] || '')).filter(Boolean);
+  return [...new Set(ids.map(s => s.replace(/\.[a-z0-9]{2,5}$/i, '')).filter(Boolean))];
+}
+
+$('recGo').addEventListener('click', async () => {
+  const ids = parseLookupIds($('recIds').value);
+  if (!ids.length) { toast('Paste one or more reporting IDs / file names first.'); return; }
+  const realm = lookupRealm();
+  if (!realm) { toast('Which customer? e.g. horizonmedia, discovery'); return; }
+  const out = $('recResults');
+  out.textContent = 'Looking up ' + ids.length + ' ID(s) in ' + realm + '…';
+  try {
+    const all = await fetchRealmRecords(realm, 2);
+    const byRid = new Map(), byTitle = new Map();
+    all.forEach(r => {
+      byRid.set(normalizeName(r.reportingId || '').replace(/[\s:_-]+/g, ''), r);
+      byTitle.set(normalizeName(r.contentTitle || '').replace(/[\s:_-]+/g, ''), r);
+    });
+    out.innerHTML = ids.map(id => {
+      const n = normalizeName(id).replace(/[\s:_-]+/g, '');
+      const rec = byRid.get(n) || byTitle.get(n);
+      if (!rec) {
+        return '<div>' + esc(id) + ' · <i>no record in ' + esc(realm) +
+          ' - wrong customer, or never ingested</i></div>';
+      }
+      const st = rec.status || '';
+      const dr = rec.detection_result;
+      const pct = rec.admin_visible && rec.admin_visible.detection_percentage != null
+        ? 'detected ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
+      const when = (rec.ingestDatetime || rec.datetime || '').replace('T', ' ').slice(5, 16);
+      const bad = st === 'INGEST_FAILED' || (!!dr && dr !== 'pass');
+      const label = st === 'DETECTION_COMPLETED' ? 'done' + (dr ? ' · ' + dr : '')
+        : st === 'INGEST_FAILED' ? 'ingest failed'
+        : PORTAL_STAGE[st] || st || 'unknown state';
+      return '<div>' + esc(id) + ' · ' +
+        '<span style="color:' + (bad ? '#ec9a9a' : '#3fbf7f') + '">' + esc(label) + '</span>' +
+        (pct ? ' · ' + esc(pct) : '') + (when ? ' · ingested ' + esc(when) : '') + '</div>';
+    }).join('');
+  } catch (e) {
+    out.textContent = 'Lookup failed: ' + e.message + ' - check the customer name / records API token';
+  }
+});
 
 // A record's admin_visible.cid is "C(^.~)c_Commercial_<commercial_cid>";
 // the firehose table keys on the suffix only.
@@ -4611,19 +4666,17 @@ function dbxCountSql(fid, start, end, raw) {
     '  AND vcf.session_end < ' + dbxLit(end + ' 00:00:00') + '\n' +
     '  AND vcf.fk_commercial_id ' + (raw ? fid : '= ' + dbxLit(fid)) + ';';
 }
-function impressionsSql(id, rec) {
-  const ccid = recordCommercialCid(rec);
-  const w = recordImprWindow(rec);
-  return '-- ' + id + ' (resolve commercial_id, then count impressions)\n' +
+function impressionsSql(label, ccid, start, end) {
+  return '-- ' + label + ' (resolve commercial_id, then count impressions)\n' +
     dbxResolveSql(ccid) + '\n\n' +
-    dbxCountSql('<filterable_id from the query above>', w.start, w.end) + '\n\n' +
+    dbxCountSql('<filterable_id from the query above>', start, end) + '\n\n' +
     '-- single-run variant (no manual join):\n' +
     dbxCountSql('IN (SELECT commercial_id FROM detection.commercial_ids_firehose WHERE commercial_cid = ' +
-      dbxLit(ccid) + ')', w.start, w.end, true);
+      dbxLit(ccid) + ')', start, end, true);
 }
-// Direct Databricks SQL: when host + warehouse + PAT are configured the
-// per-row "impr" link runs both queries and renders the count inline;
-// unconfigured it copies the queries for a manual Databricks paste.
+// Direct Databricks SQL via the Statements API. With host + warehouse +
+// PAT configured, Count runs the queries live; without, per-row links
+// copy the same SQL for a manual paste.
 ['dbxHost', 'dbxWh', 'dbxTok'].forEach(id => {
   chrome.storage.local.get(id, d => { if (d[id]) $(id).value = d[id]; });
   $(id).addEventListener('input', e => chrome.storage.local.set({ [id]: e.target.value.trim() }));
@@ -4674,86 +4727,90 @@ $('dbxPing').addEventListener('click', async () => {
   } catch (e) { toast('Databricks: ' + e.message); }
 });
 
-$('recResults').addEventListener('click', async e => {
-  const t = e.target;
-  const k = t.getAttribute && (t.getAttribute('data-imp') || t.getAttribute('data-impsql'));
+// Impression counts: separate from the run flow - paste reporting IDs
+// (resolved through the records API) or bare commercial_cids. Every
+// state is spelled out: no record, no cid yet, firehose lag, live count.
+let lastImpLookup = new Map();
+const CCID_RE = /^[a-z0-9]+-\d{9,}-[0-9a-f]{8,}$/i;
+$('impResults').addEventListener('click', e => {
+  const k = e.target.getAttribute && e.target.getAttribute('data-impsql');
   if (k == null) return;
   e.preventDefault();
-  const ent = lastRecLookup.get(k);
-  if (!ent) return;
-  if (t.hasAttribute('data-impsql') || !dbxReady(dbxCfg())) {
-    navigator.clipboard.writeText(impressionsSql(ent.id, ent.rec))
-      .then(() => toast('Impressions queries copied - paste into Databricks.'))
-      .catch(() => toast('Copy failed.'));
+  const j = lastImpLookup.get(k);
+  if (!j) return;
+  navigator.clipboard.writeText(impressionsSql(j.id, j.ccid, j.start, j.end))
+    .then(() => toast('Impressions queries copied - paste into Databricks.'))
+    .catch(() => toast('Copy failed.'));
+});
+$('impGo').addEventListener('click', async () => {
+  const raw = $('impIds').value;
+  let toks = parseLookupIds(raw);
+  if (!toks.length) toks = raw.split(/[\r\n,;\s]+/).map(s => s.trim()).filter(Boolean);
+  const cids = [], ids = [];
+  [...new Set(toks)].forEach(t => (CCID_RE.test(t) ? cids : ids).push(t));
+  if (!ids.length && !cids.length) { toast('Paste reporting IDs or commercial_cids first.'); return; }
+  const realm = lookupRealm();
+  if (ids.length && !realm) { toast('Which customer? needed to resolve reporting IDs.'); return; }
+  const out = $('impResults');
+  // Build per-id jobs: resolve reporting IDs to records to cids up front.
+  const jobs = [];
+  if (ids.length) {
+    out.textContent = 'Resolving ' + ids.length + ' ID(s) in ' + realm + '…';
+    let recs;
+    try { recs = await fetchRealmRecords(realm, 2); }
+    catch (e) { out.textContent = 'Records fetch failed: ' + e.message; return; }
+    const byRid = new Map();
+    recs.forEach(r => byRid.set(normalizeName(r.reportingId || '').replace(/[\s:_-]+/g, ''), r));
+    ids.forEach(id => {
+      const rec = byRid.get(normalizeName(id).replace(/[\s:_-]+/g, ''));
+      if (!rec) { jobs.push({ id, err: 'no record in ' + realm + ' - wrong customer or never ingested' }); return; }
+      const ccid = recordCommercialCid(rec);
+      if (!ccid) { jobs.push({ id, err: 'record exists, but no commercial cid assigned yet' }); return; }
+      const w = recordImprWindow(rec);
+      jobs.push({ id, ccid, start: w.start, end: w.end });
+    });
+  }
+  cids.forEach(ccid => jobs.push({
+    id: ccid, ccid,
+    start: new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10),
+    end: new Date(Date.now() + 864e5).toISOString().slice(0, 10)
+  }));
+  lastImpLookup = new Map();
+  jobs.forEach(j => { if (j.ccid) lastImpLookup.set(j.id, j); });
+  const sqlLink = j => ' · <a href="#" data-impsql="' + esc(j.id) +
+    '" title="Copy the Databricks queries for this ID">sql</a>';
+  if (!dbxReady(dbxCfg())) {
+    out.innerHTML = jobs.map(j => '<div>' + esc(j.id) + ' · ' +
+      (j.err ? '<i>' + esc(j.err) + '</i>' : '<a href="#" data-impsql="' + esc(j.id) +
+        '">copy impression queries</a>') + '</div>').join('') +
+      '<div class="hint">Databricks not configured - links copy SQL for a manual paste.</div>';
     return;
   }
-  const a = e.target;
-  a.textContent = 'running…';
-  try {
-    const ccid = recordCommercialCid(ent.rec);
-    const w = recordImprWindow(ent.rec);
-    const rows = await dbxQuery(dbxResolveSql(ccid));
-    const fid = rows[0] && rows[0][1];
-    if (!fid) {
-      a.textContent = 'impr pending';
-      a.title = 'No firehose row yet - new cids take a few hours to stream in after ingest';
-      return;
+  const lines = [];
+  const push = html => { lines.push(html); out.innerHTML = lines.join(''); };
+  for (const j of jobs) {
+    if (j.err) { push('<div>' + esc(j.id) + ' · <i>' + esc(j.err) + '</i></div>'); continue; }
+    push('<div>' + esc(j.id) + ' · running…</div>');
+    try {
+      const rows = await dbxQuery(dbxResolveSql(j.ccid));
+      const fid = rows[0] && rows[0][1];
+      if (!fid) {
+        lines[lines.length - 1] = '<div>' + esc(j.id) +
+          ' · <i>not in firehose yet - cids stream in ~1-2h after ingest, nothing to count</i>' + sqlLink(j) + '</div>';
+      } else {
+        const title = rows[0][2] ? ' <i>(' + esc(rows[0][2]) + ')</i>' : '';
+        const cnt = await dbxQuery(dbxCountSql(String(fid), j.start, j.end));
+        const n = (cnt[0] && cnt[0][0]) != null ? cnt[0][0] : '?';
+        lines[lines.length - 1] = '<div>' + esc(j.id) + ' · <b style="color:#3fbf7f">' +
+          esc(String(n)) + ' impressions</b> (' + esc(j.start) + ' → ' + esc(j.end) + ')' +
+          title + sqlLink(j) + '</div>';
+      }
+    } catch (e) {
+      lines[lines.length - 1] = '<div>' + esc(j.id) +
+        ' · <span style="color:#ec9a9a">query failed: ' + esc(e.message) + '</span></div>';
     }
-    const cnt = await dbxQuery(dbxCountSql(String(fid), w.start, w.end));
-    a.outerHTML = ' · <b style="color:#3fbf7f">impr ' +
-      esc(String((cnt[0] && cnt[0][0]) != null ? cnt[0][0] : '?')) + '</b>' +
-      ' <a href="#" title="Copy the queries used" data-impsql="' + esc(ent.id) + '">sql</a>';
-  } catch (err) {
-    a.textContent = 'impr?';
-    a.title = err.message;
-    toast('Impressions: ' + err.message);
+    out.innerHTML = lines.join('');
   }
-});
-
-$('recGo').addEventListener('click', async () => {
-  const raw = $('recIds').value;
-  // IDs lead filenames in this workflow ("DSBK2966000H SBK_..._30.mp4") -
-  // codes/file-ids first, first-token-per-line as the fallback.
-  let ids = extractCodes(raw).concat(extractFileIds(raw));
-  if (!ids.length) {
-    ids = raw.split(/[\r\n,;]+/).map(s => (s.trim().split(/\s+/)[0] || '')).filter(Boolean);
-  }
-  ids = [...new Set(ids.map(s => s.replace(/\.[a-z0-9]{2,5}$/i, '')).filter(Boolean))];
-  if (!ids.length) { toast('Paste one or more reporting IDs / file names first.'); return; }
-  if (!$('recRealm').value.trim() && client) $('recRealm').value = ingestRealm() || '';
-  const realmIn = $('recRealm').value.trim().toLowerCase().replace(/ /g, '');
-  if (!realmIn) { toast('Which customer? e.g. horizonmedia, discovery'); return; }
-  const realm = FI_ALIASES[realmIn] || realmIn;
-  const out = $('recResults');
-  out.textContent = 'Looking up ' + ids.length + ' ID(s) in ' + realm + '…';
-  try {
-    const all = await fetchRealmRecords(realm, 2);
-    const byRid = new Map(), byTitle = new Map();
-    all.forEach(r => {
-      byRid.set(normalizeName(r.reportingId || '').replace(/[\s:_-]+/g, ''), r);
-      byTitle.set(normalizeName(r.contentTitle || '').replace(/[\s:_-]+/g, ''), r);
-    });
-    lastRecLookup = new Map();
-    out.innerHTML = ids.map(id => {
-      const n = normalizeName(id).replace(/[\s:_-]+/g, '');
-      const rec = byRid.get(n) || byTitle.get(n);
-      if (!rec) return '<div>' + esc(id) + ' · <i>no record in ' + esc(realm) + '</i></div>';
-      const st = rec.status || '?';
-      const stage = PORTAL_STAGE[st] ? ' (' + PORTAL_STAGE[st] + ')' : '';
-      const failed = st.indexOf('INGEST_FAILED') === 0 ||
-        (!!rec.detection_result && rec.detection_result !== 'pass');
-      const pct = rec.admin_visible && rec.admin_visible.detection_percentage != null
-        ? ' · detected ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
-      const when = (rec.ingestDatetime || rec.datetime || '').replace('T', ' ').slice(5, 16);
-      const impr = recordCommercialCid(rec)
-        ? ' · <a href="#" data-imp="' + esc(id) + '" title="Impression count: runs the Databricks queries when configured, else copies them for a manual paste">impr</a>' : '';
-      if (impr) lastRecLookup.set(id, { id, rec });
-      return '<div>' + esc(id) + ' · ' +
-        (failed ? '<span style="color:#ec9a9a">' : '<span style="color:#3fbf7f">') +
-        esc(st) + stage + (rec.detection_result ? '/' + esc(rec.detection_result) : '') + '</span>' +
-        pct + (when ? ' · ' + esc(when) : '') + impr + '</div>';
-    }).join('');
-  } catch (e) { out.textContent = 'Lookup failed: ' + e.message; }
 });
 
 function ingestReportIds() {
