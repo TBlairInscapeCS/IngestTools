@@ -4694,7 +4694,11 @@ $('recResults').addEventListener('click', async e => {
     const w = recordImprWindow(ent.rec);
     const rows = await dbxQuery(dbxResolveSql(ccid));
     const fid = rows[0] && rows[0][1];
-    if (!fid) { a.textContent = 'no commercial_id'; return; }
+    if (!fid) {
+      a.textContent = 'impr pending';
+      a.title = 'No firehose row yet - new cids take a few hours to stream in after ingest';
+      return;
+    }
     const cnt = await dbxQuery(dbxCountSql(String(fid), w.start, w.end));
     a.outerHTML = ' · <b style="color:#3fbf7f">impr ' +
       esc(String((cnt[0] && cnt[0][0]) != null ? cnt[0][0] : '?')) + '</b>' +
