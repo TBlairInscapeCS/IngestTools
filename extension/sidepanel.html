@@ -319,6 +319,10 @@
       <input type="text" id="impRealm" list="realmList" placeholder="customer" size="12" title="Portal customer/realm - needed to resolve reporting IDs to commercial_cids">
       <button id="impGo">Count</button>
     </div>
+    <div class="row">
+      <label class="col">from <input type="date" id="impStart" style="width:8.5em" title="Optional - empty means each record's ingest date (90d back for bare cids)"></label>
+      <label class="col">to <input type="date" id="impEnd" style="width:8.5em" title="Optional - empty means tomorrow"></label>
+    </div>
     <textarea id="impIds" placeholder="Reporting IDs (or commercial_cids) - one per line" style="height:3.6em"></textarea>
     <div class="msg" id="impResults"></div>
     <details class="mini">

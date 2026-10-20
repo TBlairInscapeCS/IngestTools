@@ -4752,7 +4752,12 @@ $('impGo').addEventListener('click', async () => {
   const realm = lookupRealm();
   if (ids.length && !realm) { toast('Which customer? needed to resolve reporting IDs.'); return; }
   const out = $('impResults');
-  // Build per-id jobs: resolve reporting IDs to records to cids up front.
+  // Optional window override: "from" is inclusive; "to" is a day the user
+  // expects included, so translate to the exclusive end the SQL uses.
+  const ovStart = $('impStart').value;
+  const ovEnd = $('impEnd').value
+    ? new Date(new Date($('impEnd').value + 'T00:00:00Z').getTime() + 864e5).toISOString().slice(0, 10)
+    : '';
   const jobs = [];
   if (ids.length) {
     out.textContent = 'Resolving ' + ids.length + ' ID(s) in ' + realm + '…';
@@ -4767,13 +4772,13 @@ $('impGo').addEventListener('click', async () => {
       const ccid = recordCommercialCid(rec);
       if (!ccid) { jobs.push({ id, err: 'record exists, but no commercial cid assigned yet' }); return; }
       const w = recordImprWindow(rec);
-      jobs.push({ id, ccid, start: w.start, end: w.end });
+      jobs.push({ id, ccid, start: ovStart || w.start, end: ovEnd || w.end });
     });
   }
   cids.forEach(ccid => jobs.push({
     id: ccid, ccid,
-    start: new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10),
-    end: new Date(Date.now() + 864e5).toISOString().slice(0, 10)
+    start: ovStart || new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10),
+    end: ovEnd || new Date(Date.now() + 864e5).toISOString().slice(0, 10)
   }));
   lastImpLookup = new Map();
   jobs.forEach(j => { if (j.ccid) lastImpLookup.set(j.id, j); });
