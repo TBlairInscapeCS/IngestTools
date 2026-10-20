@@ -1200,11 +1200,48 @@ def scoop_downloads():
             _seen_dl.add(p.name)
 
 
+def tickerize_drops():
+    """Manual ESPN fallback: media dropped in Ingest/_tickerize/ gets a
+    <stem>_ticker.mp4 built alongside it, no manifest needed. Failures
+    write a <stem>_ticker.fail marker so a bad file isn't retried every
+    pass; delete the marker (or the output) to retry."""
+    d = WATCH_DIR / "_tickerize"
+    if not d.is_dir():
+        return
+    for p in sorted(d.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in MEDIA_EXTS:
+            continue
+        if p.stem.lower().endswith(("_t", "_ticker")):
+            continue
+        if p.with_name(p.stem + "_ticker.mp4").exists():
+            continue
+        marker = p.with_name(p.stem + "_ticker.fail")
+        if marker.exists():
+            continue
+        try:
+            if time.time() - p.stat().st_mtime < POLL_SECONDS:
+                continue  # still copying
+        except OSError:
+            continue
+        ok, msg = convert(d, p)
+        if ok:
+            log(f"tickerized {p.name} -> {msg}")
+            alert_event("tickerize", f"Tickerized {p.name} -> {msg}")
+        else:
+            log(f"tickerize fail {p.name}: {msg}")
+            try:
+                marker.write_text(msg)
+            except OSError:
+                pass
+            alert_event("tickerize", f"Tickerize FAILED {p.name}: {msg}")
+
+
 def run_once():
     if not WATCH_DIR.exists():
         return
     relocate_debug_logs()
     scoop_downloads()
+    tickerize_drops()
     for manifest in all_manifests():
         if MANIFEST_RE.match(manifest.name):
             process_job(manifest)
@@ -1218,6 +1255,10 @@ def main():
         run_once()
         return
     log(f"Watching {WATCH_DIR} every {POLL_SECONDS}s (Ctrl+C to stop)")
+    try:
+        (WATCH_DIR / "_tickerize").mkdir(exist_ok=True)
+    except OSError as e:
+        log(f"tickerize dir: {e}")
     while True:
         try:
             run_once()

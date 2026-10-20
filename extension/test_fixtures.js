@@ -86,6 +86,23 @@ eq('wb spots', extractSpotBlocks('Clayface\nWRCA75B3000H\nMonster Rev 30\nWRCA47
   const s = extractSpotBlocks('NFL SHOP STYLE BUFFET :15 HD\nSHOP\nNFL SHOP STYLE BUFFET :15 HD\n[f.mp4](https://nflit.sharepoint.com/x/f.mp4)\nCOPR1502615H');
   eq('nfl spot', s.length === 1 ? [s[0].id, s[0].title, s[0].url] : s, ['COPR1502615H', 'NFL SHOP STYLE BUFFET :15 HD', 'https://nflit.sharepoint.com/x/f.mp4']);
 }
+// USN grouped-link layout: every URL listed after the last code block -
+// the line scan can't reach them, so links attach by code-in-URL.
+{
+  const s = extractSpotBlocks(
+    'NTUR3331000H\nFOOD - HOLIDAY BAKING CHAMPIONSHIP :30\n' +
+    'NTUR3392000H\nFOOD - HOLIDAY BAKING CHAMPIONSHIP :15\n' +
+    'https://v5media.dmds.com/advideo/NTUR3392000H_HD370_202610191353.mp4?h=x\n' +
+    'https://v5media.dmds.com/advideo/NTUR3331000H_HD370_202610191351.mp4?h=y');
+  eq('usn grouped links', s.map(x => [x.id, x.title, !!x.url]),
+    [['NTUR3331000H', 'FOOD - HOLIDAY BAKING CHAMPIONSHIP :30', true],
+     ['NTUR3392000H', 'FOOD - HOLIDAY BAKING CHAMPIONSHIP :15', true]]);
+}
+// Replies are follow-ups, never new requests - even carrying codes.
+eq('reply not candidate', isRequestCandidate("[EXTERNAL] Re: Kohl's Inscape POD 10/14/2026",
+  'adding NTUR3331000H too', 'jhernandez@horizon-next.com', [], 'tim@vizio.com'), false);
+eq('fresh still candidate', isRequestCandidate("Kohl's Inscape POD 10/14/2026",
+  'adding NTUR3331000H too', 'jhernandez@horizon-next.com', [], 'tim@vizio.com'), true);
 // Empire: title/code/:len/date column lines
 {
   const s = extractSpotBlocks('70% OFF Flooring - :30 - OG Jingle + Contact - TV\nEMPR0158000H\n:30\n10/17/2026');

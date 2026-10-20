@@ -914,6 +914,29 @@ function grabFileNames() {
     } catch (e) { /* skip */ }
   });
 
+  // Yangaroo/DMDS list pages name spots by bare ad-id and wire download
+  // links that don't end in a media extension (/advideo/, /Download?id=)
+  // - accept ISCI-ish tokens as entries and carry each anchor's href.
+  if (/dmds|yangaroo/i.test(location.host)) {
+    const codeRe = /\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{7,14}\b/;
+    text.split(/\r?\n/).forEach(line => {
+      const m = line.trim().match(codeRe);
+      if (m && !entries.has(m[0])) {
+        entries.set(m[0], { name: m[0], line: line.trim().slice(0, 500) });
+      }
+    });
+    document.querySelectorAll('a[href]').forEach(a => {
+      try {
+        const m = (a.innerText || '').match(codeRe) || a.href.match(codeRe);
+        if (!m) return;
+        const url = new URL(a.getAttribute('href'), location.href).href;
+        const cur = entries.get(m[0]);
+        if (cur) { if (!cur.url) cur.url = url; }
+        else entries.set(m[0], { name: m[0], line: (a.innerText || a.href).slice(0, 500), url });
+      } catch (e) { /* skip */ }
+    });
+  }
+
   const rowRe = /\b(asset|creative|file|spot|deliver)/i;
   document.querySelectorAll('tr, li, [class*="asset"], [class*="file"], [class*="creative"]').forEach(el => {
     const cls = String((el.className && el.className.baseVal) || el.className || '') + ' ' + String(el.id || '');

@@ -376,6 +376,7 @@ var CLIENTS = [
     ingest: {
       jiraEpic: 'DD-726',
       fingerprint: 'both',
+      cidMap: 'discovery',  // Warner ingests under the discovery customer
       note: 'Theatrical ACR Doc lives on warnermedia.sharepoint.com; spots deliver same-day via ER.',
     },
   },
@@ -395,6 +396,7 @@ var CLIENTS = [
     ingest: {
       jiraEpic: 'DD-726',
       fingerprint: 'both',
+      cidMap: 'discovery',  // Warner ingests under the discovery customer
       nameTitle: true,
       advertiser: true,
       metadata: 'adid + creative_name; network col is the advertiser (DSC/HGTV/CNN)',

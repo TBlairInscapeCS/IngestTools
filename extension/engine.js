@@ -723,14 +723,14 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   if (selfAddr && a.toLowerCase() === String(selfAddr).toLowerCase()) return false;
   // OOO/auto-replies on request threads quote the request below them.
   if (/^\s*(?:\[\s*external\s*\]\s*)*(?:automatic reply|auto-?reply|out of office)\b/i.test(s)) return false;
-  // Replies quoting an old request below "Thanks!" aren't new requests -
-  // only what the sender actually wrote (first segment) may score. A re:
-  // subject describes the old thread, so replies score on body alone.
-  const isReply = /^\s*re\s*:/i.test(s);
+  // Replies (incl. "[EXTERNAL] Re:") are thread follow-ups, never new
+  // requests - even when they cite codes, the user grabs them manually.
+  // Delivery notices bypass this function (erNotice/dl force-inclusion).
+  if (/^\s*(?:\[[^\]]*\]\s*)*re\s*:/i.test(s)) return false;
   const b = firstSegment(body);
   const weak = detectCodes(b).length >= 1 ||
     /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
-      .test((isReply ? '' : s) + ' ' + b.slice(0, 2000));
+      .test(s + ' ' + b.slice(0, 2000));
   const known = CLIENTS.some(c => ((c.detect || {}).domains || []).some(re => re.test(a)));
   const learned = senders &&
     ((senders[a.toLowerCase()] || 0) >= 1 ||
@@ -740,9 +740,9 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   // Channel vocabulary only vets unknown senders - real file-ingest
   // customers title deliveries "for fingerprinting" all the time.
   if (!known && !learned && CHANNEL_SUBJ.test(s) && !FILE_FOR_FP.test(s)) return false;
-  if (!isReply && CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
+  if (CLIENTS.some(c => ((c.detect || {}).subjects || []).some(re => re.test(s)))) return true;
   if (known || learned) return weak;
-  return looksLikeRequest(isReply ? '' : s, b);
+  return looksLikeRequest(s, b);
 }
 
 function parseEml(text) {
@@ -1024,6 +1024,21 @@ function extractSpotBlocks(text) {
   const isNum = l => /^\d{3,6}$/.test(l);
   const isUrl = l => /https?:\/\//.test(l);
   const isLen = l => /^:\d{1,3}$/.test(l) || /^\d{1,3}s$/.test(l);
+  // Title placement is layout-level ambiguous ("code/title/code/title"
+  // vs "title/code/title/code" produce the same tokens). Disambiguate by
+  // the FIRST code: no title-like line above it -> this text puts titles
+  // below their codes (USN/Yangaroo), so the upward scan must not claim
+  // the previous spot's title line.
+  const firstIdx = lines.findIndex(l => {
+    const m = l.match(/^(\S+)/);
+    return m && isCodeToken(m[1]);
+  });
+  let above = '';
+  for (let j = firstIdx - 1; j >= 0; j--) {
+    if (lines[j] && !isUrl(lines[j])) { above = lines[j]; break; }
+  }
+  const belowLayout = firstIdx < 0 || !above || above.length > 80 ||
+    /[.!?,;:]\s*$/.test(above);
   for (let i = 0; i < lines.length; i++) {
     // A code alone on the line, or a table row starting with a code
     // ("NTUR3388000H 10/20 START") - a short remainder is column text
@@ -1043,7 +1058,7 @@ function extractSpotBlocks(text) {
       // way up too (forward scan below handles link-after-code layouts).
       if (isUrl(l)) { if (!spot.url) spot.url = firstUrl(l) || l; continue; }
       if (isNum(l)) { if (spot.title) spot.row = +l; break; }
-      if (!spot.title) spot.title = l;
+      if (!spot.title && !belowLayout) spot.title = l;
       else break;  // prose above the title isn't part of this block
     }
     for (let j = i + 1; j < lines.length && j <= i + 4; j++) {
@@ -1051,10 +1066,23 @@ function extractSpotBlocks(text) {
       if (isCodeToken(l)) break;
       if (!spot.url && isUrl(l)) { spot.url = firstUrl(l) || l; continue; }
       if (!spot.len && isLen(l)) { spot.len = l.replace(':', ''); continue; }
+      // USN/Yangaroo blocks put the title on the line after the code.
+      if (!spot.title && l && l.length <= 80 && !isUrl(l)) { spot.title = l; continue; }
       if (spot.url && spot.len) break;
     }
     out.push(spot);
   }
+  // Grouped-link layouts list every URL after the last code block - too
+  // far for the line scan. Attach by the code embedded in the URL itself
+  // (v5media.dmds.com/advideo/NTUR3331000H_...mp4 names its spot).
+  const links = extractLinks(text);
+  out.forEach(s => {
+    if (s.url) return;
+    const n = normalizeName(s.id).replace(/[\s:_-]+/g, '');
+    if (n.length < 6) return;
+    const l = links.find(x => normalizeName(x.url).indexOf(n) >= 0);
+    if (l) s.url = l.url;
+  });
   return out;
 }
 
