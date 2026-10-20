@@ -4565,6 +4565,10 @@ function ingestRealm() {
 // Standalone record lookup: answer "was this creative ingested / is it
 // detecting?" for arbitrary IDs without running a job. Realm defaults to
 // the detected client's cidMap; the datalist offers every known customer.
+// Each found record also offers an "impr sql" link copying the two-step
+// Databricks impression-count queries with that record's commercial_cid
+// and ingest date already filled in.
+let lastRecLookup = new Map();
 {
   const realms = new Set();
   (typeof CLIENTS !== 'undefined' ? CLIENTS : []).forEach(c =>
@@ -4574,6 +4578,46 @@ function ingestRealm() {
 }
 chrome.storage.local.get('recRealm', d => { if (d.recRealm) $('recRealm').value = d.recRealm; });
 $('recRealm').addEventListener('input', e => chrome.storage.local.set({ recRealm: e.target.value }));
+
+// A record's admin_visible.cid is "C(^.~)c_Commercial_<commercial_cid>";
+// the firehose table keys on the suffix only.
+function recordCommercialCid(rec) {
+  const raw = (rec.admin_visible && rec.admin_visible.cid) || '';
+  const i = raw.indexOf('Commercial_');
+  return i < 0 ? '' : raw.slice(i + 'Commercial_'.length);
+}
+function impressionsSql(id, rec) {
+  const ccid = recordCommercialCid(rec);
+  const start = (rec.ingestDatetime || rec.create_datetime || '').slice(0, 10) ||
+    new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
+  const end = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  return '-- ' + id + ' (resolve commercial_id, then count impressions)\n' +
+    'SELECT a.commercial_cid, a.commercial_id AS filterable_id, b.title, b.brand_name, c.client_name\n' +
+    'FROM detection.commercial_ids_firehose a\n' +
+    '         JOIN detection.commercial_id_external_firehose b\n' +
+    '              ON b.fk_commercial_id = a.commercial_id\n' +
+    '         JOIN detection.clients c\n' +
+    '              ON c.client_id = b.fk_client_id\n' +
+    "WHERE a.commercial_cid = '" + ccid + "'\n" +
+    'LIMIT 1000;\n\n' +
+    'SELECT COUNT(*)\n' +
+    'FROM detection.viewing_commercials_firehose vcf\n' +
+    "WHERE vcf.session_start >= '" + start + " 00:00:00'\n" +
+    "  AND vcf.session_end < '" + end + " 00:00:00'\n" +
+    "  AND vcf.fk_commercial_id = '<filterable_id from the query above>';\n\n" +
+    '-- single-run variant (no manual join):\n' +
+    "--   AND vcf.fk_commercial_id IN (SELECT commercial_id FROM detection.commercial_ids_firehose WHERE commercial_cid = '" + ccid + "')";
+}
+$('recResults').addEventListener('click', e => {
+  const k = e.target.getAttribute && e.target.getAttribute('data-imp');
+  if (k == null) return;
+  e.preventDefault();
+  const ent = lastRecLookup.get(k);
+  if (!ent) return;
+  navigator.clipboard.writeText(impressionsSql(ent.id, ent.rec))
+    .then(() => toast('Impressions queries copied - paste into Databricks.'))
+    .catch(() => toast('Copy failed.'));
+});
 
 $('recGo').addEventListener('click', async () => {
   const raw = $('recIds').value;
@@ -4598,6 +4642,7 @@ $('recGo').addEventListener('click', async () => {
       byRid.set(normalizeName(r.reportingId || '').replace(/[\s:_-]+/g, ''), r);
       byTitle.set(normalizeName(r.contentTitle || '').replace(/[\s:_-]+/g, ''), r);
     });
+    lastRecLookup = new Map();
     out.innerHTML = ids.map(id => {
       const n = normalizeName(id).replace(/[\s:_-]+/g, '');
       const rec = byRid.get(n) || byTitle.get(n);
@@ -4609,10 +4654,13 @@ $('recGo').addEventListener('click', async () => {
       const pct = rec.admin_visible && rec.admin_visible.detection_percentage != null
         ? ' · detected ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
       const when = (rec.ingestDatetime || rec.datetime || '').replace('T', ' ').slice(5, 16);
+      const impr = recordCommercialCid(rec)
+        ? ' · <a href="#" data-imp="' + esc(id) + '" title="Copy Databricks impression-count queries for this creative">impr sql</a>' : '';
+      if (impr) lastRecLookup.set(id, { id, rec });
       return '<div>' + esc(id) + ' · ' +
         (failed ? '<span style="color:#ec9a9a">' : '<span style="color:#3fbf7f">') +
         esc(st) + stage + (rec.detection_result ? '/' + esc(rec.detection_result) : '') + '</span>' +
-        pct + (when ? ' · ' + esc(when) : '') + '</div>';
+        pct + (when ? ' · ' + esc(when) : '') + impr + '</div>';
     }).join('');
   } catch (e) { out.textContent = 'Lookup failed: ' + e.message; }
 });
