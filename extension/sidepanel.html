@@ -312,6 +312,18 @@
     </div>
     <textarea id="recIds" placeholder="Reporting IDs or file names - one per line" style="height:3.6em"></textarea>
     <div class="msg" id="recResults"></div>
+    <details class="mini">
+      <summary>databricks</summary>
+      <div class="row">
+        <input type="text" id="dbxHost" placeholder="workspace host" size="18" title="From your browser bar, e.g. dbc-abc123-xy.cloud.databricks.com">
+        <input type="text" id="dbxWh" placeholder="warehouse id" size="10" title="SQL warehouse ID - 'test' lists your warehouses in the log">
+      </div>
+      <div class="row">
+        <input type="password" id="dbxTok" placeholder="personal access token" size="22" autocomplete="off" title="User Settings -> Developer -> Access tokens">
+        <button id="dbxPing" title="Test the connection - lists your SQL warehouses (id + name) in the log">test</button>
+      </div>
+      <div class="hint">With these set, the per-row "impr" link runs the queries and shows the count inline - no Databricks round-trip.</div>
+    </details>
   </details>
   <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">

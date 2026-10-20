@@ -4586,37 +4586,124 @@ function recordCommercialCid(rec) {
   const i = raw.indexOf('Commercial_');
   return i < 0 ? '' : raw.slice(i + 'Commercial_'.length);
 }
-function impressionsSql(id, rec) {
-  const ccid = recordCommercialCid(rec);
-  const start = (rec.ingestDatetime || rec.create_datetime || '').slice(0, 10) ||
-    new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
-  const end = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
-  return '-- ' + id + ' (resolve commercial_id, then count impressions)\n' +
-    'SELECT a.commercial_cid, a.commercial_id AS filterable_id, b.title, b.brand_name, c.client_name\n' +
+function recordImprWindow(rec) {
+  return {
+    start: (rec.ingestDatetime || rec.create_datetime || '').slice(0, 10) ||
+      new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10),
+    end: new Date(Date.now() + 864e5).toISOString().slice(0, 10)
+  };
+}
+function dbxLit(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
+function dbxResolveSql(ccid) {
+  return 'SELECT a.commercial_cid, a.commercial_id AS filterable_id, b.title, b.brand_name, c.client_name\n' +
     'FROM detection.commercial_ids_firehose a\n' +
     '         JOIN detection.commercial_id_external_firehose b\n' +
     '              ON b.fk_commercial_id = a.commercial_id\n' +
     '         JOIN detection.clients c\n' +
     '              ON c.client_id = b.fk_client_id\n' +
-    "WHERE a.commercial_cid = '" + ccid + "'\n" +
-    'LIMIT 1000;\n\n' +
-    'SELECT COUNT(*)\n' +
-    'FROM detection.viewing_commercials_firehose vcf\n' +
-    "WHERE vcf.session_start >= '" + start + " 00:00:00'\n" +
-    "  AND vcf.session_end < '" + end + " 00:00:00'\n" +
-    "  AND vcf.fk_commercial_id = '<filterable_id from the query above>';\n\n" +
-    '-- single-run variant (no manual join):\n' +
-    "--   AND vcf.fk_commercial_id IN (SELECT commercial_id FROM detection.commercial_ids_firehose WHERE commercial_cid = '" + ccid + "')";
+    'WHERE a.commercial_cid = ' + dbxLit(ccid) + '\n' +
+    'LIMIT 1000;';
 }
-$('recResults').addEventListener('click', e => {
-  const k = e.target.getAttribute && e.target.getAttribute('data-imp');
+function dbxCountSql(fid, start, end, raw) {
+  return 'SELECT COUNT(*)\n' +
+    'FROM detection.viewing_commercials_firehose vcf\n' +
+    'WHERE vcf.session_start >= ' + dbxLit(start + ' 00:00:00') + '\n' +
+    '  AND vcf.session_end < ' + dbxLit(end + ' 00:00:00') + '\n' +
+    '  AND vcf.fk_commercial_id ' + (raw ? fid : '= ' + dbxLit(fid)) + ';';
+}
+function impressionsSql(id, rec) {
+  const ccid = recordCommercialCid(rec);
+  const w = recordImprWindow(rec);
+  return '-- ' + id + ' (resolve commercial_id, then count impressions)\n' +
+    dbxResolveSql(ccid) + '\n\n' +
+    dbxCountSql('<filterable_id from the query above>', w.start, w.end) + '\n\n' +
+    '-- single-run variant (no manual join):\n' +
+    dbxCountSql('IN (SELECT commercial_id FROM detection.commercial_ids_firehose WHERE commercial_cid = ' +
+      dbxLit(ccid) + ')', w.start, w.end, true);
+}
+// Direct Databricks SQL: when host + warehouse + PAT are configured the
+// per-row "impr" link runs both queries and renders the count inline;
+// unconfigured it copies the queries for a manual Databricks paste.
+['dbxHost', 'dbxWh', 'dbxTok'].forEach(id => {
+  chrome.storage.local.get(id, d => { if (d[id]) $(id).value = d[id]; });
+  $(id).addEventListener('input', e => chrome.storage.local.set({ [id]: e.target.value.trim() }));
+});
+function dbxCfg() {
+  return {
+    host: $('dbxHost').value.trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+    wh: $('dbxWh').value.trim(),
+    tok: $('dbxTok').value.trim()
+  };
+}
+const dbxReady = c => c.host && c.wh && c.tok;
+async function dbxApi(path, method, body) {
+  const c = dbxCfg();
+  const r = await fetch('https://' + c.host + path, {
+    method,
+    headers: { 'Authorization': 'Bearer ' + c.tok, 'Content-Type': 'application/json' },
+    body: body && JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error('Databricks ' + r.status +
+    (r.status === 401 || r.status === 403 ? ' - token rejected' : r.status === 404 ? ' - check host/path' : ''));
+  return r.json();
+}
+async function dbxQuery(sql) {
+  const c = dbxCfg();
+  let r = await dbxApi('/api/2.0/sql/statements', 'POST',
+    { warehouse_id: c.wh, statement: sql, wait_timeout: '50s' });
+  // Cold warehouses can outlast the 50s wait - poll until terminal state.
+  for (let i = 0; r.statement_id && r.status && !/^(SUCCEEDED|FAILED|CANCELED|CLOSED)$/.test(r.status.state) && i < 40; i++) {
+    await new Promise(x => setTimeout(x, 3000));
+    r = await dbxApi('/api/2.0/sql/statements/' + r.statement_id, 'GET');
+  }
+  if (!r.status || r.status.state !== 'SUCCEEDED') {
+    const em = r.status && r.status.error && r.status.error.message;
+    throw new Error('query ' + ((r.status && r.status.state) || 'no response') + (em ? ': ' + em : ''));
+  }
+  return (r.result && r.result.data_array) || [];
+}
+$('dbxPing').addEventListener('click', async () => {
+  const c = dbxCfg();
+  if (!c.host || !c.tok) { toast('Set the workspace host + token first.'); return; }
+  try {
+    const d = await dbxApi('/api/2.0/sql/warehouses?page_size=50', 'GET');
+    const whs = (d.warehouses || []).map(w => w.id + ' ' + w.name + ' [' + (w.state || '?') + ']');
+    dbg('databricks warehouses', whs);
+    toast(whs.length ? whs.length + ' warehouse(s) - ids in the debug log'
+      : 'Connected - no warehouses listed');
+  } catch (e) { toast('Databricks: ' + e.message); }
+});
+
+$('recResults').addEventListener('click', async e => {
+  const t = e.target;
+  const k = t.getAttribute && (t.getAttribute('data-imp') || t.getAttribute('data-impsql'));
   if (k == null) return;
   e.preventDefault();
   const ent = lastRecLookup.get(k);
   if (!ent) return;
-  navigator.clipboard.writeText(impressionsSql(ent.id, ent.rec))
-    .then(() => toast('Impressions queries copied - paste into Databricks.'))
-    .catch(() => toast('Copy failed.'));
+  if (t.hasAttribute('data-impsql') || !dbxReady(dbxCfg())) {
+    navigator.clipboard.writeText(impressionsSql(ent.id, ent.rec))
+      .then(() => toast('Impressions queries copied - paste into Databricks.'))
+      .catch(() => toast('Copy failed.'));
+    return;
+  }
+  const a = e.target;
+  a.textContent = 'running…';
+  try {
+    const ccid = recordCommercialCid(ent.rec);
+    const w = recordImprWindow(ent.rec);
+    const rows = await dbxQuery(dbxResolveSql(ccid));
+    const fid = rows[0] && rows[0][1];
+    if (!fid) { a.textContent = 'no commercial_id'; return; }
+    const cnt = await dbxQuery(dbxCountSql(String(fid), w.start, w.end));
+    a.outerHTML = ' · <b style="color:#3fbf7f">impr ' +
+      esc(String((cnt[0] && cnt[0][0]) != null ? cnt[0][0] : '?')) + '</b>' +
+      ' <a href="#" title="Copy the queries used" data-impsql="' + esc(ent.id) + '">sql</a>';
+  } catch (err) {
+    a.textContent = 'impr?';
+    a.title = err.message;
+    toast('Impressions: ' + err.message);
+  }
 });
 
 $('recGo').addEventListener('click', async () => {
@@ -4655,7 +4742,7 @@ $('recGo').addEventListener('click', async () => {
         ? ' · detected ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
       const when = (rec.ingestDatetime || rec.datetime || '').replace('T', ' ').slice(5, 16);
       const impr = recordCommercialCid(rec)
-        ? ' · <a href="#" data-imp="' + esc(id) + '" title="Copy Databricks impression-count queries for this creative">impr sql</a>' : '';
+        ? ' · <a href="#" data-imp="' + esc(id) + '" title="Impression count: runs the Databricks queries when configured, else copies them for a manual paste">impr</a>' : '';
       if (impr) lastRecLookup.set(id, { id, rec });
       return '<div>' + esc(id) + ' · ' +
         (failed ? '<span style="color:#ec9a9a">' : '<span style="color:#3fbf7f">') +
