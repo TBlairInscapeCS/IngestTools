@@ -126,7 +126,7 @@
   <label class="opt"><input type="checkbox" id="opt-excReply"> Exception reply</label>
   <label class="opt"><input type="checkbox" id="opt-colMap"> Column mapping</label>
   <label class="opt"><input type="checkbox" id="opt-erSweep"> ER search sweep</label>
-  <label class="opt"><input type="checkbox" id="opt-manual"> Manual lists &amp; API</label>
+  <label class="opt"><input type="checkbox" id="opt-manual"> ER API (keyed fetch)</label>
   <label class="opt"><input type="checkbox" id="opt-log"> Log panel</label>
   <label class="opt"><input type="checkbox" id="opt-hints"> Help ? bubbles</label>
   <div style="font-weight:700;margin:8px 0 4px">Jira (post comment)</div>
@@ -255,22 +255,15 @@
   <div class="hint" id="missingNote" style="color:#ec9a9a"></div>
   <div class="scrollbox" id="results"></div>
   <details id="manualTools" data-opt="manual">
-    <summary>Manual lists, API &amp; reports</summary>
-    <textarea id="ids" placeholder="Requested tracking IDs"></textarea>
-    <textarea id="files" placeholder="File names"></textarea>
-    <div class="row">
-      <button id="grabFiles">Grab list</button>
-      <button id="loadFiles">Load .csv</button>
-      <button id="clearFiles">Clear</button>
-      <button id="run">Reconcile</button>
-    </div>
+    <summary>ER API (keyed fetch)</summary>
+    <!-- ids/files look like leftovers but are the run's state carriers:
+         the email's codes, the match output and downloaded names all
+         flow through them. Hidden, not deleted. -->
+    <textarea id="ids" class="hidden"></textarea>
+    <textarea id="files" class="hidden"></textarea>
     <div class="row">
       <input type="password" id="erApiKey" placeholder="ER API key" size="22" autocomplete="off">
       <button id="erApi">API: fetch &amp; download</button>
-    </div>
-    <div id="outRow" class="row hidden">
-      <button id="dlFound">Download found</button>
-      <button id="dlCsv">Results CSV</button>
     </div>
   </details>
 </details>

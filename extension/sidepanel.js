@@ -428,7 +428,6 @@ function resetRun() {
   $('matchResults').innerHTML = '';
   $('results').innerHTML = ''; $('counts').innerHTML = '';
   $('missingNote').innerHTML = '';
-  $('outRow').classList.add('hidden');
   $('download').classList.add('hidden');
   $('showSheet').classList.add('hidden');
   $('replyArea').classList.add('hidden'); $('replyPreview').value = '';
@@ -2071,7 +2070,6 @@ $('grabSheet').addEventListener('click', async () => {
 
 let loadTarget = null;
 $('loadSheet').addEventListener('click', () => { loadTarget = 'sheet'; $('fileInput').click(); });
-$('loadFiles').addEventListener('click', () => { loadTarget = 'files'; $('fileInput').click(); });
 
 // Grid tools that virtualize (Airtable, Notion, Monday) can't be scraped -
 // only ~20 viewport rows exist in the DOM at once. But select-all + copy
@@ -2110,22 +2108,6 @@ async function loadPastedSheet(text) {
   loadSheetText(text, 'pasted tracker');
 }
 
-// Start a fresh batch: clears the accumulated file list and captured URLs
-// (grabs merge across pages, so a new job needs an explicit reset).
-$('clearFiles').addEventListener('click', () => {
-  filesEl.value = '';
-  capturedByName = {};
-  queuedUrls.clear(); dlKeys.clear();
-  ourDlIds.clear();
-  $('results').innerHTML = '';
-  $('counts').innerHTML = '';
-  $('missingNote').innerHTML = '';
-  $('capInfo').innerHTML = '';
-  $('outRow').classList.add('hidden');
-  lastResults = null;
-  setStage('sdDl');
-  saveInputs();
-});
 $('fileInput').addEventListener('change', e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -2160,10 +2142,7 @@ $('fileInput').addEventListener('change', e => {
     return;
   }
   const r = new FileReader();
-  r.onload = () => {
-    if (loadTarget === 'sheet') loadSheetText(r.result, f.name);
-    else { filesEl.value = r.result; saveInputs(); toast('Loaded ' + f.name); }
-  };
+  r.onload = () => { if (loadTarget === 'sheet') loadSheetText(r.result, f.name); };
   r.readAsText(f);
   e.target.value = '';
 });
@@ -2324,7 +2303,6 @@ async function doMatch() {
   // Clear any previous reconcile output - it belongs to the old run.
   lastResults = null;
   $('results').innerHTML = ''; $('counts').innerHTML = '';
-  $('outRow').classList.add('hidden');
   let fresh = matchEmailToSheet(matchText, dataRows, cols, { headerRow, pendingIdx });
   // The newest-message segment may genuinely carry no refs (short cover
   // note quoting a long thread) - retry the full paste before guessing.
@@ -3310,8 +3288,6 @@ async function captureTabs() {
   return got;
 }
 
-$('grabFiles').addEventListener('click', captureTabs);
-
 // Short moniker for a file/ID in dense UI: the code-like token if there
 // is one, else the basename sans extension, clipped.
 function moniker(name) {
@@ -3423,8 +3399,6 @@ function runReconcile() {
     $('missingNote').innerHTML = '';
   }
 
-  $('outRow').classList.remove('hidden');
-  $('manualTools').open = true; // results actions live inside the manual section
   setStage('sdDl', missing.length ? 'warn' : 'ok',
     fileCount + ' files indexed · ' + (missing.length ? missing.length + ' still missing' : 'all requested found'));
   // Watched-batch arrival can come from the sweep itself: deliveries that
@@ -3446,8 +3420,6 @@ function runReconcile() {
   refreshReply();
   return true;
 }
-
-$('run').addEventListener('click', runReconcile);
 
 function copyText(text, label) {
   if (!text) return toast('Nothing to copy - ' + label + ' is empty.');
@@ -3678,8 +3650,6 @@ function askIngested(nOld, nNew) {
     $('confirmCancel').onclick = () => done('cancel');
   });
 }
-
-$('dlFound').addEventListener('click', downloadFound);
 
 // ---------- ER API ----------
 // Direct API path: GET /deliveries?AdId={ISCI} with the X-ApiKey the ER
@@ -4098,16 +4068,6 @@ $('runAll').addEventListener('click', async () => {
     if (runReconcile()) { await downloadFound(); return; }
   }
   toast('Matched ' + matched.length + ' row(s) but found no downloadable files - see the log.');
-});
-
-$('dlCsv').addEventListener('click', () => {
-  if (!lastResults) return;
-  const blob = new Blob([resultsToCsv(lastResults)], { type: 'text/csv' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'ingest-reconcile-' + new Date().toISOString().slice(0, 10) + '.csv';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
 });
 
 // ---------- Restore state + context-menu captures ----------
