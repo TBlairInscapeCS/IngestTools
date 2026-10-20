@@ -33,6 +33,7 @@ let repliedConvs = new Set(); // conversationIds that already got a template rep
 let erDeliveries = [];     // parsed ER "Spot Delivery Notification" registry
 let capturedByName = {};   // file name -> {url, line} from last page capture
 const queuedUrls = new Set(); // URLs already queued for download this session
+const dlKeys = new Map();   // download id -> queuedUrls key, for unmarking interrupts
 let portalLiveTimer = null; // 30s records-API poller in step 5
 const portalFailAlerted = new Set(); // INGEST_FAILED ids already chimed this run
 let matchCols = {};        // column picks in effect for the current match
@@ -423,7 +424,7 @@ function resetRun() {
   disarmDeliveryWatch();
   yangaroo = null;
   idsEl.value = ''; filesEl.value = '';
-  capturedByName = {}; queuedUrls.clear(); lastCapTab = null;
+  capturedByName = {}; queuedUrls.clear(); dlKeys.clear(); lastCapTab = null;
   $('matchResults').innerHTML = '';
   $('results').innerHTML = ''; $('counts').innerHTML = '';
   $('missingNote').innerHTML = '';
@@ -560,9 +561,13 @@ function renderClientNote() {
 // title column still rename to the tracking ID alone. ext keeps the
 // delivered extension.
 function nameForIngest(trackingId, title, deliveredName) {
-  if (!client || !client.ingest || !client.ingest.nameTitle) return deliveredName;
+  // Path separators can't live inside a filename - chrome.downloads reads
+  // "/" as a directory break, which interrupts the download (WB's
+  // "ONLY IN THEATERS / FRIDAY / ..." titles failed all four files).
+  const safe = s => String(s || '').replace(/[/\\]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!client || !client.ingest || !client.ingest.nameTitle) return safe(deliveredName);
   const ext = (String(deliveredName).match(/\.[a-z0-9]{2,5}$/i) || ['.mp4'])[0];
-  return ingestFileName(trackingId, title, ext) || deliveredName;
+  return ingestFileName(trackingId, title, ext) || safe(deliveredName);
 }
 
 // Ingest fields for the manifest + whether every file needs a ticker.
@@ -2110,7 +2115,7 @@ async function loadPastedSheet(text) {
 $('clearFiles').addEventListener('click', () => {
   filesEl.value = '';
   capturedByName = {};
-  queuedUrls.clear();
+  queuedUrls.clear(); dlKeys.clear();
   ourDlIds.clear();
   $('results').innerHTML = '';
   $('counts').innerHTML = '';
@@ -3189,6 +3194,7 @@ chrome.downloads.onChanged.addListener(async delta => {
   if (delta.state.current === 'complete') {
     const [item] = await chrome.downloads.search({ id: delta.id });
     ourDlIds.delete(delta.id);
+    dlKeys.delete(delta.id);
     const fname = (item && item.filename || '').toLowerCase();
     const mime = (item && item.mime || '').toLowerCase();
     if (/\.html?$/.test(fname) || /text\/html|application\/xhtml/.test(mime)) {
@@ -3201,7 +3207,15 @@ chrome.downloads.onChanged.addListener(async delta => {
         ' — link likely leads to a viewer/auth page, not media';
       dbg('html download rejected', { file: fname.split('/').pop(), mime });
     } else dlDone++;
-  } else if (delta.state.current === 'interrupted') { ourDlIds.delete(delta.id); dlFailed++; }
+  } else if (delta.state.current === 'interrupted') {
+    ourDlIds.delete(delta.id);
+    // A failed download must not stay "already downloaded" - release the
+    // queued slot so a retry actually re-downloads instead of skipping.
+    const key = dlKeys.get(delta.id);
+    if (key) { queuedUrls.delete(key); dlKeys.delete(delta.id); }
+    dlFailed++;
+    dbg('download interrupted', { error: (delta.error && delta.error.current) || '' });
+  }
   updateDlStatus();
 });
 
@@ -3625,10 +3639,12 @@ async function downloadFound() {
   dlTotal = fresh.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
   updateDlStatus();
   for (const j of fresh) {
-    queuedUrls.add(j.dkey || j.url);
     try {
       const id = await chrome.downloads.download({ url: j.url, filename: 'Ingest/' + j.file, conflictAction: 'uniquify' });
-      if (id != null) ourDlIds.add(id);
+      // Mark only on a live download id - a thrown call or dead queue
+      // leaves the URL free so the next attempt can actually retry.
+      if (id != null) { ourDlIds.add(id); queuedUrls.add(j.dkey || j.url); dlKeys.set(id, j.dkey || j.url); }
+      else dlFailed++;
     } catch (e) { dlFailed++; updateDlStatus(); }
   }
   const blob = new Blob([buildManifest(job, fresh, clientInfo())], { type: 'application/json' });
