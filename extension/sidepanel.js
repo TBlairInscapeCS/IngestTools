@@ -4562,6 +4562,61 @@ function ingestRealm() {
 
 // Reporting IDs exactly as pushed to the portal: bare id per row, plus
 // id+suffix for rows flagged for a ticker version.
+// Standalone record lookup: answer "was this creative ingested / is it
+// detecting?" for arbitrary IDs without running a job. Realm defaults to
+// the detected client's cidMap; the datalist offers every known customer.
+{
+  const realms = new Set();
+  (typeof CLIENTS !== 'undefined' ? CLIENTS : []).forEach(c =>
+    [].concat((c.ingest && c.ingest.cidMap) || []).forEach(v => v && realms.add(String(v).toLowerCase())));
+  Object.keys(FI_ALIASES).forEach(k => { realms.add(k); realms.add(FI_ALIASES[k]); });
+  $('realmList').innerHTML = [...realms].sort().map(v => '<option value="' + esc(v) + '">').join('');
+}
+chrome.storage.local.get('recRealm', d => { if (d.recRealm) $('recRealm').value = d.recRealm; });
+$('recRealm').addEventListener('input', e => chrome.storage.local.set({ recRealm: e.target.value }));
+
+$('recGo').addEventListener('click', async () => {
+  const raw = $('recIds').value;
+  // IDs lead filenames in this workflow ("DSBK2966000H SBK_..._30.mp4") -
+  // codes/file-ids first, first-token-per-line as the fallback.
+  let ids = extractCodes(raw).concat(extractFileIds(raw));
+  if (!ids.length) {
+    ids = raw.split(/[\r\n,;]+/).map(s => (s.trim().split(/\s+/)[0] || '')).filter(Boolean);
+  }
+  ids = [...new Set(ids.map(s => s.replace(/\.[a-z0-9]{2,5}$/i, '')).filter(Boolean))];
+  if (!ids.length) { toast('Paste one or more reporting IDs / file names first.'); return; }
+  if (!$('recRealm').value.trim() && client) $('recRealm').value = ingestRealm() || '';
+  const realmIn = $('recRealm').value.trim().toLowerCase().replace(/ /g, '');
+  if (!realmIn) { toast('Which customer? e.g. horizonmedia, discovery'); return; }
+  const realm = FI_ALIASES[realmIn] || realmIn;
+  const out = $('recResults');
+  out.textContent = 'Looking up ' + ids.length + ' ID(s) in ' + realm + '…';
+  try {
+    const all = await fetchRealmRecords(realm, 2);
+    const byRid = new Map(), byTitle = new Map();
+    all.forEach(r => {
+      byRid.set(normalizeName(r.reportingId || '').replace(/[\s:_-]+/g, ''), r);
+      byTitle.set(normalizeName(r.contentTitle || '').replace(/[\s:_-]+/g, ''), r);
+    });
+    out.innerHTML = ids.map(id => {
+      const n = normalizeName(id).replace(/[\s:_-]+/g, '');
+      const rec = byRid.get(n) || byTitle.get(n);
+      if (!rec) return '<div>' + esc(id) + ' · <i>no record in ' + esc(realm) + '</i></div>';
+      const st = rec.status || '?';
+      const stage = PORTAL_STAGE[st] ? ' (' + PORTAL_STAGE[st] + ')' : '';
+      const failed = st.indexOf('INGEST_FAILED') === 0 ||
+        (!!rec.detection_result && rec.detection_result !== 'pass');
+      const pct = rec.admin_visible && rec.admin_visible.detection_percentage != null
+        ? ' · detected ' + Math.round(rec.admin_visible.detection_percentage) + '%' : '';
+      const when = (rec.ingestDatetime || rec.datetime || '').replace('T', ' ').slice(5, 16);
+      return '<div>' + esc(id) + ' · ' +
+        (failed ? '<span style="color:#ec9a9a">' : '<span style="color:#3fbf7f">') +
+        esc(st) + stage + (rec.detection_result ? '/' + esc(rec.detection_result) : '') + '</span>' +
+        pct + (when ? ' · ' + esc(when) : '') + '</div>';
+    }).join('');
+  } catch (e) { out.textContent = 'Lookup failed: ' + e.message; }
+});
+
 function ingestReportIds() {
   const plan = ingestPlan();
   const ids = [];

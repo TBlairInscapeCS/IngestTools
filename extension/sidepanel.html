@@ -303,6 +303,16 @@
   </div>
   <div class="msg" id="verifyInfo"></div>
   <div class="hint" id="portalLive"></div>
+  <details class="mini" id="recLookup">
+    <summary>record lookup</summary>
+    <div class="row">
+      <input type="text" id="recRealm" list="realmList" placeholder="customer (horizonmedia…)" size="16" title="Portal customer/realm - filled from the detected client when known">
+      <datalist id="realmList"></datalist>
+      <button id="recGo">Look up</button>
+    </div>
+    <textarea id="recIds" placeholder="Reporting IDs or file names - one per line" style="height:3.6em"></textarea>
+    <div class="msg" id="recResults"></div>
+  </details>
   <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
     <div class="row"><button id="jiraApprove" class="primary hidden">Post to Jira</button>
