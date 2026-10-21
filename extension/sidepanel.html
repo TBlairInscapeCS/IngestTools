@@ -71,6 +71,10 @@
   .GUESS { background: #3a2d4d; color: #cfaef0; }
 
   table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  tr.excl td { opacity: .35; }
+  tr.excl td.xcell, tr.excl .xbtn { opacity: 1; }
+  .xbtn { cursor: pointer; color: #8b93a1; font-size: 11px; padding: 0 2px; }
+  .xbtn:hover { color: #e8a13d; }
   td, th { border: 1px solid #2c313b; padding: 3px 5px; text-align: left; font-size: 11px; vertical-align: top; }
   th { background: #22262e; position: sticky; top: 0; }
   .scrollbox { max-height: 32vh; overflow: auto; }
@@ -221,7 +225,7 @@
 <details class="s3" open id="sec3">
   <summary>3 · Match codes to rows<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
   <div class="sub">Match email codes to tracker rows.</div>
-  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
+  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. <b>&#10005;</b> in the first column excludes a row - downloads, manifest, portal and replies all skip it; click again to restore. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
   <div class="row">
     <button id="match" class="primary" title="Match the email's tracking codes to rows in the loaded tracker">Match</button>
     <input type="text" id="jobLabel" placeholder="batch label" size="14" title="Names the download folder: <date>-<client>-<label>">

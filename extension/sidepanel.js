@@ -2487,7 +2487,7 @@ function mergeMatches(fresh) {
   if (!matched || !matched.length || matchedFor !== emailEl.value) return fresh;
   const key = m => normalizeName(m.id || m.trackingId || ('row' + m.row)).replace(/[\s:_-]+/g, '');
   const freshKeys = new Set(fresh.map(key));
-  const carried = matched.filter(m => !freshKeys.has(key(m)))
+  const carried = matched.filter(m => !m.excluded && !freshKeys.has(key(m)))
     .map(m => ({ ...m, offSheet: true }));
   return fresh.concat(carried);
 }
@@ -2499,9 +2499,24 @@ $('match').addEventListener('click', async () => {
   doMatch();
 });
 
+// Row exclusion toggle: the flag lives on the match object; re-presenting
+// re-derives every downstream surface (ids box, download button, reply,
+// portal feed) from the still-selected rows.
+$('matchResults').addEventListener('click', e => {
+  const x = e.target.closest('[data-xi]');
+  if (!x || !matched) return;
+  const m = matched[+x.dataset.xi];
+  if (!m) return;
+  m.excluded = !m.excluded;
+  presentMatches(true);
+});
+
 // Everything that runs once `matched` is final: link/spot joins, results
-// table, requested-ID seeding, and the delivery-path pick.
-function presentMatches() {
+// table, requested-ID seeding, and the delivery-path pick. Rows the user
+// excluded (x in the first column) stay listed but drive nothing -
+// `sel` is what every downstream stage sees.
+const selectedMatches = () => (matched || []).filter(m => !m.excluded);
+function presentMatches(quiet) {
   matchedFor = emailEl.value;
 
   // Join inline spot blocks: titles fill blanks, share links show when the
@@ -2552,8 +2567,12 @@ function presentMatches() {
 
   // Already-ingested rows (fill-back columns filled) still match - flagged
   // red so a re-request is obvious rather than silently processed again.
-  const rows = matched.map(m =>
-    '<tr><td>' + m.row + '</td><td>' + esc(m.id || '(no id)') + '</td>' +
+  const rows = matched.map((m, i) =>
+    '<tr' + (m.excluded ? ' class="excl"' : '') + '>' +
+    '<td class="xcell"><span class="xbtn" data-xi="' + i + '" title="' +
+      (m.excluded ? 'include this row in the run' : 'exclude this row - downloads, manifest, portal and replies will skip it') + '">' +
+      (m.excluded ? '&#8635;' : '&#10005;') + '</span></td>' +
+    '<td>' + m.row + '</td><td>' + esc(m.id || '(no id)') + '</td>' +
     '<td>' + esc(m.title) + '</td>' +
     '<td><span class="chip ' + m.matchType.split(' ')[0] + '">' + m.matchType + '</span>' +
       (sheetTabs.length > 1 ? '<div class="hint">' + esc(m.tab || sheetTabName) + '</div>' : '') +
@@ -2583,7 +2602,7 @@ function presentMatches() {
       ? '<div class="hint" id="missedNote"><b>not found on this tab:</b> ' + esc(missed.join(', ')) +
         ' - loaded: ' + esc(sheetSource || '?') + ' · checking other tabs…</div>'
       : '') +
-    '<table><thead><tr><th>Row</th><th>ID</th><th>Title</th><th>Match</th><th>ESPN/Access</th><th>Date</th><th>Link</th></tr></thead><tbody>' +
+    '<table><thead><tr><th></th><th>Row</th><th>ID</th><th>Title</th><th>Match</th><th>ESPN/Access</th><th>Date</th><th>Link</th></tr></thead><tbody>' +
     rows + '</tbody></table>';
   if (missed.length) findCodeTabs(missed).then(tabHits => {
     const el = $('missedNote');
@@ -2600,17 +2619,18 @@ function presentMatches() {
   // Delivery path pick: real URLs -> inline download button in this step;
   // label-only/empty links (master-sheet convention) -> open step 4 where
   // the delivery page (ER Spot Deliveries) provides the file URLs.
-  const nDl = matched.filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
+  const sel = selectedMatches();
+  const nDl = sel.filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
   const dlBtn = $('download');
   if (nDl) {
     dlBtn.textContent = 'Download ' + nDl + ' linked';
     dlBtn.classList.remove('hidden');
     $('sec4').open = false;
-  } else if (matched.length) {
+  } else if (sel.length) {
     // No downloadable links but rows are committed: the button still
     // writes the manifest so the watcher reconciles manual drops (FTP,
     // portal, viewer downloads) and builds ticker versions on arrival.
-    dlBtn.textContent = 'Write manifest - ' + matched.length + ' file(s) manual';
+    dlBtn.textContent = 'Write manifest - ' + sel.length + ' file(s) manual';
     dlBtn.classList.remove('hidden');
     $('sec4').open = true;
   } else {
@@ -2620,26 +2640,29 @@ function presentMatches() {
   // Live verification button: only when the workbook came off an open
   // Sheets tab whose gid we can navigate.
   $('showSheet').classList.toggle('hidden',
-    !(sheetSourceTab && (sheetGids || {})[sheetTabName] && matched.length));
+    !(sheetSourceTab && (sheetGids || {})[sheetTabName] && sel.length));
 
   // Feed the reconcile box + suggest a job folder name.
-  idsEl.value = matched.map(m => m.id).filter(Boolean).join('\n');
+  idsEl.value = sel.map(m => m.id).filter(Boolean).join('\n');
   if (!$('jobLabel').value) {
     const slug = (detectedAdvertiser || emailSubject || '')
       .replace(/^\[external\]\s*/i, '').replace(/^(re|fw|fwd):\s*/i, '')
       .replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
     if (slug) $('jobLabel').value = slug;
   }
-  const nLinks = matched.filter(m => m.link).length;
-  const nEspn = matched.filter(m => m.espn).length;
-  const nCarried = matched.filter(m => m.offSheet).length;
+  const nLinks = sel.filter(m => m.link).length;
+  const nEspn = sel.filter(m => m.espn).length;
+  const nCarried = sel.filter(m => m.offSheet).length;
+  const nExcl = matched.length - sel.length;
   const newCount = extractNewCount(emailEl.value);
-  setStage('sdMatch', 'ok', matched.length + ' rows matched' +
+  setStage('sdMatch', sel.length ? 'ok' : 'warn', sel.length + ' row(s) selected' +
+    (nExcl ? ' · ' + nExcl + ' excluded' : '') +
     (missed.length ? ' · ' + missed.length + ' cited code(s) not on this tab' : '') +
     (nCarried ? ' · ' + nCarried + ' carried from earlier sheet(s)' : ''));
-  toast(matched.length + ' rows matched (' + nLinks + ' with links, ' + nEspn + ' ESPN)' +
+  if (!quiet) toast(sel.length + ' rows matched (' + nLinks + ' with links, ' + nEspn + ' ESPN)' +
+    (nExcl ? ', ' + nExcl + ' excluded' : '') +
     (nCarried ? ', ' + nCarried + ' carried from earlier sheet(s)' : '') +
-    (newCount && newCount !== matched.length ? ' — note: email said ' + newCount + ' new' : '') + '.');
+    (newCount && newCount !== sel.length ? ' — note: email said ' + newCount + ' new' : '') + '.');
 }
 
 // The email named no IDs or rows - show the pending-row guesses with the
@@ -2701,7 +2724,7 @@ function wireTabLinks(el) {
 async function showOnSheet() {
   if (!sheetSourceTab || !(matched || []).length) return false;
   const gid = (sheetGids || {})[sheetTabName];
-  const rows = matched.filter(m => !m.offSheet && m.row > 0).map(m => m.row).sort((a, b) => a - b);
+  const rows = matched.filter(m => !m.excluded && !m.offSheet && m.row > 0).map(m => m.row).sort((a, b) => a - b);
   if (!gid || !rows.length) return toast('The sheet tab isn\'t open - re-grab from it to highlight.');
   const lo = rows[0], hi = Math.min(rows[rows.length - 1], lo + 199);
   try {
@@ -2851,7 +2874,7 @@ async function pollWatchEvents() {
 }
 
 function manualReply(kind) {
-  const rows = (matched || []).filter(m => m.matchType !== 'ROW (out of range)');
+  const rows = (matched || []).filter(m => !m.excluded && m.matchType !== 'ROW (out of range)');
   const ids = rows.length
     ? rows.map(m => m.trackingId || m.title || m.id).filter(Boolean)
     : [...new Set(extractCodes(latestSegment(emailEl.value)))];
@@ -2885,7 +2908,7 @@ function refreshReply(force) {
     checkSpecFails().then(changed => { if (changed) refreshReply(true); });
     const espnIds = new Set();
     (matched || []).forEach(m => {
-      if (!m.espn) return;
+      if (m.excluded || !m.espn) return;
       [m.id, m.trackingId].filter(Boolean).forEach(v =>
         espnIds.add(normalizeName(v).replace(/ /g, '')));
     });
@@ -2897,7 +2920,8 @@ function refreshReply(force) {
       buildReconConfirmation(lastResults, espnIds, emailSender) ||
       buildConfirmationEmail(lastResults, emailSender);
   }
-  if (!text && matched && kind === 'auto') text = buildMatchConfirmation(matched, emailSender);
+  if (!text && matched && kind === 'auto' && selectedMatches().length)
+    text = buildMatchConfirmation(selectedMatches(), emailSender);
   if (!text) { area.classList.add('hidden'); setStage('sdReply'); return; }
   area.classList.remove('hidden');
   const det = area.closest('details');
@@ -3060,9 +3084,11 @@ function linkShape(url) {
 // MediaSilo, Yangaroo, plain links). Queues files + manifest.
 async function downloadLinked() {
   if (!matched || !matched.length) { toast('Run the match first.'); return false; }
+  const sel = selectedMatches();
+  if (!sel.length) { toast('Every matched row is excluded - nothing to send.'); setStage('sdDl', 'warn', 'all rows excluded'); return false; }
   warnStale();
   const job = jobSlug();
-  const withLinks = matched.filter(m => m.link || m.yangarooUrl);
+  const withLinks = sel.filter(m => m.link || m.yangarooUrl);
   // No links at all isn't fatal anymore: every matched row becomes a
   // manifest entry below so the watcher reconciles manual drops.
   if (!withLinks.length && client && client.delivery !== 'links') {
@@ -3176,7 +3202,7 @@ async function downloadLinked() {
   // run entirely on this path.
   const queuedIds = new Set(jobs.map(j => normalizeName(j.tracking_id || '').replace(/[\s:_-]+/g, '')));
   const manual = [];
-  matched.forEach(m => {
+  sel.forEach(m => {
     const tid = m.trackingId || m.id;
     const k = normalizeName(tid || '').replace(/[\s:_-]+/g, '');
     if (!k || queuedIds.has(k) || manual.some(x => x._k === k)) return;
@@ -3650,7 +3676,7 @@ async function downloadFound() {
   // choice before anything downloads - only-new, all, or cancel.
   const ingestedIds = new Set();
   (matched || []).forEach(m => {
-    if (!m.ingested) return;
+    if (m.excluded || !m.ingested) return;
     [m.id, m.trackingId].filter(Boolean).forEach(v =>
       ingestedIds.add(normalizeName(v).replace(/ /g, '')));
   });
@@ -3779,7 +3805,7 @@ async function erResolveDelivery(d, adId) {
 async function fetchErApi() {
   if (!erApiKey) { toast('Paste the ER API key first.'); return false; }
   const ids = idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const want = ids.length ? ids : (matched || []).map(m => m.id || m.trackingId).filter(Boolean);
+  const want = ids.length ? ids : (matched || []).filter(m => !m.excluded).map(m => m.id || m.trackingId).filter(Boolean);
   if (!want.length) { toast('No requested IDs - run Match first.'); return false; }
   toast('Querying ER API for ' + want.length + ' ID(s)…');
   const entries = [];
@@ -3980,7 +4006,7 @@ async function sweepAndDownload() {
   // no trawling the whole delivery window. The broad scrape stays the
   // fallback for IDs the API misses and for sender-only (no IDs) sweeps.
   const want = idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const wanted = want.length ? want : (matched || []).map(m => m.id || m.trackingId).filter(Boolean);
+  const wanted = want.length ? want : (matched || []).filter(m => !m.excluded).map(m => m.id || m.trackingId).filter(Boolean);
   if (erApiKey && wanted.length && await fetchErApi()) {
     if (!runReconcile()) return false;
     if (!(lastResults || []).some(r => r.status === 'MISSING')) return downloadFound();
@@ -4014,7 +4040,7 @@ $('erSweep').addEventListener('click', sweepAndDownload);
 
 function watchCtxFor() {
   const codes = [...new Set(
-    (matched || []).map(m => m.id || m.trackingId)
+    (matched || []).filter(m => !m.excluded).map(m => m.id || m.trackingId)
       .concat(idsEl.value.split(/\r?\n/).map(s => s.trim()))
       .filter(Boolean))];
   return { why: client ? client.name : 'request',
@@ -4040,14 +4066,14 @@ async function recheckDelivery(quiet) {
     if (hit) arrived = 'mail: ' + (hit.subject || '(no subject)');
     else if (!w.clientId && !wc.length && inbox.n) arrived = 'new request-like mail';
   }
-  const pending = ((matched || []).length > 0) || !!idsEl.value.trim();
+  const pending = (selectedMatches().length > 0) || !!idsEl.value.trim();
   if (!arrived && pending) armDeliveryWatch(watchCtxFor());
   else if (arrived) disarmDeliveryWatch();
   return arrived;
 }
 
 function maybeArmWatch() {
-  const pending = ((matched || []).length > 0) || !!idsEl.value.trim();
+  const pending = (selectedMatches().length > 0) || !!idsEl.value.trim();
   if (pending) armDeliveryWatch(watchCtxFor());
 }
 
@@ -4124,8 +4150,8 @@ $('runAll').addEventListener('click', async () => {
 
   // 4 · Download: real sheet links go direct; else the ER search sweep;
   // open delivery pages are the fallback.
-  const nDl = (matched || []).filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
-  dbg('runAll: matched', { rows: matched.length, withLinks: nDl });
+  const nDl = selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
+  dbg('runAll: matched', { rows: selectedMatches().length, withLinks: nDl });
   if (nDl) { await downloadLinked(); return; }
   let swept = await sweepAndDownload();
   // Auto-widen once when the first window leaves IDs missing - a stale
@@ -4142,7 +4168,7 @@ $('runAll').addEventListener('click', async () => {
   if (await captureTabs()) {
     if (runReconcile()) { await downloadFound(); return; }
   }
-  toast('Matched ' + matched.length + ' row(s) but found no downloadable files - see the log.');
+  toast('Matched ' + selectedMatches().length + ' row(s) but found no downloadable files - see the log.');
 });
 
 // ---------- Restore state + context-menu captures ----------
@@ -4254,7 +4280,7 @@ function ingestPlan() {
   const clean = s => String(s || '').replace(/[^\w.\- ]+/g, '').replace(/\s+/g, ' ').trim();
   return {
     rows: (matched || [])
-      .filter(m => m.matchType !== 'ROW (out of range)' && (m.trackingId || m.id))
+      .filter(m => !m.excluded && m.matchType !== 'ROW (out of range)' && (m.trackingId || m.id))
       .map(m => ({
         id: clean(m.trackingId || m.id),
         title: clean(m.title),
