@@ -2627,7 +2627,7 @@ function presentMatches(quiet) {
   const nDl = sel.filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
   const dlBtn = $('download');
   if (nDl) {
-    dlBtn.textContent = 'Download ' + nDl + ' linked';
+    dlBtn.textContent = '↓ Download ' + nDl + ' linked';
     dlBtn.classList.remove('hidden');
     $('sec4').open = false;
   } else if (sel.length) {

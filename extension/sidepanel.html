@@ -4,55 +4,110 @@
 <meta charset="utf-8">
 <title>Ingest Streamlined</title>
 <style>
-  :root { color-scheme: dark; }
-  body { font: 12px/1.4 -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 10px; color: #d7dbe2; background: #14161a; }
-  h1 { font-size: 13px; margin: 0 8px 8px 0; display: inline; }
+  :root {
+    color-scheme: dark;
+    --bg: #15171c;
+    --surface: #1c1f26;
+    --surface-2: #23272f;
+    --surface-3: #2a2f39;
+    --border: #2c313c;
+    --border-hi: #3a4150;
+    --text: #d9dde4;
+    --text-dim: #9aa1ae;
+    --text-faint: #6e7482;
+    --accent: #4f8ff7;
+    --accent-hi: #6aa3ff;
+    --r: 6px;
+  }
+  * { box-sizing: border-box; }
+  body { font: 12px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 10px;
+         color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+  h1 { font-size: 12px; font-weight: 700; letter-spacing: .02em; margin: 0; }
   .topbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
-            position: sticky; top: 0; z-index: 8; margin: -10px -10px 8px; padding: 10px; background: #14161a; }
+            position: sticky; top: 0; z-index: 8; margin: -10px -10px 8px; padding: 9px 10px;
+            background: var(--bg); border-bottom: 1px solid var(--border); }
 
-  details { border: 1px solid #2c313b; border-left-width: 3px; border-radius: 6px; margin-bottom: 8px; padding: 7px 9px; background: #1b1e24; }
-  summary { font-size: 11px; font-weight: 700; letter-spacing: .03em; cursor: pointer; }
+  /* --- Sections: numbered accordion cards, chevron at right --- */
+  details { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px;
+            margin-bottom: 8px; padding: 7px 10px; background: var(--surface); }
+  summary { font-size: 11px; font-weight: 700; letter-spacing: .02em; cursor: pointer;
+            display: flex; align-items: center; gap: 6px; list-style: none; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  details > summary::after { content: '▸'; margin-left: auto; color: var(--text-faint);
+    font-size: 10px; transition: transform .12s ease; }
+  details[open] > summary::after { transform: rotate(90deg); }
   .s1 { border-left-color: #4f9cf9; } .s1 > summary { color: #7fb7fb; }
   .s2 { border-left-color: #3fbf7f; } .s2 > summary { color: #6ed3a2; }
   .s3 { border-left-color: #a06cd5; } .s3 > summary { color: #c09ae8; }
   .s4 { border-left-color: #e8a13d; } .s4 > summary { color: #f0bc6e; }
   .s5 { border-left-color: #e06c9a; } .s5 > summary { color: #ec9fbe; }
   .s6 { border-left-color: #5cc8c8; } .s6 > summary { color: #8fd8d8; }
-  .sub { font-size: 10px; color: #8b93a1; margin-top: 5px; line-height: 1.35; }
-  .subhd { font-size: 9px; font-weight: 700; color: #8b93a1; letter-spacing: .06em;
-           text-transform: uppercase; margin-top: 9px; }
+  .sub { font-size: 10px; color: var(--text-dim); margin-top: 4px; line-height: 1.35; }
+  .subhd { font-size: 9px; font-weight: 700; color: var(--text-faint); letter-spacing: .07em;
+           text-transform: uppercase; margin-top: 10px; }
   .subhd:first-of-type { margin-top: 4px; }
 
-  textarea { width: 100%; box-sizing: border-box; height: 72px; font: 11px/1.35 ui-monospace, monospace; padding: 5px; border: 1px solid #333a45; border-radius: 4px; resize: vertical; margin-top: 6px; background: #12151a; color: #cfd4dc; }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
-  button { font-size: 11px; padding: 4px 9px; border: 1px solid #3a414d; border-radius: 4px; background: #242933; color: #d7dbe2; cursor: pointer; }
-  button:hover { background: #2e3541; }
-  button.primary { background: #2f6fd0; border-color: #2f6fd0; color: #fff; }
-  button.primary:hover { background: #3a7dde; }
+  /* --- Controls: one height, quiet secondary, single accent --- */
+  .row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+  button { display: inline-flex; align-items: center; gap: 5px; height: 23px; padding: 0 9px;
+           font-family: inherit; font-size: 11px; font-weight: 500; line-height: 1;
+           border: 1px solid var(--border-hi); border-radius: 5px; white-space: nowrap;
+           background: var(--surface-2); color: var(--text); cursor: pointer; }
+  button:hover { background: var(--surface-3); border-color: #4a5263; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+  button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  button.ghost:hover { background: var(--surface-2); color: var(--text); }
   .s4 button.primary { background: #c07d1e; border-color: #c07d1e; }
   .s4 button.primary:hover { background: #d38e2b; }
-  select, input[type=text] { font-size: 11px; padding: 3px 4px; background: #12151a; color: #d7dbe2; border: 1px solid #333a45; border-radius: 4px; }
-  a { color: #6ea8f0; }
+  select, input[type=text], input[type=password], input[type=date] {
+    font-family: inherit; font-size: 11px; height: 22px; padding: 0 6px;
+    background: #12151b; color: var(--text); border: 1px solid #333a46; border-radius: 5px; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  input::placeholder, textarea::placeholder { color: var(--text-faint); }
+  textarea { width: 100%; box-sizing: border-box; height: 72px;
+             font: 11px/1.35 ui-monospace, monospace; padding: 6px 7px;
+             border: 1px solid #333a46; border-radius: var(--r); resize: vertical; margin-top: 6px;
+             background: #12151b; color: #cfd4dc; }
+  a { color: var(--accent-hi); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  label.col { font-size: 10px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 3px; }
 
-  .hint { color: #8b93a1; font-size: 10px; margin-top: 4px; }
+  /* --- Text blocks --- */
+  .hint { color: var(--text-dim); font-size: 10px; margin-top: 4px; }
   /* Status messages are the thing you read mid-run - bigger than hints,
      minimal words. */
   .msg { color: #cfd4dc; font-size: 12px; line-height: 1.45; margin-top: 5px; }
   .msg b { color: #fff; }
-  .info { font-size: 10px; color: #b8bfca; background: #22262e; border-radius: 4px; padding: 4px 7px; margin-top: 5px; display: none; }
-  /* Secondary control groups collapse behind a quiet "more" toggle. */
+  .info { font-size: 10px; color: #b8bfca; background: var(--surface-2); border-radius: var(--r);
+          padding: 4px 7px; margin-top: 5px; display: none; }
+  /* Secondary control groups collapse behind a quiet marker toggle. */
   details.mini { display: inline; }
-  details.mini > summary { text-transform: none; font-weight: 400; display: inline;
-    font-size: 10px; color: #8b93a1; letter-spacing: 0; }
-  details.mini > summary:hover { color: #cfd4dc; }
+  details.mini > summary { display: inline; text-transform: none; font-weight: 400;
+    font-size: 10px; color: var(--text-dim); letter-spacing: 0; }
+  details.mini > summary::after { content: none; }
+  details.mini > summary::before { content: '▸'; display: inline-block; margin-right: 3px;
+    color: var(--text-faint); transition: transform .12s ease; }
+  details.mini[open] > summary::before { transform: rotate(90deg); }
+  details.mini > summary:hover { color: var(--text); }
   /* The alert card: every sound leaves a note - kind, what it was for,
      and the trigger it perceived, so false positives get caught. */
-  #alertBox { width: 100%; font-size: 10px; color: #b8bfca; background: #22262e;
-    border-left: 3px solid #8b93a1; border-radius: 4px; padding: 4px 7px; margin-top: 6px; }
+  #alertBox { width: 100%; font-size: 10px; color: #b8bfca; background: var(--surface-2);
+    border-left: 3px solid var(--text-dim); border-radius: var(--r); padding: 4px 7px; margin-top: 6px; }
   #alertBox.warn, #alertBox.fail { border-left-color: #ec9a9a; }
   #alertBox.arrived { border-left-color: #9adfa8; }
-  #alertBox a { float: right; text-decoration: none; }
-  .chip { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; margin-right: 4px; }
+  #alertBox a { float: right; }
+  /* Next-step guidance: accent-edged strip under the topbar. */
+  #nextStep { width: 100%; margin-top: 6px; padding: 4px 8px; font-size: 10px; cursor: default;
+    color: var(--text-dim); background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 5px; }
+  #nextStep:empty { display: none; }
+  #nextStep a { color: var(--accent-hi); cursor: pointer; }
+  #nextStep i { color: var(--text-faint); }
+
+  /* --- Chips: pills --- */
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 10px;
+          font-weight: 500; letter-spacing: .02em; margin-right: 4px; }
   .FOUND { background: #234a2e; color: #9adfa8; }
   .POSSIBLE { background: #4d4423; color: #ecd98a; }
   .AMBIGUOUS { background: #4d3523; color: #ecb98a; }
@@ -70,42 +125,50 @@
   .espn { background: #2a3550; color: #9db5ec; }
   .GUESS { background: #3a2d4d; color: #cfaef0; }
 
+  /* --- Tables: horizontal rules only, sticky quiet header --- */
   table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  td, th { border: none; border-bottom: 1px solid var(--border); padding: 3px 6px;
+           text-align: left; font-size: 11px; vertical-align: top; }
+  th { color: var(--text-faint); font-size: 9px; font-weight: 600; text-transform: uppercase;
+       letter-spacing: .05em; border-bottom-color: var(--border-hi);
+       position: sticky; top: 0; background: var(--surface); }
   tr.excl td { opacity: .35; }
   tr.excl td.xcell, tr.excl .xbtn { opacity: 1; }
-  .xbtn { cursor: pointer; color: #8b93a1; font-size: 11px; padding: 0 2px; }
+  .xbtn { cursor: pointer; color: var(--text-dim); font-size: 11px; padding: 0 2px; }
   .xbtn:hover { color: #e8a13d; }
-  td, th { border: 1px solid #2c313b; padding: 3px 5px; text-align: left; font-size: 11px; vertical-align: top; }
-  th { background: #22262e; position: sticky; top: 0; }
   .scrollbox { max-height: 32vh; overflow: auto; }
+  .scrollbox::-webkit-scrollbar { width: 8px; }
+  .scrollbox::-webkit-scrollbar-thumb { background: #333a46; border-radius: 4px; }
   .mono { font-family: ui-monospace, monospace; }
   .trunc { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 
-  #toast { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #3a414d; color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 12.5px; line-height: 1.4; display: none; z-index: 9; }
+  #toast { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #262b36; color: #fff;
+           border: 1px solid var(--border-hi); padding: 7px 11px; border-radius: 7px; font-size: 12px;
+           line-height: 1.4; display: none; z-index: 9; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
   .hidden { display: none !important; }
-  label.col { font-size: 10px; color: #8b93a1; }
-  #manualTools summary { font-size: 10px; font-weight: 400; text-transform: none; color: #8b93a1; letter-spacing: 0; }
-  .stamp { font-size: 9px; font-weight: 400; color: #6b7280; margin-left: 5px; letter-spacing: 0; }
-  .ib { display: inline-block; min-width: 14px; padding: 0 3px; border-radius: 8px; background: #2c313b;
-        color: #8b93a1; font-size: 10px; text-align: center; cursor: pointer; font-weight: 400; margin-left: 4px; }
-  .ib:hover { background: #3a414d; color: #cfd4dc; }
-  .bubble { font-size: 10px; color: #aab1bd; background: #171a1f; border-left: 2px solid #3a414d;
-            padding: 5px 8px; margin: 5px 0 2px; line-height: 1.5; }
+  #manualTools summary { font-size: 10px; font-weight: 400; text-transform: none; color: var(--text-dim); letter-spacing: 0; }
+  .stamp { font-size: 9px; font-weight: 400; color: var(--text-faint); letter-spacing: 0; }
+  .ib { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
+        border-radius: 50%; background: var(--surface-3); flex: none;
+        color: var(--text-dim); font-size: 9px; text-align: center; cursor: pointer; font-weight: 400; }
+  .ib:hover { background: var(--border-hi); color: var(--text); }
+  .bubble { font-size: 10px; color: #a7aeba; background: #16191f; border-left: 2px solid var(--border-hi);
+            padding: 5px 8px; margin: 5px 0 2px; line-height: 1.5; border-radius: 0 5px 5px 0; }
   .bubble b { color: #cfd4dc; }
-  .sdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
-          background: #4a515c; margin-left: 6px; vertical-align: 1px; }
+  .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+          background: #4a515c; margin-left: auto; flex: none; }
   .sdot.ok { background: #3fbf7f; }
   .sdot.warn { background: #e8a13d; }
   .sdot.fail { background: #e05c5c; }
 
   button:focus-visible, summary:focus-visible, a:focus-visible,
   select:focus-visible, input:focus-visible, textarea:focus-visible {
-    outline: 2px solid #4f9cf9; outline-offset: 1px; }
+    outline: 2px solid var(--accent); outline-offset: 1px; }
   #settingsGear { margin-left: auto; }
-  #settingsPanel { position: fixed; top: 44px; right: 8px; z-index: 50; width: 210px;
-    background: #22262e; border: 1px solid #3a414d; border-radius: 6px; padding: 10px 12px;
-    box-shadow: 0 6px 18px rgba(0,0,0,.45); font-size: 11px; }
-  #settingsPanel .opt { display: block; margin: 5px 0; color: #cfd4dc; font-weight: 400; cursor: pointer; }
+  #settingsPanel { position: fixed; top: 44px; right: 8px; z-index: 50; width: 214px;
+    background: var(--surface-2); border: 1px solid var(--border-hi); border-radius: 8px; padding: 10px 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 11px; }
+  #settingsPanel .opt { display: block; margin: 6px 0; color: #cfd4dc; font-weight: 400; cursor: pointer; }
   #settingsPanel .opt input { margin-right: 6px; vertical-align: -1px; }
   [data-opt].opt-off { display: none !important; }
   body.opt-off-hints .ib, body.opt-off-hints .bubble { display: none !important; }
@@ -115,13 +178,13 @@
 
 <div class="topbar">
   <h1>Ingest Streamlined</h1>
-  <button id="runAll" class="primary" title="Steps 1-4 end to end: read the request, load its tracker, match rows, download the media">Run all</button>
+  <button id="runAll" class="primary" title="Steps 1-4 end to end: read the request, load its tracker, match rows, download the media">▶ Run all</button>
   <span class="ib" data-bubble="bRun">?</span>
   <label class="col">Client <select id="clientSel"></select></label>
   <a href="#" id="msStatus" class="hidden" title="" style="color:#ec9a9a;font-weight:700">inbox offline - click to sign in</a>
-  <button id="clearAll" title="Wipe the email, tracker, match, downloads and drafts - sign-ins and settings stay">Clear all</button>
-  <button id="settingsGear" title="Choose which tools show" aria-expanded="false">&#9881; Settings</button>
-  <div class="hint" id="nextStep" style="width:100%"></div>
+  <button id="clearAll" class="ghost" title="Wipe the email, tracker, match, downloads and drafts - sign-ins and settings stay">✕ Clear</button>
+  <button id="settingsGear" title="Choose which tools show" aria-expanded="false">⚙</button>
+  <div id="nextStep"></div>
   <div id="alertBox" class="hidden"></div>
 </div>
 <div id="settingsPanel" class="hidden" role="dialog" aria-label="Panel settings">
@@ -152,14 +215,14 @@
   <div class="bubble hidden" id="b1">The email saying which creatives to ingest. <b>Check inbox</b> reads unread mail via Graph sign-in (no Outlook tab needed; the icon badge counts fresh requests). <b>Grab</b> reads an open Outlook tab; paste/.eml work too. A new email resets the run.</div>
   <textarea id="email" placeholder="Paste the request email, or grab it from the open Outlook tab."></textarea>
   <div class="row">
-    <button id="grabEmail" title="Read the request email from the focused Outlook tab">Grab from Outlook</button>
-    <button id="checkInbox" data-opt="graph">Check inbox</button>
+    <button id="grabEmail" title="Read the request email from the focused Outlook tab">✉ From Outlook</button>
+    <button id="checkInbox" data-opt="graph">✉ Check inbox</button>
     <details class="mini">
       <summary>more</summary>
       <div class="row">
-        <button id="pasteEmail" data-opt="emailExtra">Paste email</button>
-        <button id="loadEmail" data-opt="emailExtra">Load .eml</button>
-        <button id="clearEmail">Clear</button>
+        <button id="pasteEmail" data-opt="emailExtra">⧉ Paste</button>
+        <button id="loadEmail" data-opt="emailExtra">↑ .eml</button>
+        <button id="clearEmail">✕ Clear</button>
         <a href="#" id="testAlert" data-opt="graph" style="font-size:10px;align-self:center" title="Fire a test notification + sound (cycles request/delivery/arrived)">test alert</a>
       </div>
     </details>
@@ -191,12 +254,12 @@
   <div class="sub">The client tracker - auto-loads from the email's link, or grab a tab.</div>
   <div class="bubble hidden" id="b2">The client tracker - loaded automatically from the email's sheet link, a focused sheet tab, or any open tracker tab (an <b>Airtable tab is read via the app's own copy</b>, which covers every row, not just visible ones). <b>Paste tracker</b> is the manual fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Column mapping auto-detects; adjust under the mapping row if the sheet is unusual.</div>
   <div class="row">
-    <button id="grabSheet" class="primary" title="Read the tracker from the focused sheet tab - Google Sheets, Airtable or SharePoint">Grab sheet tab</button>
+    <button id="grabSheet" class="primary" title="Read the tracker from the focused sheet tab - Google Sheets, Airtable or SharePoint">↓ Grab tracker</button>
     <details class="mini">
       <summary>other sources</summary>
       <div class="row">
-        <button id="loadSheet">Load file</button>
-        <button id="pasteSheet">Paste tracker</button>
+        <button id="loadSheet">↑ Load file</button>
+        <button id="pasteSheet">⧉ Paste tracker</button>
       </div>
     </details>
     <details id="colDetails" class="mini" data-opt="colMap">
@@ -227,7 +290,7 @@
   <div class="sub">Match email codes to tracker rows.</div>
   <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. <b>&#10005;</b> in the first column excludes a row - downloads, manifest, portal and replies all skip it; click again to restore. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
   <div class="row">
-    <button id="match" class="primary" title="Match the email's tracking codes to rows in the loaded tracker">Match</button>
+    <button id="match" class="primary" title="Match the email's tracking codes to rows in the loaded tracker">⇄ Match</button>
     <input type="text" id="jobLabel" placeholder="batch label" size="14" title="Names the download folder: <date>-<client>-<label>">
     <button id="download" class="hidden"></button>
     <button id="showSheet" class="hidden" title="Scroll the tracker tab to the matched rows">Show on sheet</button>
@@ -243,16 +306,16 @@
     <b>ER search</b> queries Extreme Reach directly: every Inscape TV delivery in the day window, all pages. Optional sender filter reads each delivery's "Trafficked By" (e.g. <i>tatari</i>); with matched IDs loaded it only sender-checks those rows. No page needed open - just be logged into ER.
   </div>
   <div class="row">
-    <button id="grabAndDl" class="primary" title="Read every open delivery page (ER list, Yangaroo, link pages) and queue the matched files">Download from open pages</button>
+    <button id="grabAndDl" class="primary" title="Read every open delivery page (ER list, Yangaroo, link pages) and queue the matched files">↓ From open pages</button>
   </div>
   <div class="row" data-opt="erSweep">
     <input type="text" id="erSender" placeholder="sender (e.g. tatari)" size="14">
     <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
-    <button id="erSweep">Download from ER search</button>
+    <button id="erSweep">↓ From ER search</button>
   </div>
   <div class="msg" id="capInfo"></div>
   <div class="row">
-    <button id="recheck" title="Check the inbox/ER for the delivery now - and arm a watch that alerts when it lands">Re-check for delivery</button>
+    <button id="recheck" title="Check the inbox/ER for the delivery now - and arm a watch that alerts when it lands">⟳ Re-check</button>
     <span class="hint" id="watchInfo"></span>
   </div>
   <div class="hint" id="dateFilterHint"></div>
@@ -268,7 +331,7 @@
     <textarea id="files" class="hidden"></textarea>
     <div class="row">
       <input type="password" id="erApiKey" placeholder="ER API key" size="22" autocomplete="off">
-      <button id="erApi">API: fetch &amp; download</button>
+      <button id="erApi">↓ Fetch &amp; download</button>
     </div>
   </details>
 </details>
@@ -281,20 +344,20 @@
   <div class="row">
     <button id="ingestCheck">Check portal</button>
     <button id="ingestPreview">Preview fills</button>
-    <button id="ingestPush" class="primary hidden">Push fills to queue</button>
-    <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - no drag-and-drop">Feed files</button>
+    <button id="ingestPush" class="primary hidden">↑ Push fills</button>
+    <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - no drag-and-drop">⇧ Feed files</button>
   </div>
   <div class="msg" id="ingestInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
   <div class="subhd">Verify &amp; report to Jira</div>
   <div class="row">
-    <button id="postJira" class="primary" title="Check this job's records in the ingest API, then draft the Jira ticket">Verify &amp; draft Jira</button>
+    <button id="postJira" class="primary" title="Check this job's records in the ingest API, then draft the Jira ticket">✓ Verify &amp; Jira</button>
     <details class="mini">
       <summary>more</summary>
       <div class="row">
         <button id="verifyIngest" title="Check this job's records in the ingest API - without drafting the ticket">Check records</button>
         <button id="jiraTicket" title="Draft the Jira ticket only - skips the records verification">Draft ticket</button>
-        <button id="shotPortal" title="Capture the portal queue tab - attaches to the ticket as evidence">Screenshot</button>
+        <button id="shotPortal" title="Capture the portal queue tab - attaches to the ticket as evidence">▣ Screenshot</button>
         <button id="saveRecords" class="hidden">Save records JSON</button>
       </div>
     </details>
@@ -338,10 +401,10 @@
   </details>
   <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
-    <div class="row"><button id="jiraApprove" class="primary hidden">Post to Jira</button>
-      <button id="copyTicket">Copy ticket</button>
+    <div class="row"><button id="jiraApprove" class="primary hidden">✓ Post to Jira</button>
+      <button id="copyTicket">⧉ Copy</button>
       <button id="rebuildTicket" title="Rebuild from the current email + match">↻ Rebuild</button>
-      <button id="clearTicket">Clear</button></div>
+      <button id="clearTicket">✕ Clear</button></div>
     <textarea id="jiraPreview" class="scrollbox mono" style="height:22vh;font-size:11px;margin-top:4px"></textarea>
   </div>
 </details>
@@ -361,11 +424,11 @@
         <option value="missing">Not yet available</option>
         <option value="specfail">Spec failure</option>
       </select>
-      <button id="copyReply" class="primary">Copy reply</button>
-      <button id="draftReplyOut" title="Create a reply draft on the original thread in Outlook">Draft in Outlook</button>
+      <button id="copyReply" class="primary">⧉ Copy reply</button>
+      <button id="draftReplyOut" title="Create a reply draft on the original thread in Outlook">✉ Draft in Outlook</button>
       <button id="redraftReply" title="Rebuild from the current email + match">↻ Redraft</button>
-      <button id="clearReply">Clear</button>
-      <button id="copyExcReply" data-opt="excReply" title="Copy the exception reply variant (escalation wording)">Exception reply</button>
+      <button id="clearReply">✕ Clear</button>
+      <button id="copyExcReply" data-opt="excReply" title="Copy the exception reply variant (escalation wording)">⧉ Exception reply</button>
     </div>
     <div class="hint" id="replyCheck"></div>
     <textarea id="replyPreview" class="scrollbox mono" style="height:14vh;font-size:11px;margin-top:4px"></textarea>
@@ -376,13 +439,13 @@
   <summary style="font-size:10px;font-weight:400;color:#8b93a1;text-transform:none">Log</summary>
   <div class="scrollbox" id="dbgLog" style="max-height:20vh"></div>
   <div class="row">
-    <button id="copyLog">Copy log</button>
-    <button id="clearLog">Clear log</button>
+    <button id="copyLog">⧉ Copy log</button>
+    <button id="clearLog">✕ Clear log</button>
   </div>
 </details>
 
 <div id="confirmModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:99">
-  <div style="background:#1b1e24;border:1px solid #3a414d;border-radius:6px;padding:14px;max-width:300px">
+  <div style="background:#1c1f26;border:1px solid #3a4150;border-radius:8px;padding:14px;max-width:300px;box-shadow:0 8px 24px rgba(0,0,0,.5)">
     <div id="confirmMsg" style="font-size:12px;line-height:1.5;margin-bottom:10px"></div>
     <div class="row">
       <button id="confirmNew" class="primary"></button>
