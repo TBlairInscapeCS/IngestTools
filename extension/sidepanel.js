@@ -4602,9 +4602,20 @@ const NEXT_STEPS = [
   ['sdIngest', 'sec5', 'fill the portal queue, verify, draft Jira'],
   ['sdReply', 'sec6', 'draft the reply'],
 ];
+// Progressive disclosure: a section opens once the step above it has
+// run (ok or warn - fail keeps focus where the problem is). Opens only;
+// never closes anything the user opened by hand.
+const SEC_CHAIN = [
+  ['sec2', 'sdEmail'], ['sec3', 'sdSheet'], ['sec4', 'sdMatch'],
+  ['sec5', 'sdDl'], ['sec6', 'sdIngest'],
+];
 setInterval(() => {
   const el = $('nextStep');
   if (!el) return;
+  SEC_CHAIN.forEach(([sec, sd]) => {
+    const s = $(sd), d = $(sec);
+    if (s && d && /(^| )(ok|warn)( |$)/.test(s.className)) d.open = true;
+  });
   const step = NEXT_STEPS.find(([sd]) => !/(^| )ok( |$)/.test(($(sd) || {}).className || ''));
   const tip = step && $(step[0]) && $(step[0]).title;
   el.innerHTML = !step ? '&#10003; all steps done - ready for the next request'

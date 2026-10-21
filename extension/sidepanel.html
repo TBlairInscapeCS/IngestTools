@@ -161,11 +161,14 @@
   .bubble { font-size: 10px; color: #a7aeba; background: #16191f; border-left: 2px solid var(--border-hi);
             padding: 5px 8px; margin: 5px 0 2px; line-height: 1.5; border-radius: 0 5px 5px 0; }
   .bubble b { color: #cfd4dc; }
-  .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-          background: #4a515c; margin-left: auto; flex: none; }
-  .sdot.ok { background: #3fbf7f; }
-  .sdot.warn { background: #e8a13d; }
-  .sdot.fail { background: #e05c5c; }
+  /* Stage dots: leftmost in each summary - hollow ring when idle,
+     filled + glowing when the step has run. */
+  .sdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+          order: -1; margin: 0 2px 0 0; flex: none;
+          background: transparent; border: 2px solid #4a515c; }
+  .sdot.ok { background: #3fbf7f; border-color: #3fbf7f; box-shadow: 0 0 5px rgba(63,191,127,.6); }
+  .sdot.warn { background: #e8a13d; border-color: #e8a13d; box-shadow: 0 0 5px rgba(232,161,61,.6); }
+  .sdot.fail { background: #e05c5c; border-color: #e05c5c; box-shadow: 0 0 5px rgba(224,92,92,.6); }
 
   button:focus-visible, summary:focus-visible, a:focus-visible,
   select:focus-visible, input:focus-visible, textarea:focus-visible {
@@ -255,7 +258,7 @@
   <div class="info msg" id="emailInfo"></div>
 </details>
 
-<details class="s2" open id="sec2">
+<details class="s2" id="sec2">
   <summary>2 · Load the tracker<span class="ib" data-bubble="b2">?</span><span class="stamp" id="tsSheet"></span><span class="sdot" id="sdSheet"></span></summary>
   <div class="sub">The client tracker - auto-loads from the email's link, or grab a tab.</div>
   <div class="bubble hidden" id="b2">The client tracker - loaded automatically from the email's sheet link, a focused sheet tab, or any open tracker tab (an <b>Airtable tab is read via the app's own copy</b>, which covers every row, not just visible ones). <b>Paste tracker</b> is the manual fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Column mapping auto-detects; adjust under the mapping row if the sheet is unusual.</div>
@@ -291,7 +294,7 @@
   <div class="info msg" id="sheetInfo"></div>
 </details>
 
-<details class="s3" open id="sec3">
+<details class="s3" id="sec3">
   <summary>3 · Match codes to rows<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
   <div class="sub">Match email codes to tracker rows.</div>
   <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. <b>&#10005;</b> in the first column excludes a row - downloads, manifest, portal and replies all skip it; click again to restore. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
