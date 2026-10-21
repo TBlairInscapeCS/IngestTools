@@ -375,50 +375,50 @@
   <div class="scrollbox" id="ingestPreviewBox"></div>
   <div class="subhd">Verify &amp; report to Jira</div>
   <div class="row">
-    <button id="postJira" class="primary" title="Check this job's records in the ingest API, then draft the Jira ticket">✓ Verify &amp; Jira</button>
+    <button id="postJira" class="primary" title="Check this job's records in the ingest API, then draft the ticket below - nothing posts until you approve it">✓ Verify &amp; draft</button>
     <details class="mini">
       <summary>more</summary>
       <div class="row">
         <button id="verifyIngest" title="Check this job's records in the ingest API - without drafting the ticket">Check records</button>
-        <button id="jiraTicket" title="Draft the Jira ticket only - skips the records verification">Draft ticket</button>
-        <button id="shotPortal" title="Capture the portal queue tab - attaches to the ticket as evidence">▣ Screenshot</button>
-        <button id="saveRecords" class="hidden">Save records JSON</button>
+        <button id="shotPortal" title="Capture the portal queue tab - saves into the job folder as evidence">▣ Make screenshot</button>
+        <button id="saveRecords" class="hidden" title="Download the records query results as JSON - attaches to the ticket as evidence">⧉ Make JSON</button>
+        <details class="mini" id="recLookup">
+          <summary>record lookup</summary>
+          <div class="row">
+            <input type="text" id="recRealm" list="realmList" placeholder="customer (horizonmedia…)" size="16" title="Portal customer/realm - filled from the detected client when known">
+            <datalist id="realmList"></datalist>
+            <button id="recGo">Look up</button>
+          </div>
+          <textarea id="recIds" placeholder="Reporting IDs or file names - one per line" style="height:3.6em"></textarea>
+          <div class="msg" id="recResults"></div>
+        </details>
+        <details class="mini" id="impLookup">
+          <summary>impression counts</summary>
+          <div class="row">
+            <input type="text" id="impRealm" list="realmList" placeholder="customer" size="12" title="Portal customer/realm - needed to resolve reporting IDs to commercial_cids">
+            <button id="impGo">Count</button>
+          </div>
+          <div class="row">
+            <label class="col">from <input type="date" id="impStart" style="width:8.5em" title="Optional - empty means each record's ingest date (90d back for bare cids)"></label>
+            <label class="col">to <input type="date" id="impEnd" style="width:8.5em" title="Optional - empty means tomorrow"></label>
+          </div>
+          <textarea id="impIds" placeholder="Reporting IDs (or commercial_cids) - one per line" style="height:3.6em"></textarea>
+          <div class="msg" id="impResults"></div>
+          <div class="hint">Databricks credentials live in ⚙ Settings - without them Count produces SQL for a manual paste.</div>
+        </details>
       </div>
-    </details>
-    <details class="mini" id="recLookup">
-    <summary>record lookup</summary>
-    <div class="row">
-      <input type="text" id="recRealm" list="realmList" placeholder="customer (horizonmedia…)" size="16" title="Portal customer/realm - filled from the detected client when known">
-      <datalist id="realmList"></datalist>
-      <button id="recGo">Look up</button>
-    </div>
-    <textarea id="recIds" placeholder="Reporting IDs or file names - one per line" style="height:3.6em"></textarea>
-    <div class="msg" id="recResults"></div>
-  </details>
-    <details class="mini" id="impLookup">
-    <summary>impression counts</summary>
-    <div class="row">
-      <input type="text" id="impRealm" list="realmList" placeholder="customer" size="12" title="Portal customer/realm - needed to resolve reporting IDs to commercial_cids">
-      <button id="impGo">Count</button>
-    </div>
-    <div class="row">
-      <label class="col">from <input type="date" id="impStart" style="width:8.5em" title="Optional - empty means each record's ingest date (90d back for bare cids)"></label>
-      <label class="col">to <input type="date" id="impEnd" style="width:8.5em" title="Optional - empty means tomorrow"></label>
-    </div>
-    <textarea id="impIds" placeholder="Reporting IDs (or commercial_cids) - one per line" style="height:3.6em"></textarea>
-    <div class="msg" id="impResults"></div>
-    <div class="hint">Databricks credentials live in ⚙ Settings - without them Count produces SQL for a manual paste.</div>
     </details>
   </div>
   <div class="msg" id="verifyInfo"></div>
   <div class="hint" id="portalLive"></div>
   <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
+    <textarea id="jiraPreview" class="scrollbox mono" style="height:22vh;font-size:11px;margin-top:4px"></textarea>
+    <div class="hint" style="margin-top:5px">Review the draft - it only posts on your click.</div>
     <div class="row"><button id="jiraApprove" class="primary hidden">✓ Post to Jira</button>
       <button id="copyTicket">⧉ Copy</button>
       <button id="rebuildTicket" title="Rebuild from the current email + match">↻ Rebuild</button>
       <button id="clearTicket">✕ Clear</button></div>
-    <textarea id="jiraPreview" class="scrollbox mono" style="height:22vh;font-size:11px;margin-top:4px"></textarea>
   </div>
 </details>
 

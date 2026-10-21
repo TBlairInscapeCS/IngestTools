@@ -5058,10 +5058,6 @@ function buildJiraTicket() {
   return lines.join('\n');
 }
 
-$('jiraTicket').addEventListener('click', () => {
-  $('jiraPreview').value = buildJiraTicket();
-  $('jiraBox').classList.remove('hidden');
-});
 $('rebuildTicket').addEventListener('click', () => {
   $('jiraPreview').value = buildJiraTicket();
 });
