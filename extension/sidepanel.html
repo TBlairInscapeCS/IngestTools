@@ -61,8 +61,11 @@
   .s4 button.primary { background: #c07d1e; border-color: #c07d1e; }
   .s4 button.primary:hover { background: #d38e2b; }
   select, input[type=text], input[type=password], input[type=date] {
-    font-family: inherit; font-size: 11px; height: 22px; padding: 0 6px;
+    font-family: inherit; font-size: 11px; height: 23px; padding: 0 6px;
     background: #12151b; color: var(--text); border: 1px solid #333a46; border-radius: 5px; }
+  /* A control cluster that travels as one unit inside a wrapping row
+     (e.g. the ER sweep's sender/days inputs + its button). */
+  .grp { display: inline-flex; gap: 5px; align-items: center; }
   input[type=checkbox] { accent-color: var(--accent); }
   input::placeholder, textarea::placeholder { color: var(--text-faint); }
   textarea { width: 100%; box-sizing: border-box; height: 72px;
@@ -152,7 +155,7 @@
            border: 1px solid var(--border-hi); padding: 7px 11px; border-radius: 7px; font-size: 12px;
            line-height: 1.4; display: none; z-index: 9; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
   .hidden { display: none !important; }
-  #manualTools summary { font-size: 10px; font-weight: 400; text-transform: none; color: var(--text-dim); letter-spacing: 0; }
+
   .stamp { font-size: 9px; font-weight: 400; color: var(--text-faint); letter-spacing: 0; }
   .ib { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
         border-radius: 50%; background: var(--surface-3); flex: none;
@@ -327,22 +330,20 @@
   </div>
   <div class="row">
     <button id="grabAndDl" class="primary" title="Read every open delivery page (ER list, Yangaroo, link pages) and queue the matched files">↓ From open pages</button>
-  </div>
-  <div class="row" data-opt="erSweep">
-    <input type="text" id="erSender" placeholder="sender (e.g. tatari)" size="14">
-    <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
-    <button id="erSweep">↓ From ER search</button>
-  </div>
-  <div class="msg" id="capInfo"></div>
-  <div class="row">
+    <span class="grp" data-opt="erSweep">
+      <input type="text" id="erSender" placeholder="sender (e.g. tatari)" size="12">
+      <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
+      <button id="erSweep">↓ From ER search</button>
+    </span>
     <button id="recheck" title="Check the inbox/ER for the delivery now - and arm a watch that alerts when it lands">⟳ Re-check</button>
     <span class="hint" id="watchInfo"></span>
   </div>
+  <div class="msg" id="capInfo"></div>
   <div class="hint" id="dateFilterHint"></div>
   <div id="counts"></div>
   <div class="hint" id="missingNote" style="color:#ec9a9a"></div>
   <div class="scrollbox" id="results"></div>
-  <details id="manualTools" data-opt="manual">
+  <details id="manualTools" class="mini" data-opt="manual">
     <summary>ER API (keyed fetch)</summary>
     <!-- ids/files look like leftovers but are the run's state carriers:
          the email's codes, the match output and downloaded names all
