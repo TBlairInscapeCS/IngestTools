@@ -20,6 +20,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -52,6 +53,11 @@ FI_AUTH = "Basic Y3Jvb21pYW46c1pJUiNVWmVkNVVNZzQ4Sg=="
 FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
               "itn": "itnnetworks", "chief": "chiefmedia"}
 PORTAL_CHECK_SECONDS = 60   # min gap between record polls per job
+# Python 3.13+ sets VERIFY_X509_STRICT by default, and the corporate TLS
+# inspector's chain trips it ("Basic Constraints of CA cert not marked
+# critical"). Strict off, verification still on.
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
 ARCHIVE_REST_SECONDS = 30   # settle after all-terminal (portal's own
                             # New-Ingest un-gray lag is ~20s per the user)
 ARCHIVE_ASK_AGAIN = 30 * 60  # re-prompt a declined archive after this
@@ -570,7 +576,7 @@ def portal_statuses(realm: str, wanted: list[str]) -> dict:
     req = urllib.request.Request(
         FI_BASE + "/v1/" + realm + "/content?offset=1&limit=500",
         headers={"Authorization": FI_AUTH})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
         data = json.loads(r.read())
     idx = {}
     for rec in data.get("content", []):
@@ -623,8 +629,13 @@ def portal_gate(manifest_path: Path, job_dir: Path, manifest: dict,
         try:
             statuses = portal_statuses(realm, wanted)
             state["portal_status"] = statuses
+            if state.pop("portal_check_err", None):
+                log(f"portal check recovered ({realm})")
         except Exception as e:
-            log(f"portal check failed ({realm}): {e}")
+            # Log once per distinct failure, not once a minute.
+            if str(e) != state.get("portal_check_err"):
+                log(f"portal check failed ({realm}): {e}")
+            state["portal_check_err"] = str(e)
     failed = [k for k, v in statuses.items()
               if v and ((v.get("status") or "").startswith("INGEST_FAILED")
                         or (v.get("result") or "") == "fail")]

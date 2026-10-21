@@ -385,6 +385,16 @@ function hashStr(s) {
 const pick = (pool, seed) => pool[seed % pool.length];
 
 const CONF_INTRO = {
+  single: [
+    "I've ingested the creative - it'll appear in the commercial reports under the following ID:",
+    "The creative is ingested and will report under the following ID:",
+    "Confirming the creative is ingested - it'll appear in the commercial reports under this ID:",
+  ],
+  singleTicker: [
+    "I've ingested the creative and its ticker version to appear in the commercial reports under the following IDs:",
+    "The creative is ingested, ticker version included - they'll report under the following IDs:",
+    "Confirming the creative plus its ticker version are ingested, reporting under these IDs:",
+  ],
   none: [
     "I've ingested those creatives to appear in the commercial reports under the following IDs:",
     "Those creatives are ingested and will report under the following IDs:",
@@ -422,10 +432,21 @@ const CONF_MISSING = {
     'I skipped these - they were not in the linked folder:',
   ],
 };
+function capFirst(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function countPhrase(i, r) {
+  if (i === r) return r === 2 ? 'both of the requested files' : 'all ' + r + ' of the requested files';
+  return i + ' of the ' + r + ' requested files';
+}
 const CONF_COUNT = [
-  (i, r) => "I've ingested " + i + ' of the ' + r + ' requested files',
-  (i, r) => i + ' of the ' + r + ' requested files are ingested',
-  (i, r) => 'Ingested ' + i + ' of the ' + r + ' files you sent over',
+  (i, r) => "I've ingested " + countPhrase(i, r),
+  (i, r) => capFirst(countPhrase(i, r)) + (i === 1 ? ' is ingested' : ' are ingested'),
+  (i, r) => 'Ingested ' + countPhrase(i, r),
+];
+// A lone file doesn't need counting at all - "1 of the 1" reads like a robot.
+const CONF_COUNT_ONE = [
+  "I've ingested the file you sent over",
+  "The file's ingested",
+  "Your file's ingested",
 ];
 
 // Confirmation built from matched sheet rows, in the format actually used:
@@ -434,18 +455,20 @@ const CONF_COUNT = [
 // read like copy-paste.
 function buildMatchConfirmation(matched, sender) {
   const items = [];
-  let nEspn = 0;
+  let nBase = 0, nEspn = 0;
   matched
     .filter(m => m.matchType !== 'ROW (out of range)')
     .forEach(m => {
       const base = m.trackingId || m.title || m.id;
       if (!base) return;
-      items.push(base);
+      items.push(base); nBase++;
       if (m.espn || m.emailEspn) { items.push(base + '_ticker'); nEspn++; }
     });
   if (!items.length) return null;
   const seed = hashStr(items.join('|'));
-  const intro = pick(CONF_INTRO[nEspn === 0 ? 'none' : nEspn === 1 ? 'one' : 'many'], seed);
+  const intro = pick(CONF_INTRO[
+    nBase === 1 ? (nEspn ? 'singleTicker' : 'single')
+                : (nEspn === 0 ? 'none' : nEspn === 1 ? 'one' : 'many')], seed);
   const lines = [greet(sender), '', intro];
   items.forEach(t => lines.push(t));
   lines.push('', pick(CONF_SHEET, seed >> 3), '', 'Thanks,');
@@ -466,10 +489,11 @@ function buildReconConfirmation(results, espnIds, sender) {
     .filter(id => espnIds && espnIds.has(normalizeName(id).replace(/ /g, '')))
     .map(id => id + '_ticker');
   const seed = hashStr(found.join('|') + '::' + missing.join('|'));
-  const lines = [greet(sender), '',
-    pick(CONF_COUNT, seed)(found.length, requested) +
-    (tickers.length ? ', plus ticker versions,' : '') +
-    ' to appear in the commercial reports:'];
+  const countLine = (found.length === 1 && requested === 1
+    ? pick(CONF_COUNT_ONE, seed)
+    : pick(CONF_COUNT, seed)(found.length, requested)) +
+    (tickers.length ? (tickers.length === 1 ? ', plus its ticker version,' : ', plus ticker versions,') : '');
+  const lines = [greet(sender), '', countLine + ' to appear in the commercial reports:'];
   found.concat(tickers).forEach(id => lines.push(id));
   if (missing.length) {
     lines.push('', pick(CONF_MISSING[missing.length === 1 ? 'one' : 'many'], seed >> 4));

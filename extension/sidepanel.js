@@ -1838,10 +1838,65 @@ async function airtableHeadersFromTab() {
   } catch (e) { return []; }
 }
 
-// An open Airtable tracker: drive the grid's own select-all + copy, then
+// An open Airtable tab's URL carries base/table/view ids - with a PAT we
+// can pull exactly that view via the API instead of fighting the grid's
+// clipboard. No token (or API failure) falls through to the copy path.
+function airtableUrlIds(url) {
+  const m = String(url || '').match(/airtable\.com\/(app\w+)\/(tbl\w+)\/(viw\w+)/);
+  return m && { base: m[1], table: m[2], view: m[3] };
+}
+async function fetchAirtableView(tab) {
+  const ids = airtableUrlIds(tab.url);
+  if (!ids || !hasAtToken()) return false;
+  try {
+    const schema = await airtableApi('meta/bases/' + ids.base + '/tables');
+    const t = (schema.tables || []).find(x => x.id === ids.table);
+    if (!t) throw new Error('table ' + ids.table + ' not in base schema');
+    const headers = [], hdr = {};
+    (t.fields || []).forEach(f => { hdr[f.name] = headers.length; headers.push(f.name); });
+    const urlCols = new Set((t.fields || []).filter(f => f.type === 'url').map(f => hdr[f.name]));
+    const rows = [headers], links = {};
+    let offset = '', recs = 0;
+    do {
+      const page = await airtableApi(ids.base + '/' + encodeURIComponent(ids.table) +
+        '?view=' + encodeURIComponent(ids.view) + '&pageSize=100' +
+        (offset ? '&offset=' + encodeURIComponent(offset) : ''));
+      for (const rec of page.records || []) {
+        const row = new Array(headers.length).fill('');
+        for (const [fname, val] of Object.entries(rec.fields || {})) {
+          const ci = hdr[fname];
+          if (ci == null) continue;
+          const v = Array.isArray(val)
+            ? val.map(x => (x && (x.url || x.text || x.filename)) || String(x)).join(', ')
+            : (val && typeof val === 'object' ? (val.url || val.text || '') : val);
+          row[ci] = String(v == null ? '' : v);
+        }
+        const ri = rows.length;
+        urlCols.forEach(ci => { if (/^https?:/i.test(row[ci])) links[ri + ',' + ci] = row[ci]; });
+        rows.push(row); recs++;
+      }
+      offset = page.offset || '';
+    } while (offset);
+    if (rows.length < 2) throw new Error('view returned no records');
+    sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
+    loadSheetRows({ rows, links, sheetName: t.name }, 'Airtable ' + t.name);
+    lastSheetRef = { airtable: true, baseName: t.name };
+    rememberSheet();
+    dbg('airtable view loaded', { table: t.name, view: ids.view, records: recs, links: Object.keys(links).length });
+    return true;
+  } catch (e) {
+    dbg('airtable view api fail', { err: String((e && e.message) || e) });
+    return false;
+  }
+}
+
+// An open Airtable tracker: API pull first (exact view from the tab URL
+// when a token is set), else drive the grid's own select-all + copy and
 // pull the TSV back off the clipboard with its DOM headers prepended.
 // Falls back to manual paste if the app swallows the synthetic events.
 async function grabAirtableTab(tab) {
+  if (await fetchAirtableView(tab)) return true;
+  const noTok = hasAtToken() ? '' : ' - or add an Airtable token in Settings for a direct API pull';
   let res;
   try {
     [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: airtableCopyAll, args: [true] });
@@ -1849,7 +1904,7 @@ async function grabAirtableTab(tab) {
   const r = (res && res.result) || {};
   dbg('airtable copy attempt', { okCopy: r.okCopy, cell: r.cellId, headers: (r.headers || []).length, selected: r.selected, focus: r.focus, domSel: r.domSel });
   if (!r.okCopy) {
-    toast('Airtable blocked the auto-copy - click the grid, Cmd+A, Cmd+C, then Paste tracker.');
+    toast('Airtable blocked the auto-copy - click the grid, Cmd+A, Cmd+C, then Paste tracker' + noTok + '.');
     setStage('sdSheet', 'warn', 'Airtable needs a manual copy-paste');
     return false;
   }
@@ -1858,7 +1913,7 @@ async function grabAirtableTab(tab) {
     const text = await navigator.clipboard.readText();
     if (!text || !/\t/.test(text)) {
       dbg('airtable clipboard not TSV', { len: (text || '').length });
-      toast('Airtable copy produced nothing - try Cmd+A, Cmd+C on the grid, then Paste tracker.');
+      toast('Airtable copy produced nothing - try Cmd+A, Cmd+C on the grid, then Paste tracker' + noTok + '.');
       return false;
     }
     loadSheetText(withHeaders(text, r.headers), 'Airtable tracker');

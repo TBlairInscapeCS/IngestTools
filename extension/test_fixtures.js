@@ -261,6 +261,27 @@ eq('detect theatrical body', detect('', 'Hi Inscape Team,\n\nThe below spots hav
   eq('unrelated still missing', miss.results[0].status, 'MISSING');
 }
 
+// ---------- Reply phrasing: single file and all-file counts ----------
+{
+  const mk = ids => ids.map(id => ({ status: 'FOUND', id }));
+  const one = buildReconConfirmation(mk(['DSBK2966000H']), new Set(), 'Tim');
+  eq('single file reply built', !!one, true);
+  eq('single file has no count', /\d+ of (the )?\d+/.test(one), false);
+  eq('single file names id', /DSBK2966000H/.test(one), true);
+  const all = buildReconConfirmation(mk(['A1', 'B2', 'C3']), new Set(), 'Tim');
+  eq('all files says all not n-of-n', /all 3/i.test(all) && !/3 of the 3/.test(all), true);
+  const two = buildReconConfirmation(mk(['A1', 'B2']), new Set(), 'Tim');
+  eq('two files says both', /both/i.test(two), true);
+  const partial = buildReconConfirmation(
+    mk(['A1']).concat([{ status: 'MISSING', id: 'Z9' }]), new Set(), 'Tim');
+  eq('partial keeps the count', /1 of the 2/.test(partial), true);
+  const tick = buildReconConfirmation(mk(['DSBK2966000H']),
+    new Set(['dsbk2966000h']), 'Tim');
+  eq('single ticker is singular', /its ticker version/.test(tick) && !/ticker versions/.test(tick), true);
+  const single = buildMatchConfirmation([{ id: 'X', trackingId: 'X' }], 'Tim');
+  eq('single creative no plurals', /those creatives/i.test(single), false);
+}
+
 console.log('==============================');
 console.log(pass + ' passed, ' + fail + ' failed');
 failures.forEach(f => console.log('FAIL: ' + f));
