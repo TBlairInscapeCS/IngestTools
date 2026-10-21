@@ -1390,29 +1390,31 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       matched.push({ row: n, id: '', title: '', trackingId: '', fileName: '', brand: '', matchType: 'ROW (out of range)', linkText: '', link: '', access: null, espn: false, date: '' });
     }
   });
-  // Date narrowing: implicit matches (FILE/TITLE) flooding the sheet -
-  // shared placeholders substring-match all over history. When the email
-  // cites dates and the sheet has a date column, rows far from every
-  // cited date can't be this request. Explicit refs (ID/ROW codes the
-  // email named) stand regardless - a re-request of an old spot is real.
-  // Undated rows pass: no evidence either way.
+  // Selection discipline: a sender who names sheet lines ("line 12",
+  // "rows 40-42") has already said which rows they mean - unrelated
+  // title/file substring hits elsewhere on the tracker are coincidence
+  // and must not ride along. For implicit hits generally, the request
+  // date vs the row date is the discriminator: dated rows must sit
+  // within ~3 days of a cited date to stay, but only when that leaves
+  // somebody standing (an old re-requested title is a real match when
+  // it's the only hit). Undated rows always pass - no evidence either
+  // way. Explicit refs stand regardless of date.
   {
     const dayMs = 864e5;
     const explicitTypes = { 'ID': 1, 'ROW': 1, 'ROW (out of range)': 1, 'EMAIL': 1 };
+    const explicit = matched.filter(m => explicitTypes[m.matchType]);
     const implicit = matched.filter(m => !explicitTypes[m.matchType]);
-    if (cols.date >= 0 && implicit.length > 10) {
+    const rowCited = explicit.some(m => m.matchType.indexOf('ROW') === 0);
+    if (implicit.length && (rowCited || cols.date >= 0)) {
       const toMs = d => new Date(d + 'T12:00:00').getTime();
       const dts = extractDates(emailText).map(toMs).filter(t => !isNaN(t));
-      if (dts.length) {
-        const near = implicit.filter(m => {
-          const t = cellDateMs(m.date);
-          return isNaN(t) || dts.some(d => Math.abs(t - d) <= 3 * dayMs);
-        });
-        if (near.length) {
-          const keep = matched.filter(m => explicitTypes[m.matchType]);
-          matched.length = 0;
-          matched.push(...keep, ...near);
-        }
+      const near = implicit.filter(m => {
+        const t = cellDateMs(m.date);
+        return isNaN(t) || !dts.length || dts.some(d => Math.abs(t - d) <= 3 * dayMs);
+      });
+      if (rowCited || (dts.length && near.length && near.length < implicit.length)) {
+        matched.length = 0;
+        matched.push(...explicit, ...(rowCited ? [] : near));
       }
     }
   }
@@ -1464,9 +1466,14 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       rowW.forEach(w => {
         if (hayW.has(w)) { score += w.length >= 8 ? 2 : 1; why.push(w); }
       });
-      if (get(cols.date) && extractDates(get(cols.date)).size &&
-          [...extractDates(get(cols.date))].some(d => emailDates.has(d))) {
-        score += 3; why.push('request date');
+      const cellMs = cellDateMs(get(cols.date));
+      if (!isNaN(cellMs)) {
+        const gap = Math.min.apply(null, emailDates
+          .map(d => Math.abs(cellMs - new Date(d + 'T12:00:00').getTime()))
+          .concat([Infinity]));
+        if (gap === 0) { score += 3; why.push('request date'); }
+        else if (gap <= 3 * 864e5) { score += 2; why.push('date within 3 days'); }
+        else if (gap <= 7 * 864e5) { score += 1; why.push('date within a week'); }
       }
       if (score > 0) scored.push({ i, score, why });
     });

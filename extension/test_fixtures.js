@@ -200,6 +200,53 @@ eq('date mon-day-yyyy', extractDates('due Oct-19-2026'), ['2026-10-19']);
   eq('date narrows flood', m.map(x => x.id), ['NEW1']);
 }
 
+// Date proximity without a flood: a handful of implicit hits still
+// narrows to the date-close one - the old flood-only threshold (>10)
+// let small phantom sets through.
+{
+  const cols = { id: 0, title: 1, file: 2, link: -1, brand: 3, access: -1, espn: -1, date: 4 };
+  const rows = [
+    ['OLD1', 'old', 'stale_named_file_2020', 'AT&T', '1/2/2020'],
+    ['NEW1', 'new', 'fresh_named_file_x', 'AT&T', '19-Oct-26'],
+  ];
+  const m = matchEmailToSheet('assets: stale_named_file_2020, fresh_named_file_x, sent 19-Oct-26',
+    rows, cols, { headerRow: 1 });
+  eq('date narrows small set', m.map(x => x.id), ['NEW1']);
+  // Sole far-dated implicit survives when no near alternative exists -
+  // can't discriminate on no evidence.
+  const solo = matchEmailToSheet('assets: stale_named_file_2020, sent 19-Oct-26',
+    rows, cols, { headerRow: 1 });
+  eq('lone far implicit kept', solo.map(x => x.id), ['OLD1']);
+}
+
+// Line-lock: "line 2" cites the row outright - a coincidental TITLE hit
+// on another row is not part of the request (InMarket-style emails).
+{
+  const cols = { id: 0, title: 1, file: 2, link: -1, brand: 3, access: -1, espn: -1, date: 4 };
+  const rows = [
+    ['WANT1', 'Ordinary spot', 'file_a', 'InMarket', '19-Oct-26'],
+    ['PHANTOM1', 'Fresh Season Trailer', 'file_b', 'InMarket', '19-Oct-26'],
+  ];
+  const m = matchEmailToSheet('please ingest line 2 - Fresh Season Trailer attached too',
+    rows, cols, { headerRow: 1 });
+  eq('cited line locks the match', m.map(x => x.row), [2]);
+  eq('line-lock drops implicit', m.every(x => x.matchType === 'ROW'), true);
+}
+
+// GUESS date proximity: vague email, no word clues - the pending row
+// whose sheet date sits near the request date outranks the rest.
+{
+  const cols = { id: 0, title: 1, file: 2, link: -1, brand: 3, access: -1, espn: -1, date: 4 };
+  const rows = [
+    ['AA1', 'unrelated', 'fa', 'XBrand', '1/2/2020'],
+    ['BB1', 'unrelated', 'fb', 'YBrand', '19-Oct-26'],
+  ];
+  const g = matchEmailToSheet('new spots for ingest, sent 19-Oct-26', rows, cols,
+    { headerRow: 1, pendingIdx: [0, 1] });
+  eq('guess prefers date-near row', g[0].id, 'BB1');
+  eq('guess near-date clue named', (g[0].guessClues || []).join(' '), 'request date');
+}
+
 // latestSegment: pasted threads only extract from the newest message
 {
   const thread = 'Hi Tim\nPlease ingest these.\nNEWCODE123H\n\nFrom: Tim Blair <Tim.Blair@vizio.com>\nSent: Friday\nSubject: Re: req\nIngested OLDCODE456H thanks';
