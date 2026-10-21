@@ -339,6 +339,18 @@
       <button id="erSweep">↓ From ER search</button>
     </span>
     <button id="recheck" title="Check the inbox/ER for the delivery now - and arm a watch that alerts when it lands">⟳ Re-check</button>
+    <details id="manualTools" class="mini" data-opt="manual">
+      <summary>ER API (keyed fetch)</summary>
+      <!-- ids/files look like leftovers but are the run's state carriers:
+           the email's codes, the match output and downloaded names all
+           flow through them. Hidden, not deleted. -->
+      <textarea id="ids" class="hidden"></textarea>
+      <textarea id="files" class="hidden"></textarea>
+      <div class="row">
+        <button id="erApi">↓ Fetch &amp; download</button>
+        <span class="hint">API key lives in ⚙ Settings</span>
+      </div>
+    </details>
     <span class="hint" id="watchInfo"></span>
   </div>
   <div class="msg" id="capInfo"></div>
@@ -346,18 +358,6 @@
   <div id="counts"></div>
   <div class="hint" id="missingNote" style="color:#ec9a9a"></div>
   <div class="scrollbox" id="results"></div>
-  <details id="manualTools" class="mini" data-opt="manual">
-    <summary>ER API (keyed fetch)</summary>
-    <!-- ids/files look like leftovers but are the run's state carriers:
-         the email's codes, the match output and downloaded names all
-         flow through them. Hidden, not deleted. -->
-    <textarea id="ids" class="hidden"></textarea>
-    <textarea id="files" class="hidden"></textarea>
-    <div class="row">
-      <button id="erApi">↓ Fetch &amp; download</button>
-      <span class="hint">API key lives in ⚙ Settings</span>
-    </div>
-  </details>
 </details>
 
 <details class="s5" id="sec5">
@@ -385,10 +385,7 @@
         <button id="saveRecords" class="hidden">Save records JSON</button>
       </div>
     </details>
-  </div>
-  <div class="msg" id="verifyInfo"></div>
-  <div class="hint" id="portalLive"></div>
-  <details class="mini" id="recLookup">
+    <details class="mini" id="recLookup">
     <summary>record lookup</summary>
     <div class="row">
       <input type="text" id="recRealm" list="realmList" placeholder="customer (horizonmedia…)" size="16" title="Portal customer/realm - filled from the detected client when known">
@@ -398,7 +395,7 @@
     <textarea id="recIds" placeholder="Reporting IDs or file names - one per line" style="height:3.6em"></textarea>
     <div class="msg" id="recResults"></div>
   </details>
-  <details class="mini" id="impLookup">
+    <details class="mini" id="impLookup">
     <summary>impression counts</summary>
     <div class="row">
       <input type="text" id="impRealm" list="realmList" placeholder="customer" size="12" title="Portal customer/realm - needed to resolve reporting IDs to commercial_cids">
@@ -411,7 +408,10 @@
     <textarea id="impIds" placeholder="Reporting IDs (or commercial_cids) - one per line" style="height:3.6em"></textarea>
     <div class="msg" id="impResults"></div>
     <div class="hint">Databricks credentials live in ⚙ Settings - without them Count produces SQL for a manual paste.</div>
-  </details>
+    </details>
+  </div>
+  <div class="msg" id="verifyInfo"></div>
+  <div class="hint" id="portalLive"></div>
   <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
     <div class="row"><button id="jiraApprove" class="primary hidden">✓ Post to Jira</button>
