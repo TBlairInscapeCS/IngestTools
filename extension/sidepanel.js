@@ -1344,6 +1344,7 @@ function renderInbox(msgs, quiet) {
       Object.entries(erByAgency).map(([a, n]) => esc(a) + ' ×' + n).join(', ') + '</i>'
     : '';
   el.style.display = 'block';
+  lastInboxCands = cands; // kept for loadMailById (notification deep-links)
   el.innerHTML = '<b>' + cands.length + ' unread request-like email(s):</b>' + erTally +
     cands.map((c, i) => {
       const from = (c.m.from && c.m.from.emailAddress && c.m.from.emailAddress.name) || '';
@@ -1367,23 +1368,7 @@ function renderInbox(msgs, quiet) {
     }).join('');
   el.querySelectorAll('a[data-ib]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
-    const c = cands[parseInt(a.dataset.ib, 10)];
-    const from = c.m.from && c.m.from.emailAddress;
-    // Yangaroo deliveries parse off the raw HTML - the Graph body carries
-    // the same Download anchors the Outlook-tab scrape looks for.
-    yangaroo = parseYangarooHtml((c.m.body && c.m.body.content) || '');
-    emailFolderName = folderMap[c.m.parentFolderId] || '';
-    setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
-      '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
-      String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
-    emailFromAddr = (from && from.address) || '';
-    // Sheet pops in a background tab - pulls/match run from the export,
-    // but the open tab stays ready for "Show on sheet" highlights.
-    const sids = sheetIdsFor(client);
-    if (sids[0]) chrome.tabs.create({
-      url: 'https://docs.google.com/spreadsheets/d/' + sids[0], active: false });
-    tryLoadTrackerAttachment(c.m.id);
-    toast('Email loaded from inbox.');
+    loadInboxCand(cands[parseInt(a.dataset.ib, 10)]);
   }));
   // One-click delivery download: every spot's direct link (Yangaroo or
   // Comcast cad-api) queues into Ingest/ without ever opening the email.
@@ -1426,6 +1411,41 @@ function renderInbox(msgs, quiet) {
       erNotice: !!c.erNotice,
     })),
   };
+}
+
+let lastInboxCands = [];
+function loadInboxCand(c) {
+  if (!c) return;
+  const from = c.m.from && c.m.from.emailAddress;
+  // Yangaroo deliveries parse off the raw HTML - the Graph body carries
+  // the same Download anchors the Outlook-tab scrape looks for.
+  yangaroo = parseYangarooHtml((c.m.body && c.m.body.content) || '');
+  emailFolderName = folderMap[c.m.parentFolderId] || '';
+  setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
+    '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
+    String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
+  emailFromAddr = (from && from.address) || '';
+  // Sheet pops in a background tab - pulls/match run from the export,
+  // but the open tab stays ready for "Show on sheet" highlights.
+  const sids = sheetIdsFor(client);
+  if (sids[0]) chrome.tabs.create({
+    url: 'https://docs.google.com/spreadsheets/d/' + sids[0], active: false });
+  tryLoadTrackerAttachment(c.m.id);
+  toast('Email loaded from inbox.');
+}
+// A notification deep-link names a message id - load it from the cached
+// inbox list, or fetch it directly when the list changed since.
+async function loadMailById(id) {
+  let c = lastInboxCands.find(x => x.m && x.m.id === id);
+  if (!c && MS.refreshToken) {
+    try {
+      const m = await graphFetch('/me/messages/' + id +
+        '?$select=subject,from,receivedDateTime,parentFolderId,conversationId,body');
+      c = { m, body: (m.body && m.body.content) || '' };
+    } catch (e) { dbg('pendingAction mail fetch fail', { err: String(e) }); }
+  }
+  if (c) loadInboxCand(c);
+  else toast('That email is no longer in the inbox list - use Check inbox.');
 }
 
 // While the panel is open, poll quietly every 5 min so a fresh request
@@ -4503,6 +4523,50 @@ msLoad().then(() => {
   if (MS.clientId) $('msClientId').value = MS.clientId;
   if (MS.tenant) $('msTenant').value = MS.tenant;
   if (MS.refreshToken) checkInbox(true);
+});
+
+// Notification clicks carry intent: the service worker stashes a
+// pendingAction so the panel opens in context - the request mail loads,
+// a delivery arrival re-runs the check. Applied on load and live.
+async function applyPendingAction() {
+  const d = await chrome.storage.local.get('pendingAction');
+  const pa = d.pendingAction;
+  if (!pa) return;
+  await chrome.storage.local.remove('pendingAction');
+  if (Date.now() - (pa.at || 0) > 10 * 60e3) return; // stale - ignore
+  if (pa.type === 'mail' && pa.id) await loadMailById(pa.id);
+  else if (pa.type === 'recheck') $('recheck').click();
+}
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area === 'local' && ch.pendingAction && ch.pendingAction.newValue) applyPendingAction();
+});
+applyPendingAction();
+
+// Next-step guidance: the stage dots already know where the run stands -
+// read the first non-ok one and name its action. Clicking jumps there.
+const NEXT_STEPS = [
+  ['sdEmail', 'sec1', 'load the request email - Run all, Check inbox, or Grab from Outlook'],
+  ['sdSheet', 'sec2', 'load the tracker - auto-pulls from the email link, or Grab sheet tab'],
+  ['sdMatch', 'sec3', 'press Match to pair the codes with rows'],
+  ['sdDl', 'sec4', 'download the media - open pages, ER search, or arm the watch'],
+  ['sdIngest', 'sec5', 'fill the portal queue, verify, draft Jira'],
+  ['sdReply', 'sec6', 'draft the reply'],
+];
+setInterval(() => {
+  const el = $('nextStep');
+  if (!el) return;
+  const step = NEXT_STEPS.find(([sd]) => !/(^| )ok( |$)/.test(($(sd) || {}).className || ''));
+  const tip = step && $(step[0]) && $(step[0]).title;
+  el.innerHTML = !step ? '&#10003; all steps done - ready for the next request'
+    : '&rarr; next: <a href="#" data-sec="' + step[1] + '">' + esc(step[2]) + '</a>' +
+      (tip ? ' <i>(' + esc(tip) + ')</i>' : '');
+}, 2500);
+$('nextStep').addEventListener('click', e => {
+  const sec = e.target.getAttribute && e.target.getAttribute('data-sec');
+  if (!sec) return;
+  e.preventDefault();
+  const d = $(sec);
+  if (d) { d.open = true; d.scrollIntoView({ block: 'nearest' }); }
 });
 
 // ---------- Panel settings (which optional modules show) ----------

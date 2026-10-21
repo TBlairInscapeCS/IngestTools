@@ -187,10 +187,16 @@ chrome.alarms.onAlarm.addListener(async a => {
 });
 
 // Clicking the notification focuses the side panel (user gesture, so the
-// open is allowed) and silences the chime.
-chrome.notifications.onClicked.addListener(async () => {
+// open is allowed), silences the chime, and carries intent: a request
+// opens with that mail loaded; an arrival re-runs the delivery check.
+chrome.notifications.onClicked.addListener(async notificationId => {
   chrome.runtime.sendMessage({ stop: true });
   try { chrome.tts.stop(); } catch (e) {}
+  if (/^req-/.test(notificationId) && !/^req-test-/.test(notificationId)) {
+    chrome.storage.local.set({ pendingAction: { type: 'mail', id: notificationId.slice(4), at: Date.now() } });
+  } else if (/^arrived-/.test(notificationId)) {
+    chrome.storage.local.set({ pendingAction: { type: 'recheck', at: Date.now() } });
+  }
   try {
     const w = await chrome.windows.getLastFocused();
     if (w) await chrome.sidePanel.open({ windowId: w.id });
