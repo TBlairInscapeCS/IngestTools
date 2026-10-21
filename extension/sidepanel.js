@@ -405,9 +405,16 @@ function clearAll() {
   onEmailChange(); // resets sender/graph-id/derived state for empty text
   setStage('sdEmail'); $('tsEmail').textContent = '';
   renderClientNote();
+  // Lookup-module inputs resetRun never touches - clear all means ALL.
+  ['sheetPaste', 'recIds', 'impIds', 'recRealm', 'impRealm', 'impStart', 'impEnd']
+    .forEach(id => { const el = $(id); if (el) el.value = ''; });
+  ['recResults', 'impResults', 'dateFilterHint']
+    .forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
+  $('erSender').value = ''; $('erDays').value = '14';
   // Persisted inputs must not resurrect on the next panel reload
   chrome.storage.local.remove(['emailText', 'idsText', 'filesText',
-    'capturedByName', 'msLastSheet', 'pendingIds', 'pendingFiles']);
+    'capturedByName', 'msLastSheet', 'pendingIds', 'pendingFiles',
+    'recRealm', 'erSender', 'erDays']);
   toast('Cleared - fresh run.');
 }
 
@@ -1071,11 +1078,19 @@ chrome.storage.onChanged.addListener((ch, area) => {
 function setMsStatus(down) {
   $('msStatus').classList.toggle('hidden', !down);
 }
+// Sign-in setup lives in the settings panel now - revealing it has to
+// open that panel or it unhides inside a closed flyout.
+function showMsSetup() {
+  const su = $('msSetup');
+  su.classList.remove('hidden');
+  su.style.display = 'block'; // .info is display:none in CSS
+  $('settingsPanel').classList.remove('hidden');
+  $('settingsGear').setAttribute('aria-expanded', 'true');
+}
 $('msStatus').addEventListener('click', e => {
   e.preventDefault();
-  $('sec1').open = true;
-  $('msSetup').classList.remove('hidden');
-  $('msSetup').style.display = 'block';
+  e.stopPropagation(); // the document click handler would instantly re-close the panel
+  showMsSetup();
   $('msSignIn').focus();
 });
 
@@ -1219,10 +1234,8 @@ async function checkInbox(quiet) {
   await msLoad();
   if (!MS.refreshToken) {
     if (!quiet) {
-      const su = $('msSetup');
-      su.classList.remove('hidden');
-      su.style.display = 'block'; // .info is display:none in CSS
-      toast('Sign in to read the inbox (one-time app registration, below).');
+      showMsSetup();
+      toast('Sign in to read the inbox - setup is in ⚙ Settings.');
     }
     return { n: 0, hits: [] };
   }
@@ -2963,8 +2976,7 @@ $('draftReplyOut').addEventListener('click', async () => {
     // already-approved Mail.Read.
     if (/403|401|re-consent|readwrite/i.test(String(e.message))) {
       msWantWrite = true;
-      $('msSetup').classList.remove('hidden');
-      $('msSetup').style.display = 'block';
+      showMsSetup();
       $('msMsg').textContent = ' write access needs one more consent - hit Sign in again.';
     }
   }

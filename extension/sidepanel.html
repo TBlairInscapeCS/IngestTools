@@ -174,9 +174,12 @@
   select:focus-visible, input:focus-visible, textarea:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 1px; }
   #settingsGear { margin-left: auto; }
-  #settingsPanel { position: fixed; top: 44px; right: 8px; z-index: 50; width: 214px;
+  #settingsPanel { position: fixed; top: 44px; right: 8px; z-index: 50; width: 224px;
+    max-height: 78vh; overflow-y: auto;
     background: var(--surface-2); border: 1px solid var(--border-hi); border-radius: 8px; padding: 10px 12px;
     box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 11px; }
+  #settingsPanel::-webkit-scrollbar { width: 8px; }
+  #settingsPanel::-webkit-scrollbar-thumb { background: #333a46; border-radius: 4px; }
   #settingsPanel .opt { display: block; margin: 6px 0; color: #cfd4dc; font-weight: 400; cursor: pointer; }
   #settingsPanel .opt input { margin-right: 6px; vertical-align: -1px; }
   [data-opt].opt-off { display: none !important; }
@@ -206,6 +209,24 @@
   <label class="opt"><input type="checkbox" id="opt-manual"> ER API (keyed fetch)</label>
   <label class="opt"><input type="checkbox" id="opt-log"> Log panel</label>
   <label class="opt"><input type="checkbox" id="opt-hints"> Help ? bubbles</label>
+  <div class="info hidden" id="msSetup" data-opt="graph">
+    Reads your inbox via Microsoft Graph. One-time setup:
+    Entra &rarr; App registrations &rarr; new app (org-only, no redirect URI)
+    &rarr; "Allow public client flows" = Yes &rarr; add delegated <b>Mail.Read</b>.<br>
+    <input id="msClientId" placeholder="Application (client) ID" style="width:55%">
+    <input id="msTenant" placeholder="Tenant domain or ID" style="width:33%">
+    <button id="msSignIn">Sign in</button>
+    <a href="#" id="msUsePsApp" title="Microsoft's first-party Graph PowerShell app - often pre-consented in locked-down tenants">no app access? try the built-in one</a>
+    <span id="msMsg"></span>
+    <div id="msCodeRow" class="hidden">
+      After signing in on the page that opened, paste the code shown - or
+      the full URL if it lands on a dead localhost page:
+      <input id="msCode" placeholder="code or full URL" style="width:60%">
+      <button id="msCodeGo">Exchange</button><br>
+      <a href="#" id="msAltRedirect">redirect_uri error? try the other form</a> ·
+      <a href="#" id="msDevCode">use device code instead</a>
+    </div>
+  </div>
   <div style="font-weight:700;margin:8px 0 4px">Jira (post comment)</div>
   <label class="opt">Email <input type="text" id="jiraEmail" placeholder="you@vizio.com" autocomplete="off" style="width:97%;margin-top:2px"></label>
   <label class="opt">API token <input type="password" id="jiraToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
@@ -213,6 +234,14 @@
   <div class="opt" style="font-weight:400;color:#8b93a1">Personal access token - airtable.com/create/tokens, scopes <i>data.records:read</i> + <i>schema.bases:read</i>. Lets Grab pull the pending view of every brand tab directly - no copy-paste, real link URLs.</div>
   <label class="opt">Token <input type="password" id="atToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
   <label class="opt">Base ID <input type="text" id="atBase" placeholder="app… (blank = auto-pick)" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <div style="font-weight:700;margin:8px 0 4px">Extreme Reach API</div>
+  <label class="opt">API key <input type="password" id="erApiKey" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <div style="font-weight:700;margin:8px 0 4px">Databricks (impressions)</div>
+  <label class="opt">Workspace host <input type="text" id="dbxHost" placeholder="dbc-abc123-xy.cloud.databricks.com" autocomplete="off" title="From your browser bar" style="width:97%;margin-top:2px"></label>
+  <label class="opt">Warehouse id <input type="text" id="dbxWh" autocomplete="off" title="SQL warehouse ID - 'test' lists your warehouses in the log" style="width:97%;margin-top:2px"></label>
+  <label class="opt">Token <input type="password" id="dbxTok" autocomplete="off" title="User Settings -&gt; Developer -&gt; Access tokens" style="width:97%;margin-top:2px"></label>
+  <div class="row"><button id="dbxPing" title="Test the connection - lists your SQL warehouses (id + name) in the log">Test connection</button></div>
+  <div class="opt" style="font-weight:400;color:#8b93a1;font-size:10px;margin-top:4px">Without these, Count produces the SQL for a manual paste instead of running it.</div>
   <div class="row"><a href="#" id="settingsReset">reset to defaults</a></div>
 </div>
 <div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then downloads: direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>
@@ -235,24 +264,6 @@
         <a href="#" id="testAlert" data-opt="graph" style="font-size:10px;align-self:center" title="Fire a test notification + sound (cycles request/delivery/arrived)">test alert</a>
       </div>
     </details>
-  </div>
-  <div class="info hidden" id="msSetup" data-opt="graph">
-    Reads your inbox via Microsoft Graph. One-time setup:
-    Entra &rarr; App registrations &rarr; new app (org-only, no redirect URI)
-    &rarr; "Allow public client flows" = Yes &rarr; add delegated <b>Mail.Read</b>.<br>
-    <input id="msClientId" placeholder="Application (client) ID" style="width:55%">
-    <input id="msTenant" placeholder="Tenant domain or ID" style="width:33%">
-    <button id="msSignIn">Sign in</button>
-    <a href="#" id="msUsePsApp" title="Microsoft's first-party Graph PowerShell app - often pre-consented in locked-down tenants">no app access? try the built-in one</a>
-    <span id="msMsg"></span>
-    <div id="msCodeRow" class="hidden">
-      After signing in on the page that opened, paste the code shown - or
-      the full URL if it lands on a dead localhost page:
-      <input id="msCode" placeholder="code or full URL" style="width:60%">
-      <button id="msCodeGo">Exchange</button><br>
-      <a href="#" id="msAltRedirect">redirect_uri error? try the other form</a> ·
-      <a href="#" id="msDevCode">use device code instead</a>
-    </div>
   </div>
   <div class="info" id="inboxList" data-opt="graph"></div>
   <div class="info msg" id="emailInfo"></div>
@@ -339,8 +350,8 @@
     <textarea id="ids" class="hidden"></textarea>
     <textarea id="files" class="hidden"></textarea>
     <div class="row">
-      <input type="password" id="erApiKey" placeholder="ER API key" size="22" autocomplete="off">
       <button id="erApi">↓ Fetch &amp; download</button>
+      <span class="hint">API key lives in ⚙ Settings</span>
     </div>
   </details>
 </details>
@@ -395,18 +406,7 @@
     </div>
     <textarea id="impIds" placeholder="Reporting IDs (or commercial_cids) - one per line" style="height:3.6em"></textarea>
     <div class="msg" id="impResults"></div>
-    <details class="mini">
-      <summary>databricks setup</summary>
-      <div class="row">
-        <input type="text" id="dbxHost" placeholder="workspace host" size="18" title="From your browser bar, e.g. dbc-abc123-xy.cloud.databricks.com">
-        <input type="text" id="dbxWh" placeholder="warehouse id" size="10" title="SQL warehouse ID - 'test' lists your warehouses in the log">
-      </div>
-      <div class="row">
-        <input type="password" id="dbxTok" placeholder="personal access token" size="22" autocomplete="off" title="User Settings -> Developer -> Access tokens">
-        <button id="dbxPing" title="Test the connection - lists your SQL warehouses (id + name) in the log">test</button>
-      </div>
-      <div class="hint">Without these, Count produces the SQL for a manual paste instead of running it.</div>
-    </details>
+    <div class="hint">Databricks credentials live in ⚙ Settings - without them Count produces SQL for a manual paste.</div>
   </details>
   <div class="msg" id="jiraStatus"></div>
   <div id="jiraBox" class="hidden" style="margin-top:4px">
