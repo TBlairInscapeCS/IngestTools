@@ -367,12 +367,13 @@
 <details class="s5" id="sec5">
   <summary>5 · Fill the portal + report<span class="ib" data-bubble="b5">?</span><span class="stamp" id="tsIngest"></span><span class="sdot" id="sdIngest"></span></summary>
   <div class="sub">Fill the portal queue, then verify + draft Jira. Ingest/post stay your clicks.</div>
-  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check &amp; preview</b> verifies the customer name against the playbook, lists queued files and shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Accept fills</b> approves that preview: writes the cells and keeps watching for files dropped later. <b>Feed files</b> streams this job's downloaded files into the portal's file picker; <b>Pick &amp; feed</b> lets you choose media anywhere on disk (files land in the job folder first). <b>_ticker</b> files get fingerprint=video per playbook. Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click.</div>
+  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check &amp; preview</b> verifies the customer name against the playbook, lists queued files and shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Accept fills</b> approves that preview: writes the cells and keeps watching for files dropped later. <b>Feed files</b> streams this job's downloaded files into the portal's file picker - batch one, the standard video+audio versions. The watcher builds <b>_ticker</b> versions on arrival; the status line shows the builds, and <b>Feed ticker files</b> queues them as the second, video-only ingest (separate batch per playbook) with fills applied automatically. <b>Pick &amp; feed</b> lets you choose media anywhere on disk (files land in the job folder first). Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click, once per batch.</div>
   <div class="subhd">Fill the ingest queue</div>
   <div class="row">
     <button id="ingestCheck" title="Probe the portal queue (customer check + queued files) and show the fill plan for the matched rows">▤ Check &amp; preview</button>
     <button id="ingestPush" class="primary hidden" title="Approve the previewed fills - writes them into the portal queue cells">✓ Accept fills</button>
-    <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - no drag-and-drop">⇧ Feed files</button>
+    <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - batch 1: standard versions only">⇧ Feed files</button>
+    <button id="feedTicker" class="hidden" title="Batch 2: streams the watcher's _ticker builds and fills them (id+suffix, fingerprint=video) - a separate video-only ingest">⇧ Feed ticker files</button>
     <details class="mini"><summary>more</summary>
       <div class="row">
         <button id="pickPortal" title="Pick media anywhere on disk - files land in the job folder, pair to manifest rows, then feed the portal picker">⇧ Pick &amp; feed</button>
@@ -380,6 +381,7 @@
     </details>
   </div>
   <div class="msg" id="ingestInfo"></div>
+  <div class="hint" id="tickerInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
   <div class="subhd">Verify &amp; report to Jira</div>
   <div class="row">

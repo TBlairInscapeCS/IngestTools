@@ -4261,6 +4261,10 @@ function portalFill(plan) {
   window.__ingestFill = plan;
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const rows = plan.rows.map(r => ({ ...r, idN: norm(r.id), titleN: norm(r.title) }));
+  // Ticker markers: _ticker, _t, or the playbook's custom tickerSuffix.
+  const sfxRe = new RegExp('(' + ['_ticker', '_t', plan.opts.tickerSuffix]
+    .filter(Boolean).filter((s, i, a) => a.indexOf(s) === i)
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$', 'i');
   const findRow = stem => {
     const s = norm(stem);
     return rows.find(r => r.idN && s.includes(r.idN)) ||
@@ -4282,14 +4286,15 @@ function portalFill(plan) {
     const nameTd = tr.querySelector('td.file_name');
     if (!nameTd || !nameTd.textContent.trim()) return;
     const stem = nameTd.textContent.trim().replace(/\.[^.]+$/, '');
-    const ticker = /_ticker|_t$/i.test(stem);
-    const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
+    const tk = stem.match(sfxRe);
+    const ticker = !!tk;
+    const r = findRow(stem.replace(sfxRe, '')) || findRow(stem);
     if (!r) { nameTd.style.outline = '1px solid #b06000'; tr.dataset.ingestFilled = 'miss'; return; }
     tr.dataset.ingestFilled = 'ok';
     // The ticker marker is preserved, the value behind it corrected:
     // CODE_t -> RealID_t, CODE_ticker -> RealID_ticker. Never stripped,
     // never doubled (marker appended only when the value lacks it).
-    const marker = ticker ? (stem.match(/_ticker$|_t$/i) || stem.match(/_ticker|_t$/i))[0] : '';
+    const marker = ticker ? tk[0] : '';
     const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
     write(tr, 'file_reporting', ticker ? withMarker(r.id) : r.id);
     if (plan.opts.nameTitle && r.title) write(tr, 'file_title', ticker ? withMarker(r.title) : r.title);
@@ -4378,6 +4383,9 @@ function renderIngestPreview() {
 function renderIngestVerify(probe) {
   const plan = ingestPlan();
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const sfxRe = new RegExp('(' + ['_ticker', '_t', plan.opts.tickerSuffix]
+    .filter(Boolean).filter((s, i, a) => a.indexOf(s) === i)
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$', 'i');
   const findRow = stem => {
     const s = norm(stem);
     return plan.rows.find(r => s.includes(norm(r.id))) ||
@@ -4387,10 +4395,11 @@ function renderIngestVerify(probe) {
   const html = '<table><tr><th>File</th><th>Reporting</th><th>Title</th><th>Adv</th><th>FP</th><th></th></tr>' +
     probe.rows.map(q => {
       const stem = q.name.replace(/\.[^.]+$/, '');
-      const ticker = /_ticker|_t$/i.test(stem);
-      const r = findRow(stem.replace(/_ticker|_t$/i, '')) || findRow(stem);
+      const tk = stem.match(sfxRe);
+      const ticker = !!tk;
+      const r = findRow(stem.replace(sfxRe, '')) || findRow(stem);
       if (!r) { miss++; return '<tr><td>' + esc(q.name) + '</td><td colspan="4"></td><td class="warn">no match</td></tr>'; }
-      const marker = ticker ? (stem.match(/_ticker$|_t$/i) || stem.match(/_ticker|_t$/i))[0] : '';
+      const marker = ticker ? tk[0] : '';
       const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
       const wantRep = ticker ? withMarker(r.id) : r.id;
       const wantTitle = plan.opts.nameTitle && r.title ? (ticker ? withMarker(r.title) : r.title) : q.title;
@@ -4435,6 +4444,7 @@ $('ingestCheck').addEventListener('click', async () => {
   $('ingestPush').classList.toggle('hidden', !ingestPlan().rows.length);
   if (p.rows.length) renderIngestVerify(p);
   else renderIngestPreview();
+  refreshTickerStatus();
 });
 
 $('ingestPush').addEventListener('click', async () => {
@@ -4459,17 +4469,20 @@ $('ingestPush').addEventListener('click', async () => {
     $('ingestInfo').textContent = 'plan armed for ' + plan.rows.length + ' row(s) — drop the videos, fills apply automatically';
   }
   dbg('ingest push', { rows: plan.rows.length, queued: n });
+  refreshTickerStatus();
 });
 
 // Runs INSIDE the portal tab: pulls this job's downloaded files from the
 // watcher's loopback server (http://127.0.0.1:8770, manifest-scoped) and
 // assigns them to the page's bulk file input - same as a manual pick.
 // The armed portalFill observer then writes metadata as rows appear.
-async function feedJobFiles(job, base) {
+async function feedJobFiles(job, base, kind) {
   try {
-    const lst = await (await fetch(base + '/ingest-files?job=' + encodeURIComponent(job))).json();
+    const lst = await (await fetch(base + '/ingest-files?job=' + encodeURIComponent(job) +
+      (kind && kind !== 'all' ? '&kind=' + kind : ''))).json();
     const names = (lst && lst.files) || [];
-    if (!names.length) return { error: 'watcher has no downloaded files for job ' + job };
+    if (!names.length) return { error: 'watcher has no ' + (kind === 'ticker' ? 'ticker ' : '') +
+      'files for job ' + job };
     const input = document.getElementById('multifile') ||
       document.querySelector('#bulkdrop input[type=file], input.bulk-btn-upload');
     if (!input) return { error: 'no bulk file input found - open the File Ingest view' };
@@ -4499,13 +4512,15 @@ async function feedJobFiles(job, base) {
 // Feeds whatever the watcher has for this job into the portal picker.
 // Shared by "Feed files" (job-dir downloads) and "Pick & feed" (after
 // the picked files have been uploaded into the job dir).
-async function feedPortalNow(tab, job) {
+async function feedPortalNow(tab, job, kind) {
   const [res] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id }, func: feedJobFiles, args: [job, 'http://127.0.0.1:8770'] });
+    target: { tabId: tab.id }, func: feedJobFiles,
+    args: [job, 'http://127.0.0.1:8770', kind || 'standard'] });
   const r = (res && res.result) || {};
   if (r.error) { $('ingestInfo').textContent = r.error; toast(r.error); return r; }
   stamp('tsIngest');
-  $('ingestInfo').textContent = 'Fed ' + r.fed + ' file(s) - ' + r.rowsAdded + ' new queue row(s), ' +
+  $('ingestInfo').textContent = 'Fed ' + r.fed + (kind === 'ticker' ? ' ticker' : '') +
+    ' file(s) - ' + r.rowsAdded + ' new queue row(s), ' +
     r.rowsTotal + ' total' + (r.rowsAdded ? ' - Check & preview to verify' :
     ' - no new rows appeared; the page may need a manual drop') +
     (r.skipped && r.skipped.length ? ' · skipped: ' + r.skipped.join(', ') : '');
@@ -4517,8 +4532,66 @@ $('feedPortal').addEventListener('click', async () => {
   const tab = await portalTab();
   if (!tab) { toast('No portal.cognet.tv tab open - open the ingest page first'); return; }
   $('ingestInfo').textContent = 'Streaming job files from Ingest/ into the portal picker…';
-  try { await feedPortalNow(tab, jobSlug()); } catch (e) { toast(e.message); }
+  try { await feedPortalNow(tab, jobSlug(), 'standard'); } catch (e) { toast(e.message); }
+  refreshTickerStatus();
 });
+
+// Ticker builds are the second, video-only ingest: feed just the _ticker
+// outputs, then re-run the fill so their rows get id+suffix and
+// fingerprint=video. The armed observer would fill them anyway - the
+// explicit re-push covers a reloaded portal tab that lost __ingestFill.
+$('feedTicker').addEventListener('click', async () => {
+  const tab = await portalTab();
+  if (!tab) { toast('No portal.cognet.tv tab open - open the ingest page first'); return; }
+  $('ingestInfo').textContent = 'Streaming ticker versions into the portal picker…';
+  const r = await feedPortalNow(tab, jobSlug(), 'ticker');
+  if (!r || r.error) return;
+  const plan = ingestPlan();
+  if (plan.rows.length) {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalFill, args: [plan] });
+    const [pr] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalProbe });
+    if (pr && pr.result && pr.result.rows.length) renderIngestVerify(pr.result);
+    $('ingestInfo').textContent += ' · ticker fills applied - BEGIN INGEST starts the video-only batch';
+  }
+  refreshTickerStatus();
+});
+
+// Ticker build status for the module's status line + the feed button's
+// visibility. Expected count mirrors the manifest's needs_espn rule
+// (row flag OR client's ticker-always playbook).
+async function refreshTickerStatus() {
+  const box = $('tickerInfo'), btn = $('feedTicker');
+  if (!box || !btn) return;
+  const nEspn = (matched || [])
+    .filter(m => !m.excluded && m.matchType !== 'ROW (out of range)' && (m.trackingId || m.id))
+    .filter(m => m.espn || tickerAlways()).length;
+  if (!nEspn) { box.textContent = ''; btn.classList.add('hidden'); return; }
+  try {
+    const t = await (await fetch('http://127.0.0.1:8770/ticker-status?job=' +
+      encodeURIComponent(jobSlug()))).json();
+    if (!t.expected) {
+      box.textContent = nEspn + ' ticker version(s) expected - watcher has no manifest yet';
+      btn.classList.add('hidden');
+      return;
+    }
+    const ready = (t.ready || []).length, building = (t.building || []).length,
+      waiting = (t.waiting || []).length, failed = (t.failed || []).length,
+      filed = (t.done || []).length;
+    btn.classList.toggle('hidden', !ready);
+    box.innerHTML = 'ticker versions: <b>' + ready + '/' + t.expected + ' ready</b>' +
+      (building ? ' · ' + building + ' building…' : '') +
+      (waiting ? ' · ' + waiting + ' awaiting download' : '') +
+      (filed ? ' · ' + filed + ' already built &amp; filed' : '') +
+      (failed ? ' · <span style="color:#ec9a9a">' + failed + ' failed - see watcher log</span>' : '') +
+      (ready ? ' - feed them as the second, video-only batch' : '');
+  } catch (e) {
+    box.textContent = nEspn + ' ticker version(s) expected - watcher unreachable';
+    btn.classList.add('hidden');
+  }
+}
+// Tick while the section is open: a build finishing flips the status to
+// ready and reveals Feed ticker files without a click.
+setInterval(() => { if ($('sec5').open) refreshTickerStatus(); }, 15000);
 
 // Manual fallback for deliveries that never came through the extension:
 // pick media anywhere -> upload into the job folder (watcher pairs each
@@ -4548,7 +4621,8 @@ $('portalPick').addEventListener('change', async e => {
   if (unpaired.length) toast('Some files matched no manifest row - they stay in the job folder unpaired.');
   const tab = await portalTab();
   if (!tab) { toast('Files are in the job folder - open the portal ingest page, then Feed files.'); return; }
-  try { await feedPortalNow(tab, job); } catch (e3) { toast(e3.message); }
+  try { await feedPortalNow(tab, job, 'standard'); } catch (e3) { toast(e3.message); }
+  refreshTickerStatus();
 });
 
 // ---------- live portal ingest status (records API while panel is open) ----------

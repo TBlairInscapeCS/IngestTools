@@ -131,10 +131,13 @@ def start_log_server():
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
             if u.path == "/ingest-files":
-                files = job_media_files((q.get("job") or [""])[0])
+                files = job_media_files((q.get("job") or [""])[0], (q.get("kind") or ["standard"])[0])
                 self._send(200, json.dumps({"files": files}).encode(), "application/json")
             elif u.path == "/spec-failures":
                 self._send(200, json.dumps({"failures": spec_failures((q.get("job") or [""])[0])}).encode(),
+                           "application/json")
+            elif u.path == "/ticker-status":
+                self._send(200, json.dumps(ticker_status((q.get("job") or [""])[0])).encode(),
                            "application/json")
             elif u.path == "/watch-events":
                 # Alert events the panel didn't see: notification pops and
@@ -1104,17 +1107,90 @@ def find_manifest_for_job(slug: str):
     return None, None
 
 
-def job_media_files(slug: str) -> list[str]:
+def ticker_names_for(files: list, suffix: str) -> set[str]:
+    """Derived ticker output names a set of manifest entries produces:
+    one per needs_espn row, <stem><suffix>.mp4 (with _ticker fallback -
+    convert writes _ticker first and renames only when the suffix differs)."""
+    out = set()
+    for e in files:
+        if not e.get("needs_espn") or not e.get("file"):
+            continue
+        stem = Path(e["file"]).stem
+        for sfx in {suffix, "_ticker"}:
+            out.add(stem + sfx + ".mp4")
+    return out
+
+
+def is_ticker_name(name: str, suffix: str) -> bool:
+    """Delivered files can arrive pre-suffixed - the same stems the fill
+    regex strips (_ticker / _t / the playbook's custom suffix)."""
+    stem = Path(name).stem.lower()
+    return stem.endswith((suffix.lower(), "_ticker", "_t"))
+
+
+def job_media_files(slug: str, kind: str = "standard") -> list[str]:
+    """Job media for the portal feed, split by batch: 'standard' is the
+    first (video+audio) ingest - manifest files minus ticker-patterned
+    names; 'ticker' is the second video-only ingest - derived ticker
+    outputs plus any manifest file already carrying a ticker suffix."""
     mp, m = find_manifest_for_job(slug)
     if not m:
         return []
     # A rejected row that was "kept in place" still exists on disk - the
     # manifest name alone must not qualify it for the portal feed.
     rejected = set(load_state(mp).get("rejected") or [])
-    return [e["file"] for e in m.get("files", [])
-            if e.get("file") and e["file"] not in rejected
-            and Path(e["file"]).suffix.lower() in MEDIA_EXTS
-            and (mp.parent / e["file"]).exists()]
+    suffix = (m.get("client") or {}).get("tickerSuffix") or "_ticker"
+    media = [e["file"] for e in m.get("files", [])
+             if e.get("file") and e["file"] not in rejected
+             and Path(e["file"]).suffix.lower() in MEDIA_EXTS
+             and (mp.parent / e["file"]).exists()]
+    derived = sorted(n for n in ticker_names_for(m.get("files", []), suffix)
+                     if (mp.parent / n).exists() and n not in media)
+    if kind == "ticker":
+        return derived + [n for n in media if is_ticker_name(n, suffix)]
+    if kind == "all":
+        return media + derived
+    return [n for n in media if not is_ticker_name(n, suffix)]
+
+
+def ticker_status(slug: str) -> dict:
+    """Per-job ticker build progress for the panel: needs_espn manifest
+    rows vs what espn_ticker.sh has produced on disk. 'waiting' = the
+    download hasn't landed; 'building' = landed, conversion pending or
+    running (the convert is synchronous inside the tracker pass, so an
+    in-flight build reads as building). 'done' = built earlier but the
+    output left the job dir (archive moved it) - ready only counts files
+    actually feedable."""
+    mp, m = find_manifest_for_job(slug)
+    if not m:
+        return {"expected": 0, "ready": [], "building": [], "waiting": [],
+                "failed": [], "done": []}
+    suffix = (m.get("client") or {}).get("tickerSuffix") or "_ticker"
+    state = load_state(mp)
+    done = set(state.get("done") or [])
+    failed = set(state.get("failed") or [])
+    job_dir = mp.parent
+    out = {"expected": 0, "ready": [], "building": [], "waiting": [],
+           "failed": [], "done": [], "suffix": suffix}
+    for e in m.get("files", []):
+        if not e.get("needs_espn"):
+            continue
+        name = e.get("file", "")
+        out["expected"] += 1
+        if name in failed:
+            out["failed"].append(name)
+            continue
+        tick = next((t for t in ticker_names_for([e], suffix)
+                     if (job_dir / t).exists()), None)
+        if tick:
+            out["ready"].append(tick)
+        elif name in done:
+            out["done"].append(name)
+        elif name and (job_dir / name).exists():
+            out["building"].append(name)
+        else:
+            out["waiting"].append(name or e.get("tracking_id") or "?")
+    return out
 
 
 def spec_failures(slug: str) -> list[dict]:
@@ -1141,7 +1217,10 @@ def resolve_job_file(slug: str, name: str):
     if not m:
         return None
     name = Path(name).name
-    if name not in {e.get("file", "") for e in m.get("files", [])}:
+    suffix = (m.get("client") or {}).get("tickerSuffix") or "_ticker"
+    allowed = {e.get("file", "") for e in m.get("files", [])} | \
+        ticker_names_for(m.get("files", []), suffix)
+    if name not in allowed:
         return None
     p = mp.parent / name
     return p if p.exists() and p.suffix.lower() in MEDIA_EXTS else None
