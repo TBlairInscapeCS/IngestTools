@@ -81,15 +81,21 @@
   .msg b { color: #fff; }
   .info { font-size: 10px; color: #b8bfca; background: var(--surface-2); border-radius: var(--r);
           padding: 4px 7px; margin-top: 5px; display: none; }
-  /* Secondary control groups collapse behind a quiet marker toggle. */
+  /* Secondary control groups collapse behind a toggle that matches the
+     buttons it sits beside - same height/shape, dimmer text, ▾ marker. */
   details.mini { display: inline; }
-  details.mini > summary { display: inline; text-transform: none; font-weight: 400;
-    font-size: 10px; color: var(--text-dim); letter-spacing: 0; }
-  details.mini > summary::after { content: none; }
-  details.mini > summary::before { content: '▸'; display: inline-block; margin-right: 3px;
-    color: var(--text-faint); transition: transform .12s ease; }
-  details.mini[open] > summary::before { transform: rotate(90deg); }
-  details.mini > summary:hover { color: var(--text); }
+  details.mini > summary { display: inline-flex; align-items: center; gap: 4px;
+    height: 23px; padding: 0 9px; font-family: inherit; font-size: 10px; font-weight: 500;
+    letter-spacing: .02em; border: 1px solid var(--border-hi); border-radius: 5px;
+    white-space: nowrap; background: var(--surface-2); color: var(--text-dim);
+    text-transform: none; }
+  details.mini > summary::after { content: '▾'; margin-left: 0; font-size: 8px; color: var(--text-faint); }
+  details.mini[open] > summary::after { content: '▴'; }
+  details.mini > summary:hover { background: var(--surface-3); color: var(--text); }
+  /* An open toggle drops its content onto its own line instead of
+     squeezing it into the button row. */
+  details.mini[open] { display: block; flex-basis: 100%; }
+  details.mini[open] > summary { margin-bottom: 5px; }
   /* The alert card: every sound leaves a note - kind, what it was for,
      and the trigger it perceived, so false positives get caught. */
   #alertBox { width: 100%; font-size: 10px; color: #b8bfca; background: var(--surface-2);
