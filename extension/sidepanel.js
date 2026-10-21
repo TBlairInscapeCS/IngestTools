@@ -16,7 +16,8 @@ let specFails = null;      // watcher's spec rejects: null=unchecked, []=none
 let specFailsJob = '';     // job slug the specFails list belongs to
 let emailDates = new Set();
 let emailSubject = '';
-let emailSender = '';      // sender first name for reply greetings
+let emailSender = '';      // sender first name for reply greetings + job slug
+let jobStampCache = null;  // slug time when the email's sent date won't parse
 let emailDate = '';        // sent timestamp for the Jira ticket header
 let emailGraphId = '';     // Graph message id when the email came via inbox
 let emailFromAddr = '';    // sender address of the Graph-loaded email
@@ -365,19 +366,18 @@ async function sheetCoversRequest() {
 }
 
 // Job naming: flat ~/Downloads/Ingest/ layout - media lands at the top
-// level, per-job metadata is <date>-<client>-<label>-manifest.json (the
-// client name stays in the slug so every batch still self-identifies and
-// manifests can't collide). The label box is an optional suffix;
-// advertiser falls in when the box is empty.
-function jobSlugBase() {
-  const d = extractDates(emailEl.value)[0] || new Date().toISOString().slice(0, 10);
-  const cl = client ? client.name.split(' (')[0].split(' / ')[0].replace(/[^\w]+/g, '') : 'job';
-  return d.replace(/-/g, '') + '-' + cl;
-}
+// level, per-job metadata is <slug>-manifest.json. The slug is fixed
+// format, no input: date+time the request was sent (now when the email
+// date won't parse), client, and the requester's name when known.
+// The timestamp keeps same-day/same-client jobs from colliding.
 function jobSlug() {
-  const extra = String($('jobLabel').value || detectedAdvertiser || '')
-    .replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
-  return (jobSlugBase() + (extra ? '-' + extra : '')).slice(0, 80);
+  const sent = Date.parse(emailDate);
+  const t = isNaN(sent) ? (jobStampCache = jobStampCache || new Date()) : new Date(sent);
+  const d = t.getFullYear() + String(t.getMonth() + 1).padStart(2, '0') + String(t.getDate()).padStart(2, '0');
+  const ts = t.toTimeString().slice(0, 8).replace(/:/g, '');
+  const cl = client ? client.name.split(' (')[0].split(' / ')[0].replace(/[^\w]+/g, '') : 'job';
+  const who = String(emailSender || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+  return (d + '-' + ts + '-' + cl + (who ? '-' + who : '')).slice(0, 80);
 }
 
 function saveInputs() {
@@ -448,9 +448,9 @@ function resetRun() {
   // a dirty reply kept last request's text, a staged Jira run could post
   // the wrong ticket's comment, and stale records/dates attach wrongly.
   replyDirty = false; emailDate = ''; emailGraphId = ''; emailFromAddr = ''; emailFolderName = '';
-  // The job label is per-batch - a stale one kept merging later batches
-  // into one folder. The base (date+client) regenerates at download time.
-  $('jobLabel').value = '';
+  // Sender + slug-time are per-request: a stale greeting names the
+  // previous requester, and a stale timestamp re-slugs the next job.
+  emailSender = ''; jobStampCache = null;
   sheetAutoLoaded = ''; // next request may auto-pull a different tracker
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
@@ -1555,6 +1555,10 @@ function erRegistryHits(req) {
 
 function onEmailChange() {
   const text = emailEl.value;
+  // Paste-into-the-box skips setEmailText - recompute the greeting name
+  // here too, or replies go out nameless. Cleared when the box empties.
+  if (!text.trim()) emailSender = '';
+  else if (!emailSender) emailSender = senderFirstName(text);
   if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
   // Auto-pull the client's known tracker off its mined sheet id - the
   // request email no longer needs to carry the sheet link. Skipped when
@@ -1614,6 +1618,7 @@ function onEmailChange() {
   info.style.display = 'block';
   const bits = [];
   if (emailSubject) bits.push('subject: <i>' + esc(emailSubject) + '</i>');
+  if (emailSender) bits.push('sender: <b>' + esc(emailSender) + '</b>');
   if (trimmed) bits.push('<i>thread trimmed - using newest message</i>');
   bits.push('<b>' + links.length + '</b> link(s)' + (links.length ? ' [' + links.map(l => esc(l.type)).join(', ') + ']' : ''));
   bits.push('<b>' + dates.length + '</b> date(s)' + (dates.length ? ': ' + dates.map(esc).join(', ') : ''));
@@ -2661,12 +2666,6 @@ function presentMatches(quiet) {
 
   // Feed the reconcile box + suggest a job folder name.
   idsEl.value = sel.map(m => m.id).filter(Boolean).join('\n');
-  if (!$('jobLabel').value) {
-    const slug = (detectedAdvertiser || emailSubject || '')
-      .replace(/^\[external\]\s*/i, '').replace(/^(re|fw|fwd):\s*/i, '')
-      .replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-    if (slug) $('jobLabel').value = slug;
-  }
   const nLinks = sel.filter(m => m.link).length;
   const nEspn = sel.filter(m => m.espn).length;
   const nCarried = sel.filter(m => m.offSheet).length;
