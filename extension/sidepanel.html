@@ -85,8 +85,11 @@
   .info { font-size: 10px; color: #b8bfca; background: var(--surface-2); border-radius: var(--r);
           padding: 4px 7px; margin-top: 5px; display: none; }
   /* Secondary control groups collapse behind a toggle that matches the
-     buttons it sits beside - same height/shape, dimmer text, ▾ marker. */
-  details.mini { display: inline; }
+     buttons it sits beside - same height/shape, dimmer text, ▾ marker.
+     The card border/padding from the details rule must be reset - on an
+     inline element it draws fragmented frame artifacts. */
+  details.mini { display: inline; border: none; border-radius: 0; padding: 0;
+    margin: 0; background: none; }
   details.mini > summary { display: inline-flex; align-items: center; gap: 4px;
     height: 23px; padding: 0 9px; font-family: inherit; font-size: 10px; font-weight: 500;
     letter-spacing: .02em; border: 1px solid var(--border-hi); border-radius: 5px;
@@ -331,7 +334,7 @@
   <div class="row">
     <button id="grabAndDl" class="primary" title="Read every open delivery page (ER list, Yangaroo, link pages) and queue the matched files">↓ From open pages</button>
     <span class="grp" data-opt="erSweep">
-      <input type="text" id="erSender" placeholder="sender (e.g. tatari)" size="12">
+      <input type="text" id="erSender" placeholder="sender (e.g. tatari)" style="width:9em">
       <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
       <button id="erSweep">↓ From ER search</button>
     </span>
