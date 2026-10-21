@@ -317,7 +317,11 @@
   <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. <b>&#10005;</b> in the first column excludes a row - downloads, manifest, portal and replies all skip it; click again to restore. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
   <div class="row">
     <button id="match" class="primary" title="Match the email's tracking codes to rows in the loaded tracker">⇄ Match</button>
-    <input type="text" id="jobLabel" placeholder="batch label" size="14" title="Names the download folder: <date>-<client>-<label>">
+    <details class="mini"><summary>batch label</summary>
+      <div class="row">
+        <input type="text" id="jobLabel" placeholder="batch label" size="14" title="Names the download folder: <date>-<client>-<label>">
+      </div>
+    </details>
     <button id="download" class="hidden"></button>
     <button id="showSheet" class="hidden" title="Scroll the tracker tab to the matched rows">Show on sheet</button>
   </div>
@@ -328,27 +332,32 @@
   <summary>4 · Download the media<span class="ib" data-bubble="b4">?</span><span class="stamp" id="tsCapture"></span><span class="sdot" id="sdDl"></span></summary>
   <div class="sub">Get the media - direct links, ER search, or open pages.</div>
   <div class="bubble hidden" id="b4">
-    <b>Open pages</b> reads every delivery list open in the browser (ER Spot Deliveries tabs + the focused page) - only what's on screen; flip pages and press again to accumulate.<br>
-    <b>ER search</b> queries Extreme Reach directly: every Inscape TV delivery in the day window, all pages. Optional sender filter reads each delivery's "Trafficked By" (e.g. <i>tatari</i>); with matched IDs loaded it only sender-checks those rows. No page needed open - just be logged into ER.
+    <b>Find &amp; download</b> is fully automatic: direct sheet links first, then the ER delivery search (queries Extreme Reach for every Inscape TV delivery in the day window - auto-widens to 30 days when IDs stay missing), then open delivery pages as the fallback. No page needed open for the ER search - just be logged in.<br>
+    <b>Re-check</b> re-runs the delivery check and arms a 5-min watch that chimes when files land. <b>Overrides</b> holds the manual paths: sender/day-window ER search, open-pages-only capture, and the keyed ER API fetch.
   </div>
   <div class="row">
-    <button id="grabAndDl" class="primary" title="Read every open delivery page (ER list, Yangaroo, link pages) and queue the matched files">↓ From open pages</button>
-    <span class="grp" data-opt="erSweep">
-      <input type="text" id="erSender" placeholder="sender (e.g. tatari)" style="width:9em">
-      <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
-      <button id="erSweep">↓ From ER search</button>
-    </span>
+    <button id="grabAndDl" class="primary" title="Find the media automatically - direct sheet links first, then the ER delivery search (auto-widening), then open delivery pages">↓ Find &amp; download</button>
     <button id="recheck" title="Check the inbox/ER for the delivery now - and arm a watch that alerts when it lands">⟳ Re-check</button>
-    <details id="manualTools" class="mini" data-opt="manual">
-      <summary>ER API (keyed fetch)</summary>
-      <!-- ids/files look like leftovers but are the run's state carriers:
-           the email's codes, the match output and downloaded names all
-           flow through them. Hidden, not deleted. -->
-      <textarea id="ids" class="hidden"></textarea>
-      <textarea id="files" class="hidden"></textarea>
+    <details class="mini"><summary>overrides</summary>
       <div class="row">
-        <button id="erApi">↓ Fetch &amp; download</button>
-        <span class="hint">API key lives in ⚙ Settings</span>
+        <span class="grp" data-opt="erSweep">
+          <input type="text" id="erSender" placeholder="sender (e.g. tatari)" style="width:9em">
+          <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
+          <button id="erSweep" title="Force the ER delivery search with these filters - skips the link/open-pages stages">↓ ER search</button>
+        </span>
+        <button id="dlPages" title="Only read open delivery pages (ER list, Yangaroo, link pages) - skips the ER search">↓ Open pages</button>
+        <details id="manualTools" class="mini" data-opt="manual">
+          <summary>ER API (keyed fetch)</summary>
+          <!-- ids/files look like leftovers but are the run's state carriers:
+               the email's codes, the match output and downloaded names all
+               flow through them. Hidden, not deleted. -->
+          <textarea id="ids" class="hidden"></textarea>
+          <textarea id="files" class="hidden"></textarea>
+          <div class="row">
+            <button id="erApi">↓ Fetch &amp; download</button>
+            <span class="hint">API key lives in ⚙ Settings</span>
+          </div>
+        </details>
       </div>
     </details>
     <span class="hint" id="watchInfo"></span>
@@ -369,7 +378,11 @@
     <button id="ingestCheck" title="Probe the portal queue (customer check + queued files) and show the fill plan for the matched rows">▤ Check &amp; preview</button>
     <button id="ingestPush" class="primary hidden" title="Approve the previewed fills - writes them into the portal queue cells">✓ Accept fills</button>
     <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - no drag-and-drop">⇧ Feed files</button>
-    <button id="pickPortal" title="Pick media anywhere on disk - files land in the job folder, pair to manifest rows, then feed the portal picker">⇧ Pick &amp; feed</button>
+    <details class="mini"><summary>more</summary>
+      <div class="row">
+        <button id="pickPortal" title="Pick media anywhere on disk - files land in the job folder, pair to manifest rows, then feed the portal picker">⇧ Pick &amp; feed</button>
+      </div>
+    </details>
   </div>
   <div class="msg" id="ingestInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
@@ -417,8 +430,13 @@
     <div class="hint" style="margin-top:5px">Review the draft - it only posts on your click.</div>
     <div class="row"><button id="jiraApprove" class="primary hidden">✓ Post to Jira</button>
       <button id="copyTicket">⧉ Copy</button>
-      <button id="rebuildTicket" title="Rebuild from the current email + match">↻ Rebuild</button>
-      <button id="clearTicket">✕ Clear</button></div>
+      <details class="mini"><summary>options</summary>
+        <div class="row">
+          <button id="rebuildTicket" title="Rebuild from the current email + match">↻ Rebuild</button>
+          <button id="clearTicket">✕ Clear</button>
+        </div>
+      </details>
+    </div>
   </div>
 </details>
 
@@ -430,18 +448,22 @@
     <b>Copy reply</b> puts it on the clipboard; <b>Draft in Outlook</b> creates a reply draft on the original thread (review and send yourself). Edits to the preview are kept until Redraft or Clear.</div>
   <div id="replyArea" class="hidden" style="margin-top:6px">
     <div class="row">
-      <select id="replyKind" title="Draft variant">
-        <option value="auto">Auto draft</option>
-        <option value="ingest">Ingested + IDs</option>
-        <option value="received">Received, processing</option>
-        <option value="missing">Not yet available</option>
-        <option value="specfail">Spec failure</option>
-      </select>
       <button id="copyReply" class="primary">⧉ Copy reply</button>
       <button id="draftReplyOut" title="Create a reply draft on the original thread in Outlook">✉ Draft in Outlook</button>
-      <button id="redraftReply" title="Rebuild from the current email + match">↻ Redraft</button>
-      <button id="clearReply">✕ Clear</button>
-      <button id="copyExcReply" data-opt="excReply" title="Copy the exception reply variant (escalation wording)">⧉ Exception reply</button>
+      <details class="mini"><summary>options</summary>
+        <div class="row">
+          <select id="replyKind" title="Draft variant">
+            <option value="auto">Auto draft</option>
+            <option value="ingest">Ingested + IDs</option>
+            <option value="received">Received, processing</option>
+            <option value="missing">Not yet available</option>
+            <option value="specfail">Spec failure</option>
+          </select>
+          <button id="redraftReply" title="Rebuild from the current email + match">↻ Redraft</button>
+          <button id="copyExcReply" data-opt="excReply" title="Copy the exception reply variant (escalation wording)">⧉ Exception reply</button>
+          <button id="clearReply">✕ Clear</button>
+        </div>
+      </details>
     </div>
     <div class="hint" id="replyCheck"></div>
     <textarea id="replyPreview" class="scrollbox mono" style="height:14vh;font-size:11px;margin-top:4px"></textarea>

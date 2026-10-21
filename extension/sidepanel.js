@@ -4139,7 +4139,33 @@ $('recheck').addEventListener('click', () => recheckDelivery(false));
 // One-shot delivery-page flow: scan every open delivery tab (focused page
 // + all ER tabs), reconcile against the requested IDs already loaded from
 // the sheet match, and queue every FOUND download.
-$('grabAndDl').addEventListener('click', async () => {
+// The automatic download cascade: real sheet links go direct; else the
+// ER delivery search (auto-widening once on missing IDs); open delivery
+// pages are the last fallback. Shared by "Find & download" and Run all.
+async function autoDownload() {
+  const nDl = selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
+  if (nDl) { await downloadLinked(); return; }
+  let swept = await sweepAndDownload();
+  const missingNow = () => (lastResults || []).filter(r => r.status === 'MISSING').length;
+  const days = parseInt($('erDays').value, 10) || 14;
+  if (missingNow() > 0 && days < 30) {
+    $('erDays').value = Math.min(days * 2, 30);
+    chrome.storage.local.set({ erDays: String($('erDays').value) });
+    toast(missingNow() + ' still missing - widening the sweep to ' + $('erDays').value + ' days…');
+    swept = (await sweepAndDownload()) || swept;
+  }
+  if (swept) return;
+  if (await captureTabs()) {
+    if (runReconcile()) { await downloadFound(); return; }
+  }
+  toast('Matched ' + selectedMatches().length + ' row(s) but found no downloadable files - see the log.');
+}
+
+$('grabAndDl').addEventListener('click', autoDownload);
+
+// Open-pages-only override (lives under the "overrides" dropdown): read
+// every open delivery page, reconcile, queue FOUND - no ER search.
+$('dlPages').addEventListener('click', async () => {
   if (!await captureTabs()) return;
   if (!runReconcile()) return;
   await downloadFound();
@@ -4184,27 +4210,10 @@ $('runAll').addEventListener('click', async () => {
   // 3 · Match ('guess' stops at the confirm picker - that's the user step).
   if (await doMatch() !== true) return;
 
-  // 4 · Download: real sheet links go direct; else the ER search sweep;
-  // open delivery pages are the fallback.
-  const nDl = selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
-  dbg('runAll: matched', { rows: selectedMatches().length, withLinks: nDl });
-  if (nDl) { await downloadLinked(); return; }
-  let swept = await sweepAndDownload();
-  // Auto-widen once when the first window leaves IDs missing - a stale
-  // delivery date is the common cause of "not found" after a good match.
-  const missingNow = () => (lastResults || []).filter(r => r.status === 'MISSING').length;
-  const days = parseInt($('erDays').value, 10) || 14;
-  if (missingNow() > 0 && days < 30) {
-    $('erDays').value = Math.min(days * 2, 30);
-    chrome.storage.local.set({ erDays: String($('erDays').value) });
-    toast(missingNow() + ' still missing - widening the sweep to ' + $('erDays').value + ' days…');
-    swept = (await sweepAndDownload()) || swept;
-  }
-  if (swept) return;
-  if (await captureTabs()) {
-    if (runReconcile()) { await downloadFound(); return; }
-  }
-  toast('Matched ' + selectedMatches().length + ' row(s) but found no downloadable files - see the log.');
+  // 4 · Download: the shared cascade - links, sweep, pages.
+  dbg('runAll: matched', { rows: selectedMatches().length,
+    withLinks: selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length });
+  await autoDownload();
 });
 
 // ---------- Restore state + context-menu captures ----------
