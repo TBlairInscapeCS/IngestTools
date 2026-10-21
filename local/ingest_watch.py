@@ -162,16 +162,50 @@ def start_log_server():
                 self._cors(404)
 
         def do_POST(self):
-            if self.path != "/ingest-log":
-                self._cors(404)
+            u = urllib.parse.urlparse(self.path)
+            if u.path == "/ingest-log":
+                try:
+                    body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                    LOG_DIR.mkdir(exist_ok=True)
+                    (LOG_DIR / "ingest-tools-log.txt").write_bytes(body)
+                    self._cors()
+                except Exception:
+                    self._cors(500)
                 return
-            try:
+            # Panel's "Pick & feed": the user points at media anywhere on
+            # disk; it lands in the job dir paired to its manifest row so
+            # the portal feed (and the archive) treat it like a download.
+            if u.path == "/ingest-upload":
+                q = urllib.parse.parse_qs(u.query)
+                slug = (q.get("job") or [""])[0]
+                name = Path((q.get("name") or [""])[0]).name  # basename only
+                mp, m = find_manifest_for_job(slug)
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                LOG_DIR.mkdir(exist_ok=True)
-                (LOG_DIR / "ingest-tools-log.txt").write_bytes(body)
-                self._cors()
-            except Exception:
-                self._cors(500)
+                if not m or not name or not body:
+                    self._cors(400)
+                    return
+                job_dir = mp.parent
+                target = job_dir / name
+                n = 1
+                while target.exists():
+                    target = job_dir / f"{Path(name).stem} ({n}){Path(name).suffix}"
+                    n += 1
+                try:
+                    target.write_bytes(body)
+                except Exception:
+                    self._cors(500)
+                    return
+                picked = target.name
+                expected = [e.get("file", "") for e in m.get("files", [])
+                            if e.get("file") and not (job_dir / e["file"]).exists()]
+                members = [picked]
+                pair_members(members, expected, job_dir)
+                saved = members[0]
+                self._send(200, json.dumps(
+                    {"saved": saved, "paired": saved != picked}).encode(),
+                    "application/json")
+                return
+            self._cors(404)
 
         def log_message(self, *a):
             pass

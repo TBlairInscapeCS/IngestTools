@@ -363,13 +363,13 @@
 <details class="s5" id="sec5">
   <summary>5 · Fill the portal + report<span class="ib" data-bubble="b5">?</span><span class="stamp" id="tsIngest"></span><span class="sdot" id="sdIngest"></span></summary>
   <div class="sub">Fill the portal queue, then verify + draft Jira. Ingest/post stay your clicks.</div>
-  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check portal</b> verifies the customer name against the playbook and lists queued files. <b>Preview fills</b> shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Push fills</b> writes them into the queue cells and keeps watching for files dropped later. <b>_ticker</b> files get fingerprint=video per playbook. Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click.</div>
+  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check &amp; preview</b> verifies the customer name against the playbook, lists queued files and shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Accept fills</b> approves that preview: writes the cells and keeps watching for files dropped later. <b>Feed files</b> streams this job's downloaded files into the portal's file picker; <b>Pick &amp; feed</b> lets you choose media anywhere on disk (files land in the job folder first). <b>_ticker</b> files get fingerprint=video per playbook. Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click.</div>
   <div class="subhd">Fill the ingest queue</div>
   <div class="row">
-    <button id="ingestCheck">Check portal</button>
-    <button id="ingestPreview">Preview fills</button>
-    <button id="ingestPush" class="primary hidden">↑ Push fills</button>
+    <button id="ingestCheck" title="Probe the portal queue (customer check + queued files) and show the fill plan for the matched rows">▤ Check &amp; preview</button>
+    <button id="ingestPush" class="primary hidden" title="Approve the previewed fills - writes them into the portal queue cells">✓ Accept fills</button>
     <button id="feedPortal" title="Streams this job's downloaded files from Ingest/ into the portal's file picker - no drag-and-drop">⇧ Feed files</button>
+    <button id="pickPortal" title="Pick media anywhere on disk - files land in the job folder, pair to manifest rows, then feed the portal picker">⇧ Pick &amp; feed</button>
   </div>
   <div class="msg" id="ingestInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
@@ -469,6 +469,7 @@
 </div>
 <div id="toast"></div>
 <input type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx,.eml" class="hidden">
+<input type="file" id="portalPick" accept="video/*,.mp4,.mov,.mxf,.mpg,.mpeg,.ts" multiple class="hidden">
 <script src="engine.js"></script>
 <script src="clients.js"></script>
 <script src="xlsx.js"></script>

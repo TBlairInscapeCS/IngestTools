@@ -4422,11 +4422,12 @@ $('ingestCheck').addEventListener('click', async () => {
   $('ingestInfo').innerHTML = esc(cidTxt) + ' · ' + p.rows.length + ' file(s) queued';
   setStage('sdIngest', custOk ? 'ok' : 'warn',
     'customer "' + p.customer + '"' + (custOk ? ' matches cidMap' : ' does NOT match cidMap ' + cids.join('/')) + ' · ' + p.rows.length + ' queued');
+  // One click = check + preview: rows already queued get the
+  // actual-vs-expected verify; an empty queue shows the fill plan.
+  $('ingestPush').classList.toggle('hidden', !ingestPlan().rows.length);
   if (p.rows.length) renderIngestVerify(p);
-  else $('ingestPreviewBox').innerHTML = '<div class="hint">queue empty - drop videos, then Check again</div>';
+  else renderIngestPreview();
 });
-
-$('ingestPreview').addEventListener('click', renderIngestPreview);
 
 $('ingestPush').addEventListener('click', async () => {
   const plan = ingestPlan();
@@ -4487,23 +4488,59 @@ async function feedJobFiles(job, base) {
   } catch (e) { return { error: String(e) }; }
 }
 
+// Feeds whatever the watcher has for this job into the portal picker.
+// Shared by "Feed files" (job-dir downloads) and "Pick & feed" (after
+// the picked files have been uploaded into the job dir).
+async function feedPortalNow(tab, job) {
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id }, func: feedJobFiles, args: [job, 'http://127.0.0.1:8770'] });
+  const r = (res && res.result) || {};
+  if (r.error) { $('ingestInfo').textContent = r.error; toast(r.error); return r; }
+  stamp('tsIngest');
+  $('ingestInfo').textContent = 'Fed ' + r.fed + ' file(s) - ' + r.rowsAdded + ' new queue row(s), ' +
+    r.rowsTotal + ' total' + (r.rowsAdded ? ' - Check & preview to verify' :
+    ' - no new rows appeared; the page may need a manual drop') +
+    (r.skipped && r.skipped.length ? ' · skipped: ' + r.skipped.join(', ') : '');
+  dbg('feed portal', r);
+  return r;
+}
+
 $('feedPortal').addEventListener('click', async () => {
   const tab = await portalTab();
   if (!tab) { toast('No portal.cognet.tv tab open - open the ingest page first'); return; }
-  const job = jobSlug();
   $('ingestInfo').textContent = 'Streaming job files from Ingest/ into the portal picker…';
-  try {
-    const [res] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id }, func: feedJobFiles, args: [job, 'http://127.0.0.1:8770'] });
-    const r = (res && res.result) || {};
-    if (r.error) { $('ingestInfo').textContent = r.error; toast(r.error); return; }
-    stamp('tsIngest');
-    $('ingestInfo').textContent = 'Fed ' + r.fed + ' file(s) - ' + r.rowsAdded + ' new queue row(s), ' +
-      r.rowsTotal + ' total' + (r.rowsAdded ? ' - Check portal / Push fills to verify' :
-      ' - no new rows appeared; the page may need a manual drop') +
-      (r.skipped && r.skipped.length ? ' · skipped: ' + r.skipped.join(', ') : '');
-    dbg('feed portal', r);
-  } catch (e) { toast(e.message); }
+  try { await feedPortalNow(tab, jobSlug()); } catch (e) { toast(e.message); }
+});
+
+// Manual fallback for deliveries that never came through the extension:
+// pick media anywhere -> upload into the job folder (watcher pairs each
+// to its manifest row by stem) -> feed the portal picker as usual.
+$('pickPortal').addEventListener('click', () => $('portalPick').click());
+$('portalPick').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const job = jobSlug();
+  $('ingestInfo').textContent = 'Uploading ' + files.length + ' file(s) into ' + job + '…';
+  const paired = [], unpaired = [], failed = [];
+  for (const f of files) {
+    try {
+      const r = await fetch('http://127.0.0.1:8770/ingest-upload?job=' +
+        encodeURIComponent(job) + '&name=' + encodeURIComponent(f.name),
+        { method: 'POST', body: f });
+      const d = r.ok ? await r.json() : null;
+      if (d && d.saved) (d.paired ? paired : unpaired).push(d.saved);
+      else failed.push(f.name);
+    } catch (e2) { failed.push(f.name); }
+  }
+  $('ingestInfo').textContent = 'Landed ' + paired.length + unpaired.length + ' of ' + files.length +
+    ' file(s)' + (unpaired.length ? ' · unpaired: ' + unpaired.join(', ') : '') +
+    (failed.length ? ' · failed: ' + failed.join(', ') : '');
+  if (failed.length === files.length) { toast('Upload failed - is ingest_watch running?'); return; }
+  if (unpaired.length) toast('Some files matched no manifest row - they stay in the job folder unpaired.');
+  const tab = await portalTab();
+  if (!tab) { toast('Files are in the job folder - open the portal ingest page, then Feed files.'); return; }
+  try { await feedPortalNow(tab, job); } catch (e3) { toast(e3.message); }
 });
 
 // ---------- live portal ingest status (records API while panel is open) ----------
