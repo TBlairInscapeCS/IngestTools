@@ -45,14 +45,22 @@ function extractBasename(s) {
  * @returns {{results: Array, counts: Object}}
  */
 function reconcile(ids, fileNames) {
+  // SharePoint activity-feed text wraps real file names: "<person> added
+  // <file>" and "[EXTERNAL] <file>" repeat one upload under display text.
+  // Match on the inner name so the echoes can't manufacture ambiguity,
+  // keep the raw name for results - captured URLs are keyed by it.
+  const stripFeed = n => String(n)
+    .replace(/^\[(?:external|ext)\]\s*/i, '')
+    .replace(/^\S+\s+\S+(?:\s+\S+)?\s+added\s+/i, '');
+  const seenFiles = new Set();
   const files = fileNames
     .map(extractBasename)
     .filter(Boolean)
-    .map(name => ({
-      name,
-      norm: normalizeName(name),
-      haystack: normalizeName(name).replace(/ /g, ''),
-    }));
+    .map(name => {
+      const norm = normalizeName(stripFeed(name));
+      return { name, norm, haystack: norm.replace(/ /g, '') };
+    })
+    .filter(f => f.haystack && !seenFiles.has(f.haystack) && seenFiles.add(f.haystack));
 
   const results = [];
   const seen = new Map(); // normalized ID -> first occurrence index

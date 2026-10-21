@@ -2487,7 +2487,11 @@ function mergeMatches(fresh) {
   if (!matched || !matched.length || matchedFor !== emailEl.value) return fresh;
   const key = m => normalizeName(m.id || m.trackingId || ('row' + m.row)).replace(/[\s:_-]+/g, '');
   const freshKeys = new Set(fresh.map(key));
-  const carried = matched.filter(m => !m.excluded && !freshKeys.has(key(m)))
+  // 'ROW (out of range)' rows carry no identity - they're placeholders
+  // from citing line numbers that didn't exist on the sheet then
+  // loaded. Carrying them into a re-match just litters the table.
+  const carried = matched.filter(m => !m.excluded && !freshKeys.has(key(m)) &&
+    m.matchType !== 'ROW (out of range)')
     .map(m => ({ ...m, offSheet: true }));
   return fresh.concat(carried);
 }
@@ -3426,11 +3430,31 @@ function runReconcile() {
     }
   });
 
+  // AMBIGUOUS resolution: a code can appear in several captured names -
+  // SharePoint activity-feed lines ("User added X.mp4", "[EXTERNAL] X")
+  // repeat the real library row under different display text. When the
+  // candidates hold exactly one download URL between them, that linked
+  // entry is the file the sender means; name-only duplicates were never
+  // downloadable anyway. Distinct URLs stay ambiguous - real ambiguity.
+  let linkResolved = 0;
+  results.forEach(r => {
+    if (r.status !== 'AMBIGUOUS') return;
+    const cands = r.matched.split(' | ');
+    const linked = cands.filter(n => /^https?:/i.test((capturedByName[n] || {}).url || ''));
+    const urls = [...new Set(linked.map(n => capturedByName[n].url))];
+    if (linked.length && urls.length === 1) {
+      r.status = 'FOUND';
+      r.matched = linked[0];
+      r.notes = cands.length + ' files match - picked the one with a link';
+      linkResolved++;
+    }
+  });
+
   const counts = {};
   results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
   lastResults = results;
   lastExtras = extras || [];
-  dbg('reconcile', { ids: ids.length, files: files.length, ...counts, titleHits,
+  dbg('reconcile', { ids: ids.length, files: files.length, ...counts, titleHits, linkResolved,
     found: results.filter(r => r.status === 'FOUND').map(r => r.id) });
 
   const order = ['FOUND', 'POSSIBLE MATCH', 'AMBIGUOUS', 'MISSING', 'DUPLICATE', 'BLANK', 'EXTRA'];

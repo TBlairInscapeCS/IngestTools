@@ -308,6 +308,24 @@ eq('detect theatrical body', detect('', 'Hi Inscape Team,\n\nThe below spots hav
   eq('unrelated still missing', miss.results[0].status, 'MISSING');
 }
 
+// Reconcile: SharePoint activity-feed echoes ("X added <file>",
+// "[EXTERNAL] <file>") repeat one upload under display text - they
+// dedupe to a single candidate instead of manufacturing AMBIGUOUS.
+{
+  const feed = reconcile(['ZWHF0386000H'], [
+    '[EXTERNAL] 18881G_BRD_ZWHF0386000H_15_Cage Free Eggs.mp4',
+    'Carley Wells added 18881G_BRD_ZWHF0386000H_15_Cage Free Eggs.mp4',
+  ]);
+  eq('feed echoes dedupe to found', feed.results[0].status, 'FOUND');
+  eq('feed echo keeps raw name', feed.results[0].matched,
+    '[EXTERNAL] 18881G_BRD_ZWHF0386000H_15_Cage Free Eggs.mp4');
+  const two = reconcile(['ZWHF0386000H'], [
+    '18881G_BRD_ZWHF0386000H_15_Cage Free Eggs.mp4',
+    '1885HN_BRD_ZWHF0386000H_15_Cage Free Eggs.mp4',
+  ]);
+  eq('distinct uploads still ambiguous', two.results[0].status, 'AMBIGUOUS');
+}
+
 // ---------- Reply phrasing: single file and all-file counts ----------
 {
   const mk = ids => ids.map(id => ({ status: 'FOUND', id }));
