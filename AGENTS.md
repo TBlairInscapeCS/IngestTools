@@ -23,5 +23,5 @@ the agent's responsibility as the only editor of the file.
 - Syntax check (no node on this machine):
   `osascript -l JavaScript /tmp/syncheck.jxa` or equivalent `new Function` parse.
 - Regression gate: `cd extension && osascript -l JavaScript test_fixtures.js`
-  (expect 76/76).
+  (expect 111/111).
 - `test_engine.js` is a diagnostic demo, not assertions.

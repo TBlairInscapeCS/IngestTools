@@ -114,6 +114,19 @@
   #depWarn { width: 100%; font-size: 10px; color: #ec9a9a; background: #2a1618;
     border-left: 3px solid #ec9a9a; border-radius: var(--r); padding: 4px 7px; margin-top: 6px; }
   #depWarn a { color: inherit; text-decoration: underline; }
+  #depGate { position: fixed; inset: 0; z-index: 200; background: var(--surface);
+    display: flex; align-items: flex-start; justify-content: center; padding-top: 60px; }
+  .gateCard { width: 262px; background: var(--surface-2); border: 1px solid var(--border-hi);
+    border-radius: 10px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font-size: 11px; }
+  .gateCard h2 { font-size: 14px; margin: 0 0 6px; }
+  .gateRow { display: flex; gap: 8px; margin: 9px 0; align-items: flex-start; }
+  .gateRow .cbx { flex: none; width: 14px; height: 14px; border: 1.5px solid #4a5263;
+    border-radius: 4px; margin-top: 1px; font-size: 11px; line-height: 13px; text-align: center;
+    font-weight: 700; color: var(--surface-2); }
+  .gateRow .cbx.ok { background: #3fbf7f; border-color: #3fbf7f; color: #0f1218; }
+  .gateRow .fix { font-size: 10px; color: var(--text-dim); }
+  .sdot.cred { width: 8px; height: 8px; margin-left: 5px; vertical-align: 1px; background: var(--surface-3); }
+  .sdot.cred.chk { opacity: .45; }
   /* Next-step guidance: accent-edged strip under the topbar. */
   #nextStep { width: 100%; margin-top: 6px; padding: 4px 8px; font-size: 10px; cursor: default;
     color: var(--text-dim); background: var(--surface); border: 1px solid var(--border);
@@ -212,9 +225,20 @@
   <div id="alertBox" class="hidden"></div>
   <div id="depWarn" class="hidden"></div>
 </div>
+<div id="depGate">
+  <div class="gateCard">
+    <h2>Finish setup to continue</h2>
+    <div class="fix" style="color:#b8bfca">The panel unlocks itself once every required
+      piece checks green - this screen stays dismissed after that.</div>
+    <div id="gateList"></div>
+    <div class="row" style="margin-top:10px"><a href="#" id="gateGuide">open the full setup guide</a></div>
+  </div>
+</div>
 <div id="settingsPanel" class="hidden" role="dialog" aria-label="Panel settings">
-  <div style="font-weight:700;margin-bottom:4px">Show in panel</div>
-  <label class="opt"><input type="checkbox" id="opt-graph"> Inbox check (Graph)</label>
+  <div style="font-weight:700;margin-bottom:4px">Setup</div>
+  <div class="opt" style="font-weight:400;cursor:default"><span class="sdot cred" id="sdWatch" style="margin:0 5px 0 0;vertical-align:0"></span>local watcher · <a href="#" id="openSetup">open setup checklist</a></div>
+  <div style="font-weight:700;margin:8px 0 4px">Show in panel</div>
+  <label class="opt"><input type="checkbox" id="opt-graph"> Inbox check (Graph) <span class="sdot cred" id="sdMs"></span></label>
   <label class="opt"><input type="checkbox" id="opt-emailExtra"> Extra email inputs</label>
   <label class="opt"><input type="checkbox" id="opt-excReply"> Exception reply</label>
   <label class="opt"><input type="checkbox" id="opt-colMap"> Column mapping</label>
@@ -240,16 +264,16 @@
       <a href="#" id="msDevCode">use device code instead</a>
     </div>
   </div>
-  <div style="font-weight:700;margin:8px 0 4px">Jira (post comment)</div>
+  <div style="font-weight:700;margin:8px 0 4px">Jira (post comment)<span class="sdot cred" id="sdJira"></span></div>
   <label class="opt">Email <input type="text" id="jiraEmail" placeholder="you@vizio.com" autocomplete="off" style="width:97%;margin-top:2px"></label>
   <label class="opt">API token <input type="password" id="jiraToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <div style="font-weight:700;margin:8px 0 4px">Airtable (tracker API)</div>
+  <div style="font-weight:700;margin:8px 0 4px">Airtable (tracker API)<span class="sdot cred" id="sdAt"></span></div>
   <div class="opt" style="font-weight:400;color:#8b93a1">Personal access token - airtable.com/create/tokens, scopes <i>data.records:read</i> + <i>schema.bases:read</i>. Lets Grab pull the pending view of every brand tab directly - no copy-paste, real link URLs.</div>
   <label class="opt">Token <input type="password" id="atToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
   <label class="opt">Base ID <input type="text" id="atBase" placeholder="app… (blank = auto-pick)" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <div style="font-weight:700;margin:8px 0 4px">Extreme Reach API</div>
+  <div style="font-weight:700;margin:8px 0 4px">Extreme Reach API<span class="sdot cred" id="sdEr"></span></div>
   <label class="opt">API key <input type="password" id="erApiKey" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <div style="font-weight:700;margin:8px 0 4px">Databricks (impressions)</div>
+  <div style="font-weight:700;margin:8px 0 4px">Databricks (impressions)<span class="sdot cred" id="sdDbx"></span></div>
   <label class="opt">Workspace host <input type="text" id="dbxHost" placeholder="dbc-abc123-xy.cloud.databricks.com" autocomplete="off" title="From your browser bar" style="width:97%;margin-top:2px"></label>
   <label class="opt">Warehouse id <input type="text" id="dbxWh" autocomplete="off" title="SQL warehouse ID - 'test' lists your warehouses in the log" style="width:97%;margin-top:2px"></label>
   <label class="opt">Token <input type="password" id="dbxTok" autocomplete="off" title="User Settings -&gt; Developer -&gt; Access tokens" style="width:97%;margin-top:2px"></label>

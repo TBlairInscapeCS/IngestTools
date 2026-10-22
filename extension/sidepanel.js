@@ -4786,9 +4786,16 @@ chrome.storage.local.get(['pendingIds', 'pendingFiles', 'erApiKey', 'erSender', 
   if (data.erDays) $('erDays').value = data.erDays;
 });
 
-// Dependency warn on open: a dead watcher (or missing ffprobe) kills the
-// file pipeline - say so up front, with a link to the setup checklist,
-// instead of letting every download/feed button fail one by one.
+// Dependency gate + health: the panel is unusable until the required
+// install-side deps (watcher + ffprobe) pass once - then depsOk latches
+// and the gate never shows again. A later regression (watcher dies)
+// surfaces as the non-blocking depWarn strip instead.
+async function watcherHealth() {
+  try {
+    const r = await fetch('http://127.0.0.1:8770/health', { signal: AbortSignal.timeout(2000) });
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
+}
 function showDepWarn(msg) {
   const el = $('depWarn');
   if (!el) return;
@@ -4799,18 +4806,109 @@ function showDepWarn(msg) {
     chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
   });
 }
-(async function depWarnCheck() {
-  try {
-    const r = await fetch('http://127.0.0.1:8770/health', { signal: AbortSignal.timeout(2000) });
-    const h = r.ok ? await r.json() : null;
-    if (h && h.ffprobe) return; // everything the panel can't do itself is up
-    showDepWarn(h && !h.ffprobe
-      ? 'ffprobe not found - spec checks and _ticker builds are off (brew install ffmpeg).'
-      : 'download watcher not running - downloads, tickers and portal feed are offline.');
-  } catch (e) {
-    showDepWarn('download watcher not running - downloads, tickers and portal feed are offline.');
+async function depWarnCheck() {
+  const h = await watcherHealth();
+  if (h && h.ffprobe) return; // everything the panel can't do itself is up
+  showDepWarn(h && !h.ffprobe
+    ? 'ffprobe not found - spec checks and _ticker builds are off (brew install ffmpeg).'
+    : 'download watcher not running - downloads, tickers and portal feed are offline.');
+}
+let gateTimer = null;
+async function gateCheck() {
+  const h = await watcherHealth();
+  const okWatch = !!h;
+  const okProbe = !!(h && h.ffprobe);
+  const rows = [
+    { ok: okWatch, label: 'download watcher', fix: okWatch ? 'listening on 127.0.0.1:8770'
+      : 'run watcher/install.command from the full package (double-click)' },
+    { ok: okProbe, label: 'ffprobe - spec checks + ticker builds', fix: !okWatch ? 'needs the watcher running first'
+      : okProbe ? 'found' : 'brew install ffmpeg' },
+  ];
+  $('gateList').innerHTML = rows.map(r =>
+    '<div class="gateRow"><span class="cbx ' + (r.ok ? 'ok' : '') + '">' + (r.ok ? '✓' : '') +
+    '</span><span><b>' + esc(r.label) + '</b><br><span class="fix">' + esc(r.fix) + '</span></span></div>').join('');
+  if (rows.every(r => r.ok)) {
+    chrome.storage.local.set({ depsOk: 1 });
+    $('depGate').classList.add('hidden');
+    clearInterval(gateTimer); gateTimer = null;
+    depWarnCheck(); // strip stays off - all green - but keep the check consistent
   }
-})();
+}
+chrome.storage.local.get('depsOk', d => {
+  if (d.depsOk) { $('depGate').classList.add('hidden'); depWarnCheck(); return; }
+  gateCheck();
+  gateTimer = setInterval(gateCheck, 4000);
+});
+$('gateGuide').addEventListener('click', e => {
+  e.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+});
+$('openSetup').addEventListener('click', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+});
+
+// Connection dots in ⚙ Settings: green = verified live, amber = set but
+// only partially working, red = set but failing, empty = not configured.
+// Runs each time the settings panel opens - cheap probes only.
+function credDot(id, state, title) {
+  const d = $(id);
+  if (!d) return;
+  d.className = 'sdot cred' + (state ? ' ' + state : '');
+  d.title = title || '';
+}
+async function checkConns() {
+  ['sdWatch', 'sdMs', 'sdJira', 'sdAt', 'sdEr', 'sdDbx'].forEach(id => credDot(id, 'chk', 'checking…'));
+  const jobs = [];
+
+  jobs.push(watcherHealth().then(h => credDot('sdWatch',
+    h ? (h.ffprobe ? 'ok' : 'warn') : 'fail',
+    h ? (h.ffprobe ? 'watcher running - all deps present' : 'watcher running, but ffprobe missing')
+      : 'watcher unreachable - run watcher/install.command')));
+
+  jobs.push(msLoad().then(async () => {
+    if (!MS.refreshToken) return credDot('sdMs', '', 'not signed in');
+    try { await msAccessToken(); credDot('sdMs', 'ok', 'inbox sign-in works'); }
+    catch (e) { credDot('sdMs', 'fail', 'sign-in expired - sign in again'); }
+  }).catch(() => credDot('sdMs', 'fail', 'sign-in check failed')));
+
+  jobs.push((async () => {
+    if (!$('jiraEmail').value.trim() && !$('jiraToken').value.trim()) return credDot('sdJira', '', 'no credentials set');
+    try { await jiraFetch('/rest/api/3/myself'); credDot('sdJira', 'ok', 'Jira credentials verified'); }
+    catch (e) { credDot('sdJira', 'fail', e.message); }
+  })());
+
+  jobs.push((async () => {
+    const t = $('atToken').value.trim();
+    if (!t) return credDot('sdAt', '', 'no token set');
+    try {
+      const r = await fetch('https://api.airtable.com/v0/meta/whoami', { headers: { Authorization: 'Bearer ' + t } });
+      credDot('sdAt', r.ok ? 'ok' : 'fail', r.ok ? 'Airtable token verified' : 'Airtable ' + r.status + ' - token rejected?');
+    } catch (e) { credDot('sdAt', 'fail', 'Airtable unreachable'); }
+  })());
+
+  jobs.push((async () => {
+    if (!erApiKey) return credDot('sdEr', '', 'no API key set');
+    try {
+      // Any non-auth response means the key was accepted - a deliberate
+      // bogus path gives 401/403 only when the key itself is rejected.
+      const r = await erApiGet('/ping');
+      credDot('sdEr', r.status === 401 || r.status === 403 ? 'fail' : 'ok',
+        r.status === 401 || r.status === 403 ? 'ER API key rejected (' + r.status + ')' : 'ER API key accepted');
+    } catch (e) { credDot('sdEr', 'fail', 'ER API unreachable'); }
+  })());
+
+  jobs.push((async () => {
+    const c = dbxCfg();
+    if (!c.host && !c.tok) return credDot('sdDbx', '', 'no credentials set');
+    if (!dbxReady(c)) return credDot('sdDbx', 'warn', 'host/warehouse/token incomplete');
+    try { await dbxApi('/api/2.0/sql/warehouses?page_size=1', 'GET'); credDot('sdDbx', 'ok', 'Databricks connected'); }
+    catch (e) { credDot('sdDbx', 'fail', e.message); }
+  })());
+
+  await Promise.allSettled(jobs);
+}
 
 // Exceptions sheet: restore the cached snapshot, then refresh live.
 chrome.storage.local.get('excData', d => {
@@ -4911,6 +5009,7 @@ $('settingsGear').addEventListener('click', e => {
   const p = $('settingsPanel');
   p.classList.toggle('hidden');
   $('settingsGear').setAttribute('aria-expanded', String(!p.classList.contains('hidden')));
+  if (!p.classList.contains('hidden')) checkConns();
 });
 $('settingsPanel').addEventListener('click', e => e.stopPropagation());
 document.addEventListener('click', () => {
@@ -5119,7 +5218,8 @@ $('dbxPing').addEventListener('click', async () => {
     dbg('databricks warehouses', whs);
     toast(whs.length ? whs.length + ' warehouse(s) - ids in the debug log'
       : 'Connected - no warehouses listed');
-  } catch (e) { toast('Databricks: ' + e.message); }
+    credDot('sdDbx', 'ok', 'Databricks connected');
+  } catch (e) { toast('Databricks: ' + e.message); credDot('sdDbx', 'fail', e.message); }
 });
 
 // Impression counts: separate from the run flow - paste reporting IDs
