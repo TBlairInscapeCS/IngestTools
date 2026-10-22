@@ -411,7 +411,8 @@ var CLIENTS = [
     name: 'Warner / Hearts & Science',
     detect: { keywords: [/hearts ?(&|and) ?science/i], domains: [/hearts-science\.com/i] },
     delivery: 'other',
-    ingest: { jiraEpic: 'DD-726', note: 'HBO content ingests for Discovery + Genius Digital customers.' },
+    ingest: { jiraEpic: 'DD-726', cidMap: ['discovery', 'geniusdigital'],
+      note: 'HBO content ingests for Discovery + Genius Digital customers.' },
   },
   {
     // Active - WB theatrical spots under the Warner umbrella. Trafficked
