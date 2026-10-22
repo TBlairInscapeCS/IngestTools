@@ -185,8 +185,10 @@ var CLIENTS = [
     note: "Email is an inline manifest: sheet row# + spot title + ISCI + creativehub share link per spot. Shares are viewer pages (open to download); tracker 'Working List' tab is the Bible.",
     cols: {
       // ISCI is the source ID; the 'Tracking ID' column further right is
-      // OUR fill-back confirmation, not source data.
-      id: /^isci/i,
+      // OUR fill-back confirmation, not source data. 'AMCN House #
+      // (Owned)', 'File Name' and 'ISCI (Paid Off Channel)' carry the
+      // same code - any of them works as the ID.
+      id: /isci|amcn house|file.?name/i,
     },
     ingest: { cidMap: 'horizonmedia', advertiser: true, nameTitle: true },
   },
