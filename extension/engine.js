@@ -193,22 +193,6 @@ function parseInput(text) {
   return { headers, rows, isTable, maxCols };
 }
 
-// Guess which column holds the IDs: header containing "id"/"ids".
-// "Spot Titles/Tracking IDs" (client-filled) wins over a bare "Tracking ID"
-// output column because it sorts earlier and both are 'preferred'.
-function guessIdColumn(headers) {
-  const preferred = /track|creative|ad|spot/i;
-  let fallback = -1;
-  for (let c = 0; c < headers.length; c++) {
-    const h = String(headers[c]);
-    if (/\bids?\b/i.test(h)) {
-      if (preferred.test(h)) return c;
-      if (fallback < 0) fallback = c;
-    }
-  }
-  return fallback;
-}
-
 // Find the header row in the first N rows: the one with the most
 // "header-like" cells (banners like "Required Fields by Inscape" are skipped).
 function detectHeaderRow(rows) {

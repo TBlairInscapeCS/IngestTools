@@ -356,22 +356,22 @@
 
 <details class="s4" id="sec4">
   <summary>4 · Download the media<span class="ib" data-bubble="b4">?</span><span class="stamp" id="tsCapture"></span><span class="sdot" id="sdDl"></span></summary>
-  <div class="sub">Get the media - direct links, ER search, or open pages.</div>
+  <div class="sub">Get the media - links, a delivery search, or whatever file page you have open.</div>
   <div class="bubble hidden" id="b4">
-    <b>Find &amp; download</b> is fully automatic: direct sheet links first, then the ER delivery search (queries Extreme Reach for every Inscape TV delivery in the day window - auto-widens to 30 days when IDs stay missing), then open delivery pages as the fallback. No page needed open for the ER search - just be logged in.<br>
-    <b>Re-check</b> re-runs the delivery check and arms a 5-min watch that chimes when files land. <b>Overrides</b> holds the manual paths: sender/day-window ER search, open-pages-only capture, and the keyed ER API fetch.
+    <b>Find &amp; download</b> tries every source in order: direct links from the email or tracker, a delivery search, then <b>any open page that lists files</b> - delivery lists, share folders, link pages, upload portals. If it lists your files, point at it. Only what's on screen counts - flip pages and press again to accumulate.<br>
+    <b>Re-check</b> re-runs the delivery check (inbox + delivery service) and arms a 5-min watch that chimes when files land. <b>Overrides</b> holds the manual paths: sender/day-window Extreme Reach search, open-pages-only capture, and the keyed ER API fetch.
   </div>
   <div class="row">
-    <button id="grabAndDl" class="primary" title="Find the media automatically - direct sheet links first, then the ER delivery search (auto-widening), then open delivery pages">↓ Find &amp; download</button>
-    <button id="recheck" title="Check the inbox/ER for the delivery now - and arm a watch that alerts when it lands">⟳ Re-check</button>
+    <button id="grabAndDl" class="primary" title="Find the media automatically - direct links first, then a delivery search, then any file pages you have open">↓ Find &amp; download</button>
+    <button id="recheck" title="Check for the delivery now - inbox and delivery service - and arm a watch that alerts when it lands">⟳ Re-check</button>
     <details class="mini"><summary>overrides</summary>
       <div class="row">
         <span class="grp" data-opt="erSweep">
           <input type="text" id="erSender" placeholder="sender (e.g. tatari)" style="width:9em">
           <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
-          <button id="erSweep" title="Force the ER delivery search with these filters - skips the link/open-pages stages">↓ ER search</button>
+          <button id="erSweep" title="Force the Extreme Reach delivery search with these filters - skips the link/open-pages stages">↓ ER search</button>
         </span>
-        <button id="dlPages" title="Only read open delivery pages (ER list, Yangaroo, link pages) - skips the ER search">↓ Open pages</button>
+        <button id="dlPages" title="Only read pages you have open - any page listing files works (delivery lists, share folders, link pages). Skips the search">↓ Open pages</button>
         <details id="manualTools" class="mini" data-opt="manual">
           <summary>ER API (keyed fetch)</summary>
           <!-- ids/files look like leftovers but are the run's state carriers:

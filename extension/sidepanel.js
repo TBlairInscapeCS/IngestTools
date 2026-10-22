@@ -3780,7 +3780,7 @@ async function captureTabs() {
   // SharePoint doc-library views are file sources (not tracker workbooks).
   cls.sharepoint.filter(t => /AllItems\.aspx|\/Forms\//i.test(t.url || ''))
     .forEach(t => { if (!cands.some(c => c.id === t.id)) cands.push(t); });
-  if (!cands.length) { toast('Focus a web page (or open a delivery list) first.'); return false; }
+  if (!cands.length) { toast('Focus a page that lists files - delivery list, share folder, link page.'); return false; }
   let got = false;
   for (const t of cands) got = (await capturePage(t)) || got;
   return got;
@@ -5244,7 +5244,7 @@ const NEXT_STEPS = [
   ['sdEmail', 'sec1', 'load the request email - Run all, Check inbox, or Grab from Outlook'],
   ['sdSheet', 'sec2', 'load the tracker - auto-pulls from the email link, or Grab sheet tab'],
   ['sdMatch', 'sec3', 'press Match to pair the codes with rows'],
-  ['sdDl', 'sec4', 'download the media - open pages, ER search, or arm the watch'],
+  ['sdDl', 'sec4', 'download the media - any file page, a delivery search, or the watch'],
   ['sdIngest', 'sec5', 'fill the portal queue, verify, draft Jira'],
   ['sdReply', 'sec6', 'draft the reply'],
 ];
