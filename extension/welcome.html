@@ -48,6 +48,9 @@
               margin:2px 0 0 30px; }
   .dep.miss .fix, .dep.warn .fix { display:block; }
   .dep .opt-tag { display:none; }
+  .grphead { font-weight:700; font-size:12px; margin:14px 0 4px; }
+  .grphead:first-child { margin-top:2px; }
+  .dep .fix b { color:inherit; }
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
@@ -131,22 +134,22 @@ document.getElementById('ver').textContent = 'v' + chrome.runtime.getManifest().
 // optional dep renders dim, on a required one it warns. `for` is what
 // the dependency unlocks; `fix` shows only when it isn't green.
 const DEPS = [
-  { id:'watcher', name:'Download watcher', req:true,
+  { id:'watcher', name:'Download watcher', req:true, grp:'install',
     for:'downloads, _ticker builds, portal feed, job archive',
-    fix:'Double-click watcher/install.command (full package) or see local/README.md in the repo.' },
-  { id:'ffmpeg', name:'ffmpeg / ffprobe', req:true,
+    fix:'Double-click <b>watcher/install.command</b> in the full package. It installs to ~/Library/Application Support/IngestTools and starts itself at login - that is the whole setup.' },
+  { id:'ffmpeg', name:'ffmpeg / ffprobe', req:true, grp:'install',
     for:'spec checks and _ticker version builds',
-    fix:'brew install ffmpeg — or spec checks are skipped and tickers never build.' },
-  { id:'outlook', name:'Outlook on the web', req:true,
+    fix:'brew install ffmpeg — get Homebrew at brew.sh if needed. Without it spec checks skip and tickers never build.' },
+  { id:'outlook', name:'Outlook on the web', req:true, grp:'tabs',
     for:'reading request emails (or paste them manually)',
     fix:'Open the request email in an Outlook web tab.' },
-  { id:'sheets', name:'Google / tracker access', req:true,
+  { id:'sheets', name:'Google / tracker tab', req:true, grp:'tabs',
     for:'loading tracking sheets (link-shared export or open tab)',
     fix:'Sign into Google in Chrome, or keep the tracker tab open while you work.' },
-  { id:'portal', name:'portal.cognet.tv tab', req:true,
+  { id:'portal', name:'portal.cognet.tv', req:true, grp:'tabs',
     for:'feeding files + filling the ingest queue',
     fix:'Log into portal.cognet.tv in a tab when you reach step 5.' },
-  { id:'er', name:'Extreme Reach tab', req:false, grp:'main',
+  { id:'er', name:'Extreme Reach', req:false, grp:'tabs',
     for:'the delivery search - most clients deliver here',
     fix:'Log into app.extremereach.com in a tab.' },
   { id:'graph', name:'Microsoft sign-in', req:false, grp:'opt',
@@ -217,7 +220,19 @@ async function runChecks() {
   const box = document.getElementById('deps');
   const optBox = document.getElementById('optDeps');
   box.innerHTML = ''; optBox.innerHTML = '';
+  const GRP_HEAD = {
+    install: '1 · Installs <span class="fine">- the hard part, done once</span>',
+    tabs: '2 · Tabs to keep open <span class="fine">- session stuff, just sign in</span>',
+  };
+  let lastGrp = '';
   const rows = DEPS.map(d => {
+    if (d.grp !== 'opt' && d.grp !== lastGrp) {
+      const h = document.createElement('div');
+      h.className = 'grphead';
+      h.innerHTML = GRP_HEAD[d.grp];
+      box.appendChild(h);
+    }
+    lastGrp = d.grp || lastGrp;
     const el = document.createElement('div');
     el.className = 'dep';
     el.id = 'dep-' + d.id;
