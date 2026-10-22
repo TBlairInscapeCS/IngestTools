@@ -1311,7 +1311,8 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
   // Extracted codes are distinctive enough to check against EVERY cell in
   // a row - completed rows can carry the code only in a fill-back column
   // (Inscape Tracking ID), or the source column with extra suffix text.
-  const needles = extractCodes(emailText).map(c => normalizeName(c).replace(/[\s:_-]+/g, ''));
+  const codeList = extractCodes(emailText);
+  const needles = codeList.map(c => normalizeName(c).replace(/[\s:_-]+/g, ''));
   // Distinctiveness guard: count how many rows share each id/file/title
   // value. 'Same as column C'-style placeholders and generic labels repeat
   // across hundreds of rows - substring-matching one floods the match
@@ -1334,7 +1335,7 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
     const fileName = get(cols.file);
     const brand = get(cols.brand);
     const title = get(cols.title);
-    let matchType = '';
+    let matchType = '', citedCode = '';
     if (rowRefs.has(rowNum)) matchType = 'ROW';
     else {
       const idN = normalizeName(id).replace(/ /g, '');
@@ -1347,8 +1348,18 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       const hit = n => n.length >= 4 && hay.includes(n) && (/\d/.test(n) || n.length >= 10) && rare(n);
       const tN = normalizeName(title).replace(/ /g, '');
       if (hit(idN)) matchType = 'ID';
-      else if (needles.length && needles.some(c => c.length >= 6 &&
-          normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '').includes(c))) matchType = 'ID';
+      else if (needles.length) {
+        // Whole-row needle hit: the cited code lives in some cell but not
+        // necessarily the mapped ID column (AMCN sheets leave Tracking ID
+        // blank and carry the code elsewhere). Remember it - an empty ID
+        // cell makes it the trackingId instead of falling back to title.
+        const rowHay = normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '');
+        const hitCode = needles.find(c => c.length >= 6 && rowHay.includes(c));
+        if (hitCode) {
+          matchType = 'ID';
+          citedCode = codeList[needles.indexOf(hitCode)] || hitCode;
+        }
+      }
       else if (hit(fN)) matchType = 'FILE';
       // A spot title quoted in the email is an explicit reference too -
       // emails often name spots conversationally rather than by code.
@@ -1363,7 +1374,7 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
     // arrive here via a mis-mapped column. Treat it as empty so the
     // title fallback applies instead of naming the file '30.0'.
     const trackingId = (id.trim() && !/^\d+\.\d+$/.test(id.trim()) ? id.trim() : '')
-      || String(title || id).replace(/'/g, '_').trim();
+      || citedCode || String(title || id).replace(/'/g, '_').trim();
     const entry = {
       row: rowNum,
       id,

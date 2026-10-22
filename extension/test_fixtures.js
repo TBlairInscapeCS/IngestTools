@@ -172,6 +172,19 @@ eq('numeric + coded ids ok', ['12345', 'PZPR0147000H', '0926607ZKCH', 'FAL5H'].m
 eq('titles with numerals ok', ['Sale :30', 'Season 2 Trailer', '40% Off'].map(v => isTitleLike(v)),
   [true, true, true]);
 
+// AMCN layout: new rows leave the Tracking ID column blank and carry the
+// ISCI in a different column. A whole-row code hit must claim the code as
+// the trackingId - not fall back to the spot title.
+{
+  const cols = { id: 4, title: 1, file: 0, link: 5, brand: -1, access: -1, espn: -1, date: 8 };
+  const rows = [
+    // File Name | Spot Title | Client | Client Code | Tracking ID | Link | x | x | Flight Start Date
+    ['', 'SHUDDER 4Q26 - Season of Screams Annual Offer (:30)', 'AMC', '', '', 'S02608205001', '', '', '10/22/2026', ''],
+  ];
+  const m = matchEmailToSheet('add these creatives: S02608205001 thanks', rows, cols, { headerRow: 1 });
+  eq('empty id cell -> cited code wins', m.length === 1 ? m[0].trackingId : m, 'S02608205001');
+}
+
 // Clue-finding fallback: vague email -> pending rows scored by shared
 // tokens + request date; no clues -> newest pending rows surface anyway.
 {
