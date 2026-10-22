@@ -36,8 +36,8 @@
   #warnBanner { background:#402224; border:1px solid #6b3434; color:#ec9a9a;
                 border-radius:8px; padding:10px 14px; margin-top:18px; }
   #warnBanner.ok { background:#1d3327; border-color:#2e5c3c; color:#9adfa8; }
-  .dep { display:flex; gap:10px; align-items:baseline; padding:8px 0;
-         border-bottom:1px solid var(--line); }
+  .dep { display:flex; flex-wrap:wrap; gap:10px; align-items:baseline;
+         padding:8px 0; border-bottom:1px solid var(--line); }
   .dep:last-child { border-bottom:none; }
   .dep .box { flex:0 0 20px; height:20px; border-radius:6px; border:1px solid var(--line);
               display:inline-flex; align-items:center; justify-content:center;
@@ -87,7 +87,9 @@
   .fstep > div { flex:1; padding:2px 0; }
   .farrow { margin:1px 0 1px 36px; color:var(--mut); font-size:11px;
     line-height:1.2; }
-  .dephelp { margin-top:5px; }
+  /* help sits outside .fix so it stays expandable even when the row is
+     green - install docs shouldn't vanish just because the machine's fine */
+  .dephelp { margin:-4px 0 2px 30px; flex-basis:100%; }
   .dephelp summary { cursor:pointer; color:var(--accent-hi); font-weight:600; user-select:none; }
   .dephelp ol { margin:6px 0 0; padding-left:18px; color:var(--text); }
   .dephelp li { margin:4px 0; }
@@ -325,9 +327,8 @@ async function runChecks() {
     el.className = 'dep';
     el.id = 'dep-' + d.id;
     el.innerHTML = '<span class="box">…</span><span class="need">' + d.name + '</span>' +
-      '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') +
-      (d.help ? '<details class="dephelp"><summary>step-by-step install</summary>' + d.help + '</details>' : '') +
-      '</span>';
+      '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') + '</span>' +
+      (d.help ? '<details class="dephelp"><summary>step-by-step install</summary>' + d.help + '</details>' : '');
     (d.grp === 'opt' ? optBox : gbox).appendChild(el);
     return el;
   });
