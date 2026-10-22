@@ -81,8 +81,15 @@
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
-  .cta { margin-top:26px; display:flex; gap:12px; align-items:center; }
-  .cta span { color:var(--mut); font-size:12px; }
+  .cta { margin-top:26px; }
+  .cta .ctarow { display:flex; gap:12px; align-items:center; margin-top:12px; }
+  .cta > span { display:block; margin-top:10px; color:var(--mut); font-size:12px; }
+  .banner2 { background:#3a1d1d; border:1px solid #5a2a2a; color:#ec9a9a;
+             border-radius:8px; padding:10px 14px; }
+  .banner2.ok { background:#12351f; border-color:#1f4a2e; color:#7fd9a8; }
+  button.go { font-size:15px; padding:11px 26px; border-radius:9px; }
+  button.ghost.small { font-size:11px; padding:5px 12px; color:var(--mut);
+    border-color:var(--line); font-weight:500; }
   .optbox { margin-top:14px; border:1px solid var(--line); border-radius:10px;
     padding:10px 14px; background:var(--card); }
   .optbox > summary { cursor:pointer; font-weight:700; font-size:13px; list-style:none; }
@@ -166,8 +173,11 @@
   </section>
 
   <div class="cta">
-    <button id="openPanel">Open the panel</button>
-    <button id="recheck" class="ghost">Re-check setup</button>
+    <div id="warnBanner2" class="banner2">Checking your setup&hellip;</div>
+    <div class="ctarow">
+      <button id="recheck" class="ghost small">Re-check setup</button>
+      <button id="openPanel" class="go">Let's get started →</button>
+    </div>
     <span id="openHint">or click the Ingest Streamlined toolbar icon anytime</span>
   </div>
 </main>
@@ -320,18 +330,21 @@ async function runChecks() {
     if (d.req && r.state !== 'ok') miss++;
     if (r.state === 'warn') warn++;
   }
-  const banner = document.getElementById('warnBanner');
+  const banners = [document.getElementById('warnBanner'),
+                   document.getElementById('warnBanner2')];
+  let html, cls;
   if (miss) {
-    banner.className = '';
-    banner.innerHTML = '<b>' + miss + ' required piece' + (miss > 1 ? 's' : '') +
+    cls = '';
+    html = '<b>' + miss + ' required piece' + (miss > 1 ? 's' : '') +
       ' missing.</b> The file pipeline won\'t work until the red boxes go green - fixes are under each item.';
   } else if (warn) {
-    banner.className = 'ok';
-    banner.innerHTML = '<b>Core pipeline ready.</b> A few optional pieces are unset (amber) - configure them in ⚙ Settings when you need them.';
+    cls = 'ok';
+    html = '<b>Core pipeline ready.</b> A few optional pieces are unset (amber) - configure them in ⚙ Settings when you need them.';
   } else {
-    banner.className = 'ok';
-    banner.innerHTML = '<b>Everything\'s ready.</b> Open a request email and press ▶ Run all.';
+    cls = 'ok';
+    html = '<b>Everything\'s ready.</b> Open a request email and press ▶ Run all.';
   }
+  for (const b of banners) { b.className = b.id === 'warnBanner2' ? 'banner2 ' + cls : cls; b.innerHTML = html; }
   document.getElementById('sum').textContent =
     results.filter(r => r.r.state === 'ok').length + ' of ' + DEPS.length + ' ready';
   const optOk = results.filter(r => r.d.grp === 'opt' && r.r.state === 'ok').length;
