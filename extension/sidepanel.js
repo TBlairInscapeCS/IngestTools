@@ -2525,6 +2525,10 @@ $('match').addEventListener('click', async () => {
 // re-derives every downstream surface (ids box, download button, reply,
 // portal feed) from the still-selected rows.
 $('matchResults').addEventListener('click', e => {
+  // Row number -> highlight that row on the tracker (opens it in a
+  // background tab when it isn't open).
+  const rl = e.target.closest('a.rowlink');
+  if (rl) { e.preventDefault(); highlightSheetRows([+rl.dataset.srow]); return; }
   const x = e.target.closest('[data-xi]');
   if (!x || !matched) return;
   const m = matched[+x.dataset.xi];
@@ -2538,6 +2542,12 @@ $('matchResults').addEventListener('click', e => {
 // excluded (x in the first column) stay listed but drive nothing -
 // `sel` is what every downstream stage sees.
 const selectedMatches = () => (matched || []).filter(m => !m.excluded);
+// Row numbers deep-link into the tracker when a Google Sheet backs the
+// match (the range anchor selects them); offSheet rows came from an
+// earlier workbook - their numbers would highlight the wrong line.
+const sheetRowCell = m => m.row > 0 && !m.offSheet && sheetDocId()
+  ? '<a href="#" class="rowlink" data-srow="' + m.row + '" title="highlight row ' + m.row + ' on the tracker">' + m.row + '</a>'
+  : m.row;
 function presentMatches(quiet) {
   matchedFor = emailEl.value;
 
@@ -2594,7 +2604,7 @@ function presentMatches(quiet) {
     '<td class="xcell"><span class="xbtn" data-xi="' + i + '" title="' +
       (m.excluded ? 'include this row in the run' : 'exclude this row - downloads, manifest, portal and replies will skip it') + '">' +
       (m.excluded ? '&#8635;' : '&#10005;') + '</span></td>' +
-    '<td>' + m.row + '</td><td>' + esc(m.id || '(no id)') + '</td>' +
+    '<td>' + sheetRowCell(m) + '</td><td>' + esc(m.id || '(no id)') + '</td>' +
     '<td>' + esc(m.title) + '</td>' +
     '<td><span class="chip ' + m.matchType.split(' ')[0] + '">' + m.matchType + '</span>' +
       (sheetTabs.length > 1 ? '<div class="hint">' + esc(m.tab || sheetTabName) + '</div>' : '') +
@@ -2659,10 +2669,10 @@ function presentMatches(quiet) {
     dlBtn.classList.add('hidden');
     $('sec4').open = true;
   }
-  // Live verification button: only when the workbook came off an open
-  // Sheets tab whose gid we can navigate.
-  $('showSheet').classList.toggle('hidden',
-    !(sheetSourceTab && (sheetGids || {})[sheetTabName] && sel.length));
+  // Live verification button: any Google-Sheets-backed match can
+  // highlight - an open tab gets navigated, otherwise the workbook
+  // reopens in the background with the range anchor.
+  $('showSheet').classList.toggle('hidden', !(sheetDocId() && sel.length));
 
   // Feed the reconcile box + suggest a job folder name.
   idsEl.value = sel.map(m => m.id).filter(Boolean).join('\n');
@@ -2735,20 +2745,51 @@ function wireTabLinks(el) {
   }));
 }
 
-// Live verification: Sheets' #gid=&range= anchor switches the open tab
-// to the matched tab AND outlines the matched rows natively.
-async function showOnSheet() {
-  if (!sheetSourceTab || !(matched || []).length) return false;
-  const gid = (sheetGids || {})[sheetTabName];
-  const rows = matched.filter(m => !m.excluded && !m.offSheet && m.row > 0).map(m => m.row).sort((a, b) => a - b);
-  if (!gid || !rows.length) return toast('The sheet tab isn\'t open - re-grab from it to highlight.');
+// Live verification: Sheets' #gid=&range= anchor switches the tracker
+// to the matched tab AND outlines rows natively. No tracker tab open ->
+// the workbook reopens in a background tab with the same anchor - the
+// doc id + gid live on in lastSheetRef after any load, so re-grabbing
+// the sheet is never required just to highlight.
+function sheetDocId() {
+  return (lastSheetRef && lastSheetRef.id) ||
+    (sheetSourceTab && (sheetSourceTab.url.match(/\/d\/([a-zA-Z0-9-_]+)/) || [])[1]) || '';
+}
+function sheetTabGid() {
+  const g = (sheetGids || {})[sheetTabName] ??
+    (lastSheetRef && lastSheetRef.tabName === sheetTabName ? lastSheetRef.gid : '');
+  return g == null ? '' : String(g);
+}
+async function highlightSheetRows(rows) {
+  rows = (rows || []).filter(r => r > 0).sort((a, b) => a - b);
+  if (!rows.length) return null;
+  const gid = sheetTabGid();
   const lo = rows[0], hi = Math.min(rows[rows.length - 1], lo + 199);
-  try {
-    await chrome.tabs.update(sheetSourceTab.id, {
-      url: sheetSourceTab.url.split('#')[0] + '#gid=' + gid + '&range=' + lo + ':' + hi,
-      active: true });
-  } catch (e) { toast('Sheet tab is gone - re-grab it.'); return false; }
-  toast('Highlighting rows ' + lo + '-' + hi + ' on tab "' + sheetTabName + '".');
+  if (sheetSourceTab && gid !== '') {
+    try {
+      await chrome.tabs.update(sheetSourceTab.id, {
+        url: sheetSourceTab.url.split('#')[0] + '#gid=' + gid + '&range=' + lo + ':' + hi,
+        active: true });
+      return { lo, hi, opened: false };
+    } catch (e) { sheetSourceTab = null; } // tab died - reopen below
+  }
+  const id = sheetDocId();
+  if (!id) return null;
+  const url = 'https://docs.google.com/spreadsheets/d/' + id + '/edit' +
+    (gid !== '' ? '#gid=' + gid + '&range=' + lo + ':' + hi : '');
+  const t = await chrome.tabs.create({ url, active: false });
+  // It becomes the live tab: later highlights navigate it in place.
+  sheetSourceTab = t;
+  if (gid !== '') sheetGids[sheetTabName] = String(gid);
+  return { lo, hi, opened: true, targeted: gid !== '' };
+}
+async function showOnSheet() {
+  if (!(matched || []).length) return false;
+  const rows = matched.filter(m => !m.excluded && !m.offSheet && m.row > 0).map(m => m.row);
+  if (!rows.length) return toast('Nothing on the loaded sheet to highlight.');
+  const r = await highlightSheetRows(rows);
+  if (!r) return toast('No Google Sheets tracker behind this match.');
+  toast('Highlighting rows ' + r.lo + '-' + r.hi + ' on tab "' + sheetTabName + '"' +
+    (r.opened ? (r.targeted ? ' - opened in a background tab.' : ' - opened; pick the "' + sheetTabName + '" tab there.') : '.'));
   return true;
 }
 
@@ -2790,7 +2831,7 @@ async function presentGuessPicker(cands) {
     '<table><thead><tr><th></th><th>Row</th><th>ID</th><th>Title</th><th>Clues</th><th>Date</th></tr></thead><tbody>' +
     cands.map((m, i) =>
       '<tr><td><input type="checkbox" class="guessChk" data-i="' + i + '"' + (m.guessScore > 0 ? ' checked' : '') + '></td>' +
-      '<td>' + m.row + '</td><td>' + esc(m.id || '(no id)') + '</td><td>' + esc(m.title) + '</td>' +
+      '<td>' + sheetRowCell(m) + '</td><td>' + esc(m.id || '(no id)') + '</td><td>' + esc(m.title) + '</td>' +
       '<td class="hint">' + esc((m.guessClues || []).join(' · ')) + '</td><td>' + esc(m.date) + '</td></tr>'
     ).join('') +
     '</tbody></table>' +
