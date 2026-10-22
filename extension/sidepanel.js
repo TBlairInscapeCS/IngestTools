@@ -3365,6 +3365,118 @@ function linkShape(url) {
 
 // Direct-download path for matched rows carrying real URLs (Drive folder,
 // MediaSilo, Yangaroo, plain links). Queues files + manifest.
+// URL-protector wrappers (Mimecast, SafeLinks, Proofpoint urldefense):
+// unwrap to the real file URL before chrome.downloads - the browser
+// follows 302s but NOT JS/meta-refresh interstitials, which would save
+// HTML junk that the spec check then (correctly) fails. SafeLinks and
+// urldefense decode locally; Mimecast needs the redirect chain followed
+// and, when it stalls on the protector, the interstitial mined for the
+// landing URL. Anything unresolvable falls back to the original URL -
+// the downloader's own redirect handling may still land it.
+const DL_WRAP_RE = /mimecastprotect|urldefense|safelinks\.protection|proofpoint\.com/i;
+function unwrapDlUrl(u) {
+  try {
+    const p = new URL(u);
+    if (/safelinks\.protection\.(outlook|office)/i.test(p.hostname)) {
+      const t = p.searchParams.get('url');
+      if (t && /^https?:/i.test(t)) return t;
+    }
+    if (/urldefense/i.test(p.hostname)) {
+      const m = p.pathname.match(/\/v3\/?__(https?:[^;]+?)__/i);
+      if (m) return decodeURIComponent(m[1]);
+    }
+    return u;
+  } catch (e) { return u; }
+}
+// Last-resort unwrap: open the link in a hidden tab and let the
+// protector's own portal JS resolve it (Mimecast's TTP page computes the
+// destination via API - it isn't in the HTML). Two outcomes: the tab
+// navigates off the protector (grab its URL), or the destination is a
+// file and navigation becomes a download (grab its URL, cancel it, and
+// re-download under the job's own name). Returns '' on timeout.
+async function resolveViaTab(u) {
+  let t;
+  try { t = await chrome.tabs.create({ url: u, active: false }); }
+  catch (e) { return ''; }
+  try {
+    return await new Promise(res => {
+      const done = v => {
+        clearTimeout(to);
+        chrome.tabs.onUpdated.removeListener(lis);
+        chrome.downloads.onCreated.removeListener(onDl);
+        chrome.downloads.onChanged.removeListener(onDlCh);
+        res(v || '');
+      };
+      const to = setTimeout(() => done(''), 20000);
+      const lis = (id, ch) => {
+        if (id !== t.id || !ch.url || DL_WRAP_RE.test(ch.url)) return;
+        done(ch.url);
+      };
+      // Navigation-turned-download: the item's url may still be the
+      // protector at onCreated; finalUrl resolves as redirects run.
+      // Only wrapped-origin items are tracked, so an unrelated download
+      // in the window can't be hijacked.
+      let pendingDl = 0;
+      const kill = (id, dest) => {
+        chrome.downloads.cancel(id).then(() => chrome.downloads.erase({ id })).catch(() => {});
+        done(dest);
+      };
+      const onDl = item => {
+        if (!item) return;
+        const dest = [item.finalUrl, item.url].find(x => x && !DL_WRAP_RE.test(x)) || '';
+        if (dest) return kill(item.id, dest);
+        if (item.url && DL_WRAP_RE.test(item.url)) pendingDl = item.id;
+      };
+      const onDlCh = d => {
+        if (!pendingDl || d.id !== pendingDl) return;
+        const x = (d.finalUrl && d.finalUrl.current) || '';
+        if (x && !DL_WRAP_RE.test(x)) kill(pendingDl, x);
+      };
+      chrome.tabs.onUpdated.addListener(lis);
+      chrome.downloads.onCreated.addListener(onDl);
+      chrome.downloads.onChanged.addListener(onDlCh);
+    });
+  } finally {
+    try { chrome.tabs.remove(t.id); } catch (e) {}
+  }
+}
+async function resolveDlUrl(u, cache) {
+  const un = unwrapDlUrl(u);
+  if (un !== u) { cache.set(u, un); return un; }
+  if (!DL_WRAP_RE.test(u)) return u;
+  if (cache.has(u)) return cache.get(u);
+  let out = u;
+  try {
+    const r = await fetch(u, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+    const fin = r.url || '';
+    const ct = r.headers.get('content-type') || '';
+    if (fin && !DL_WRAP_RE.test(fin)) out = fin;
+    else if (/html/i.test(ct)) {
+      const html = (await r.text()).slice(0, 80000);
+      const dom = (new URL(u).searchParams.get('domain') || '').replace(/^www\./, '');
+      const cands = [
+        /content=["']?\s*\d+\s*;\s*url=([^"'> \]]+)/i,
+        /window\.location(?:\.href)?\s*=\s*["']([^"']+)/i,
+        /location\.replace\(["']([^"']+)/i,
+        /href=["'](https?:\/\/[^"']+)["']/i,
+      ];
+      for (const re of cands) {
+        const x = (re.exec(html) || [])[1];
+        if (x && /^https?:/i.test(x) && !DL_WRAP_RE.test(x) && (!dom || x.toLowerCase().includes(dom.toLowerCase()))) { out = x; break; }
+      }
+      if (out === u && dom) {
+        const m2 = new RegExp('https?://[^"\'<> ]*' + dom.replace(/\./g, '\\.') + '[^"\'<> ]*', 'i').exec(html);
+        if (m2 && !DL_WRAP_RE.test(m2[0])) out = m2[0];
+      }
+    }
+    if (r.body && r.body.cancel) r.body.cancel();
+  } catch (e) { dbg('link unwrap fail', { err: String(e), url: u.slice(0, 140) }); }
+  if (out === u) out = (await resolveViaTab(u)) || u;
+  if (out !== u) dbg('link unwrapped', { from: u.slice(0, 90), to: out.slice(0, 140) });
+  cache.set(u, out);
+  return out;
+}
+
 async function downloadLinked() {
   if (!matched || !matched.length) { toast('Run the match first.'); return false; }
   const sel = selectedMatches();
@@ -3507,8 +3619,10 @@ async function downloadLinked() {
 
   dlTotal = jobs.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
   updateDlStatus();
+  const dlUrlCache = new Map();
   for (const j of jobs) {
     try {
+      j.url = await resolveDlUrl(j.url, dlUrlCache);
       const id = await chrome.downloads.download({
         url: j.url,
         filename: 'Ingest/' + j.file,
@@ -4014,8 +4128,10 @@ async function downloadFound() {
   const job = jobSlug();
   dlTotal = fresh.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
   updateDlStatus();
+  const dlUrlCache2 = new Map();
   for (const j of fresh) {
     try {
+      j.url = await resolveDlUrl(j.url, dlUrlCache2);
       const id = await chrome.downloads.download({ url: j.url, filename: 'Ingest/' + j.file, conflictAction: 'uniquify' });
       // Mark only on a live download id - a thrown call or dead queue
       // leaves the URL free so the next attempt can actually retry.
