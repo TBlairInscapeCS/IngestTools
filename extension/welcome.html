@@ -48,9 +48,27 @@
               margin:2px 0 0 30px; }
   .dep.miss .fix, .dep.warn .fix { display:block; }
   .dep .opt-tag { display:none; }
-  .grphead { font-weight:700; font-size:12px; margin:14px 0 4px; }
-  .grphead:first-child { margin-top:2px; }
+  .grpbox { border:1px solid var(--line); border-radius:9px;
+    padding:8px 14px 8px; margin-top:10px; }
+  .grpbox.install { background:#101f2d; border-color:#1e3d5c; }
+  .grpbox.install .grphead { color:#6fb1ec; }
+  .grpbox.tabs { background:#1b1830; border-color:#3a3560; }
+  .grpbox.tabs .grphead { color:#a89de0; }
+  .grphead { font-weight:700; font-size:12px; margin:2px 0 4px; }
+  /* tabs group: condensed, small round lights mirroring the panel's dots */
+  .grpbox.tabs .dep { padding:4px 0; font-size:12px; }
+  .grpbox.tabs .dep .box { flex:0 0 13px; height:13px; border-radius:50%;
+    font-size:9px; }
+  .grpbox.tabs .dep .need { min-width:118px; }
+  .grpbox.tabs .dep .for { font-size:11px; }
+  .grpbox.tabs .dep .fix { margin-left:23px; }
   .dep .fix b { color:inherit; }
+  .pitch p { margin:0 0 8px; font-size:13.5px; }
+  .pipe { display:flex; flex-wrap:wrap; gap:5px; align-items:center;
+    margin:8px 0 10px; }
+  .pipe span { border:1px solid var(--line); background:#0b0e12;
+    border-radius:20px; padding:3px 11px; font-size:11px; font-weight:600; }
+  .pipe i { color:var(--mut); font-style:normal; font-size:11px; }
   .dephelp { margin-top:5px; }
   .dephelp summary { cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }
   .dephelp ol { margin:6px 0 0; padding-left:18px; color:var(--txt); }
@@ -75,10 +93,22 @@
     <img src="icon128.png" alt="">
     <div>
       <h1>Ingest Streamlined<span class="ver" id="ver"></span></h1>
-      <p class="tag">Request email &rarr; tracking sheet &rarr; matched rows &rarr;
-        downloaded media &rarr; filled portal queue &rarr; Jira proof &rarr; reply.</p>
+      <p class="tag">One side panel runs the whole ingest. You supervise; it carries.</p>
     </div>
   </div>
+
+  <section class="pitch">
+    <p>Point it at a request email and it reads the ask, finds the tracking
+      sheet, matches the rows, downloads the media, fills the portal queue,
+      drafts the Jira ticket, and writes the reply - the steps that used to
+      eat your afternoon, collapsed into one watched pipeline where nothing
+      ships without your click.</p>
+    <div class="pipe">
+      <span>request</span><i>→</i><span>tracker</span><i>→</i><span>match</span><i>→</i><span>download</span><i>→</i><span>portal</span><i>→</i><span>Jira</span><i>→</i><span>reply</span>
+    </div>
+    <p class="fine" style="margin:0">Full stage-by-stage detail is in
+      <b>How a job flows</b> below.</p>
+  </section>
 
   <div id="warnBanner">Checking your setup&hellip;</div>
 
@@ -242,13 +272,16 @@ async function runChecks() {
     install: '1 · Installs <span class="fine">- the hard part, done once</span>',
     tabs: '2 · Tabs to keep open <span class="fine">- session stuff, just sign in</span>',
   };
-  let lastGrp = '';
+  let lastGrp = '', gbox = null;
   const rows = DEPS.map(d => {
     if (d.grp !== 'opt' && d.grp !== lastGrp) {
+      gbox = document.createElement('div');
+      gbox.className = 'grpbox ' + d.grp;
       const h = document.createElement('div');
       h.className = 'grphead';
       h.innerHTML = GRP_HEAD[d.grp];
-      box.appendChild(h);
+      gbox.appendChild(h);
+      box.appendChild(gbox);
     }
     lastGrp = d.grp || lastGrp;
     const el = document.createElement('div');
@@ -258,7 +291,7 @@ async function runChecks() {
       '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') +
       (d.help ? '<details class="dephelp"><summary>step-by-step install</summary>' + d.help + '</details>' : '') +
       '</span>';
-    (d.grp === 'opt' ? optBox : box).appendChild(el);
+    (d.grp === 'opt' ? optBox : gbox).appendChild(el);
     return el;
   });
   // Watcher + ffmpeg first (they gate everything else), then the rest
