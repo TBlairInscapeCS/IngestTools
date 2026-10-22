@@ -542,7 +542,9 @@ function resetRun() {
 // and force at the start of Run - it's rarely edited, but when it is the
 // update must reach the next ingest. Last fetch is cached in storage so
 // a dead network still shows the previous snapshot.
-const EXC_SHEET_ID = '1u4mgQQ6YfdiMMYMA6QcQHMASMv3trtassknq-Vh_kcw';
+// The reference-sheet doc id lives in clients.js (REF_SHEET_ID) so the
+// portable build can ship it blank - empty disables the feature.
+const EXC_SHEET_ID = (typeof REF_SHEET_ID !== 'undefined' && REF_SHEET_ID) || '';
 let excByClient = {};   // client id -> live exception note
 let excFetchedAt = 0;
 
@@ -566,6 +568,7 @@ function mapExceptions(notes) {
 }
 
 async function fetchExceptions(force) {
+  if (!EXC_SHEET_ID) return;
   if (!force && Date.now() - excFetchedAt < 15 * 60 * 1000) return;
   try {
     const r = await fetch(

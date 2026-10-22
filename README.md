@@ -101,16 +101,34 @@ covers every `Horizon / <brand>` child.
 - `Code.gs` — legacy Google Apps Script version. Writes to sheets;
   superseded — do not install it in client sheets.
 
-## Safety notes
+## Security & privacy
 
+What the audit verified — the extension is purely local:
+
+- **No telemetry.** No analytics, beacons, crash reporting, or calls to
+  anywhere you didn't configure. The only network traffic is the APIs
+  *you* keyed in (Microsoft Graph, Jira, Airtable, Extreme Reach,
+  Databricks), the sheets and files you load, and `127.0.0.1:8770`.
+- **No credentials in the package.** Every token/key is entered through
+  ⚙ Settings and lives only in `chrome.storage.local` on that machine —
+  nothing syncs to a Google account, nothing ships in the zips, nothing
+  logs. The only outbound use of each credential is its own service.
+- **The watcher is loopback-only** (127.0.0.1) and every file endpoint
+  is manifest-scoped — it cannot read or write arbitrary paths.
 - **Nothing destructive is automatic.** BEGIN INGEST, Push fills, Post
   to Jira, and sending replies are all explicit clicks. The panel
   previews every fill before it touches the page.
-- **The watcher is loopback-only** (127.0.0.1) and every file endpoint
-  is manifest-scoped — it cannot read or write arbitrary paths.
-- **No secrets ship in the package.** Credentials live in Chrome local
-  storage entered through ⚙ Settings; `local/*.env` is gitignored.
-- Evidence files are name-free: job slugs are `YYYYMMDD-HHMMSS-client`.
+- **Evidence files are name-free**: job slugs are `YYYYMMDD-HHMMSS-client`.
+- **Two builds:**
+  - `ingest-streamlined-v*-full.zip` — internal: includes `clients.js`
+    with the org's playbooks and link-shared sheet IDs. Anyone who can
+    open this zip can open those sheets — share it inside the org only.
+  - `ingest-streamlined-v*-portable.zip` — scrubbed: `clients.js` is a
+    commented template (no sheet IDs, no playbooks, no Jira epics, no
+    reference sheet). The new user supplies their own config; nothing
+    of the original org's data travels with it.
+- `local/*.env`, logs, and `customer-reference.tsv` are gitignored and
+  never packaged.
 
 ## Troubleshooting
 

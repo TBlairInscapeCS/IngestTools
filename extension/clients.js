@@ -55,6 +55,11 @@
  *   "Agency / Brand" and carry the agency's cidMap - the delivery channel
  *   and spot naming are per-brand, the ingest customer is per-agency.
  */
+// The per-customer reference sheet (Customer | Exceptions | Tracker |
+// Files/share) fetched live every 15 min. Empty = no reference sheet;
+// the portable build ships this blank.
+var REF_SHEET_ID = '1u4mgQQ6YfdiMMYMA6QcQHMASMv3trtassknq-Vh_kcw';
+
 var CLIENTS = [
   {
     id: 'inmarket',

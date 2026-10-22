@@ -52,3 +52,21 @@ EOF
 (cd "$STAGE" && zip -q -r "$OLDPWD/dist/ingest-streamlined-v$VER-full.zip" \
   "ingest-streamlined-v$VER" -x '*.DS_Store')
 echo "Built dist/ingest-streamlined-v$VER-full.zip"
+
+# Portable build: same extension, but clients.js is the scrubbed
+# template - no sheet IDs, no playbooks, no epics, no reference sheet.
+# A new user ships zero of the original org's data pointers.
+PORT=$(mktemp -d)
+trap 'rm -rf "$STAGE" "$PORT"' EXIT
+mkdir -p "$PORT/extension"
+for f in "${FILES[@]}"; do
+  if [ "$f" = "clients.js" ]; then
+    cp "$EXT/clients.template.js" "$PORT/extension/clients.js"
+  else
+    cp "$EXT/$f" "$PORT/extension/$f"
+  fi
+done
+POUT="dist/ingest-streamlined-v$VER-portable.zip"
+rm -f "$POUT"
+(cd "$PORT/extension" && zip -q -X "$OLDPWD/$POUT" "${FILES[@]}")
+echo "Built $POUT"
