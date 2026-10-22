@@ -1817,7 +1817,7 @@ async function grabSheetTab(tab) {
           // The winning download URL IS the refresh handle - without it the
           // stale prior ref (e.g. another client's Google doc) re-fetches
           // and clobbers this sheet on every match-time refresh.
-          lastSheetRef = { spUrl: u };
+          lastSheetRef = { spUrl: u, viewUrl: loc.pageUrl };
           chrome.storage.local.set({ msLastSheet: lastSheetRef });
           rememberSheet();
           sheetSourceTab = tab;
@@ -2528,7 +2528,12 @@ $('matchResults').addEventListener('click', e => {
   // Row number -> highlight that row on the tracker (opens it in a
   // background tab when it isn't open).
   const rl = e.target.closest('a.rowlink');
-  if (rl) { e.preventDefault(); highlightSheetRows([+rl.dataset.srow]); return; }
+  if (rl) {
+    e.preventDefault();
+    const m = (matched || []).find(x => x.row === +rl.dataset.srow);
+    highlightSheetRows([+rl.dataset.srow], m && (m.id || m.trackingId || ''));
+    return;
+  }
   const x = e.target.closest('[data-xi]');
   if (!x || !matched) return;
   const m = matched[+x.dataset.xi];
@@ -2545,7 +2550,7 @@ const selectedMatches = () => (matched || []).filter(m => !m.excluded);
 // Row numbers deep-link into the tracker when a Google Sheet backs the
 // match (the range anchor selects them); offSheet rows came from an
 // earlier workbook - their numbers would highlight the wrong line.
-const sheetRowCell = m => m.row > 0 && !m.offSheet && sheetDocId()
+const sheetRowCell = m => m.row > 0 && !m.offSheet && sheetRef()
   ? '<a href="#" class="rowlink" data-srow="' + m.row + '" title="highlight row ' + m.row + ' on the tracker">' + m.row + '</a>'
   : m.row;
 function presentMatches(quiet) {
@@ -2669,10 +2674,10 @@ function presentMatches(quiet) {
     dlBtn.classList.add('hidden');
     $('sec4').open = true;
   }
-  // Live verification button: any Google-Sheets-backed match can
-  // highlight - an open tab gets navigated, otherwise the workbook
-  // reopens in the background with the range anchor.
-  $('showSheet').classList.toggle('hidden', !(sheetDocId() && sel.length));
+  // Live verification button: Google docs get native row selection,
+  // SharePoint workbooks open positioned at the row with the ID staged
+  // for Cmd+F. Only file-uploaded sheets have nothing to open.
+  $('showSheet').classList.toggle('hidden', !(sheetRef() && sel.length));
 
   // Feed the reconcile box + suggest a job folder name.
   idsEl.value = sel.map(m => m.id).filter(Boolean).join('\n');
@@ -2745,51 +2750,94 @@ function wireTabLinks(el) {
   }));
 }
 
-// Live verification: Sheets' #gid=&range= anchor switches the tracker
-// to the matched tab AND outlines rows natively. No tracker tab open ->
-// the workbook reopens in a background tab with the same anchor - the
-// doc id + gid live on in lastSheetRef after any load, so re-grabbing
-// the sheet is never required just to highlight.
-function sheetDocId() {
-  return (lastSheetRef && lastSheetRef.id) ||
-    (sheetSourceTab && (sheetSourceTab.url.match(/\/d\/([a-zA-Z0-9-_]+)/) || [])[1]) || '';
+// Live verification: what workbook sits behind the loaded sheet.
+// Google docs get the #gid=&range= anchor (rows selected natively);
+// SharePoint workbooks get their page URL + ?activeCell= positioning -
+// Excel web has no range anchor, so the cursor lands on the row and the
+// ID goes on the clipboard for a Cmd+F fallback.
+function sheetRef() {
+  if (lastSheetRef && lastSheetRef.id) return { kind: 'google', id: lastSheetRef.id };
+  if (lastSheetRef && (lastSheetRef.viewUrl || lastSheetRef.spUrl)) {
+    const u = spViewUrl(lastSheetRef);
+    if (u) return { kind: 'sp', url: u };
+  }
+  if (sheetSourceTab) {
+    const g = sheetSourceTab.url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (g) return { kind: 'google', id: g[1] };
+    if (/sharepoint\.com/i.test(sheetSourceTab.url)) return { kind: 'sp', url: sheetSourceTab.url };
+  }
+  return null;
+}
+function spViewUrl(ref) {
+  if (ref.viewUrl) return ref.viewUrl;
+  try {
+    const m = (ref.spUrl || '').match(/GetFileByServerRelativeUrl\('([^']+)/i);
+    if (m) return new URL(ref.spUrl).origin + decodeURIComponent(m[1]);
+    const g = (ref.spUrl || '').match(/GetFileById\((?:guid')?([0-9a-fA-F-]{36})/i);
+    if (g) return new URL(ref.spUrl).origin + '/_layouts/15/Doc.aspx?sourcedoc={' + g[1] + '}';
+    const s = (ref.spUrl || '').match(/SourceUrl=([^&]+)/i);
+    if (s) return decodeURIComponent(s[1]);
+  } catch (e) { /* odd URL - no view */ }
+  return '';
 }
 function sheetTabGid() {
   const g = (sheetGids || {})[sheetTabName] ??
     (lastSheetRef && lastSheetRef.tabName === sheetTabName ? lastSheetRef.gid : '');
   return g == null ? '' : String(g);
 }
-async function highlightSheetRows(rows) {
+async function highlightSheetRows(rows, search) {
   rows = (rows || []).filter(r => r > 0).sort((a, b) => a - b);
   if (!rows.length) return null;
-  const gid = sheetTabGid();
   const lo = rows[0], hi = Math.min(rows[rows.length - 1], lo + 199);
+  const ref = sheetRef();
+  if (!ref) return null;
+  if (ref.kind === 'sp') {
+    // No range anchor for Excel web: ?activeCell= aims the cursor at the
+    // top row (best-effort - ignored where the editor doesn't honor it),
+    // and the ID lands on the clipboard for Cmd+F + Cmd+V.
+    const url = ref.url.split('#')[0] +
+      (ref.url.includes('?') ? '&' : '?') +
+      'activeCell=' + encodeURIComponent(sheetTabName + '!A' + lo);
+    let opened = false;
+    if (sheetSourceTab && /sharepoint\.com/i.test(sheetSourceTab.url || '')) {
+      try { await chrome.tabs.update(sheetSourceTab.id, { url, active: true }); }
+      catch (e) { sheetSourceTab = null; }
+    }
+    if (!sheetSourceTab) {
+      sheetSourceTab = await chrome.tabs.create({ url, active: false });
+      opened = true;
+    }
+    if (search) try { await navigator.clipboard.writeText(search); } catch (e) {}
+    return { lo, hi, opened, kind: 'sp', search: search || '' };
+  }
+  const gid = sheetTabGid();
   if (sheetSourceTab && gid !== '') {
     try {
       await chrome.tabs.update(sheetSourceTab.id, {
         url: sheetSourceTab.url.split('#')[0] + '#gid=' + gid + '&range=' + lo + ':' + hi,
         active: true });
-      return { lo, hi, opened: false };
+      return { lo, hi, opened: false, kind: 'google' };
     } catch (e) { sheetSourceTab = null; } // tab died - reopen below
   }
-  const id = sheetDocId();
-  if (!id) return null;
-  const url = 'https://docs.google.com/spreadsheets/d/' + id + '/edit' +
+  const url = 'https://docs.google.com/spreadsheets/d/' + ref.id + '/edit' +
     (gid !== '' ? '#gid=' + gid + '&range=' + lo + ':' + hi : '');
   const t = await chrome.tabs.create({ url, active: false });
   // It becomes the live tab: later highlights navigate it in place.
   sheetSourceTab = t;
   if (gid !== '') sheetGids[sheetTabName] = String(gid);
-  return { lo, hi, opened: true, targeted: gid !== '' };
+  return { lo, hi, opened: true, kind: 'google', targeted: gid !== '' };
 }
 async function showOnSheet() {
   if (!(matched || []).length) return false;
-  const rows = matched.filter(m => !m.excluded && !m.offSheet && m.row > 0).map(m => m.row);
-  if (!rows.length) return toast('Nothing on the loaded sheet to highlight.');
-  const r = await highlightSheetRows(rows);
-  if (!r) return toast('No Google Sheets tracker behind this match.');
-  toast('Highlighting rows ' + r.lo + '-' + r.hi + ' on tab "' + sheetTabName + '"' +
-    (r.opened ? (r.targeted ? ' - opened in a background tab.' : ' - opened; pick the "' + sheetTabName + '" tab there.') : '.'));
+  const sel = matched.filter(m => !m.excluded && !m.offSheet && m.row > 0);
+  if (!sel.length) return toast('Nothing on the loaded sheet to highlight.');
+  const r = await highlightSheetRows(sel.map(m => m.row), sel[0].id || sel[0].trackingId || '');
+  if (!r) return toast('No tracker workbook behind this match.');
+  toast(r.kind === 'sp'
+    ? 'Workbook ' + (r.opened ? 'opened in a background tab' : 'focused') + ' at row ' + r.lo +
+      (r.search ? ' - Cmd+F then paste jumps to "' + r.search + '"' : '')
+    : 'Highlighting rows ' + r.lo + '-' + r.hi + ' on tab "' + sheetTabName + '"' +
+      (r.opened ? (r.targeted ? ' - opened in a background tab.' : ' - opened; pick the "' + sheetTabName + '" tab there.') : '.'));
   return true;
 }
 
