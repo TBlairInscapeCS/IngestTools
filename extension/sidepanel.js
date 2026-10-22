@@ -337,8 +337,19 @@ async function resolveSheetLinks() {
 // a small recency list (clients fan out into per-brand/per-format docs:
 // WB theatrical vs TV, Horizon's brand sheets). Next request auto-loads
 // the remembered trackers in order until one covers the request's codes.
+// The client whose family owns a doc id per playbooks, else null - a doc
+// detected for another agency must never be remembered under this client
+// (a Horizon doc pulled mid-Kantar-job otherwise poisons every future
+// Kantar auto-load).
+function docOwner(id) {
+  return CLIENTS.find(o => sheetIdsFor(o).includes(id));
+}
+function foreignDoc(id) {
+  const o = id && docOwner(id);
+  return !!(o && topName(o) !== topName(client));
+}
 function rememberSheet() {
-  if (!client || !lastSheetRef) return;
+  if (!client || !lastSheetRef || foreignDoc(lastSheetRef.id)) return;
   chrome.storage.local.get('sheetByClient', d => {
     const m = d.sheetByClient || {};
     const old = m[client.id];
@@ -1742,6 +1753,7 @@ function onEmailChange() {
       }));
       const label = client.name + ' tracker (remembered)';
       for (const mem of list) {
+        if (foreignDoc(mem.id)) continue;
         const ok = mem.spUrl ? await loadSpDownload(mem.spUrl, label, mem.spSrc)
                  : mem.airtable ? await fetchAirtableTracker(label)
                  : mem.id ? await loadSheetDoc(mem.id, mem.gid, '', label) : false;
