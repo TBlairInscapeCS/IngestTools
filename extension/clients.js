@@ -36,6 +36,9 @@
  * emailBrand: RegExp - sheetless brand source: first capture group fills
  *   Advertiser/Brand/Vertical when ingest.advertiser is set (DPM's
  *   "fingerprint for GM"). detectedAdvertiser (subject) still wins.
+ * cols: per-field column pins ({id, title, file, link, brand, espn,
+ *   date} -> header regex) that override auto-guessing - amcn uses the
+ *   ISCI column as the source ID while 'Tracking ID' is our fill-back.
  *
  * inactive: true - keeps detection rules (old threads still surface the
  *   playbook, flagged "(inactive)") but hides the client from the manual
@@ -180,6 +183,11 @@ var CLIENTS = [
     },
     delivery: 'links',
     note: "Email is an inline manifest: sheet row# + spot title + ISCI + creativehub share link per spot. Shares are viewer pages (open to download); tracker 'Working List' tab is the Bible.",
+    cols: {
+      // ISCI is the source ID; the 'Tracking ID' column further right is
+      // OUR fill-back confirmation, not source data.
+      id: /^isci/i,
+    },
     ingest: { cidMap: 'horizonmedia', advertiser: true, nameTitle: true },
   },
   {

@@ -2477,6 +2477,14 @@ function buildColumnDropdowns() {
       sel.appendChild(o);
     });
     sel.value = c.guess(sheet.headers, sheet.dataRows, sheet.groupRow);
+    // Playbook column pin overrides the guess: amcn's sheet carries an
+    // ISCI column of source codes while a further-right 'Tracking ID'
+    // column waits for OUR confirmation - the pin picks ISCI every time.
+    const pin = client && client.cols && client.cols[c.key];
+    if (pin) {
+      const p = sheet.headers.findIndex(h => pin.test(String(h)));
+      if (p >= 0) sel.value = p;
+    }
   });
   // One-line detected summary; the dropdowns stay tucked away unless the
   // ID column can't be guessed.
@@ -2547,8 +2555,9 @@ async function doMatch() {
   // 'Spot Length' mapped as ID -> every tracking ID read as '30.0')
   // poisons file names, the manifest, and portal fills - so when the
   // values fail the shape test and the vocab guess disagrees, re-guess.
+  const pinId = client && client.cols && client.cols.id;
   const idFix = guessField(sheet.headers, 'trackingId', dataRows, sheet.groupRow);
-  if (cols.id >= 0 && idFix >= 0 && idFix !== cols.id &&
+  if (cols.id >= 0 && idFix >= 0 && idFix !== cols.id && !pinId &&
       !colLooksLike(dataRows, cols.id, 'trackingId') &&
       colLooksLike(dataRows, idFix, 'trackingId')) {
     dbg('col fix', { field: 'id', was: sheet.headers[cols.id], now: sheet.headers[idFix] });
