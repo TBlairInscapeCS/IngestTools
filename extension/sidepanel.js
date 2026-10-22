@@ -517,10 +517,23 @@ async function fetchExceptions(force) {
 }
 setInterval(() => fetchExceptions(false), 15 * 60 * 1000);
 
+let noteSheetsFor = '', noteSheets = [];   // remembered tracker refs for the shown client
 function renderClientNote() {
   const el = $('clientNote');
-  if (!client) { el.style.display = 'none'; return; }
+  if (!client) { el.style.display = 'none'; noteSheetsFor = ''; noteSheets = []; return; }
   el.style.display = 'block';
+  // Remembered trackers surface as click-to-open links - for clients whose
+  // sheets/files sit behind auth the tool can't pass (NFL's 2FA SharePoint),
+  // the previously shared link is the way back in.
+  if (noteSheetsFor !== client.id) {
+    noteSheetsFor = client.id; noteSheets = [];
+    chrome.storage.local.get('sheetByClient', d => {
+      if (!client || client.id !== noteSheetsFor) return;
+      const v = (d.sheetByClient || {})[client.id];
+      noteSheets = Array.isArray(v) ? v : v ? [v] : [];
+      renderClientNote();
+    });
+  }
   const ing = ingestSummary(client);
   // The exceptions sheet is the authoritative caveat source - live text
   // wins over the static playbook note (which stays behind the ? bubble).
@@ -537,6 +550,17 @@ function renderClientNote() {
   // Known tracking sheets -> one-click open (then "scrape sheet" picks up
   // the match from there). First sheetId wins; extras stay in detect.
   const trackerIds = sheetIdsFor(client);
+  // Remembered trackers the playbook doesn't name (or can't reach): the
+  // last shared link is the way back in when access needs a human (2FA,
+  // re-share). Google ids already in detect are skipped.
+  const lastTrackerLinks = known => noteSheets.map(mem => {
+    if (mem.id && known.includes(mem.id)) return '';
+    const u = mem.id ? 'https://docs.google.com/spreadsheets/d/' + mem.id
+      : (mem.viewUrl || mem.spUrl || '');
+    if (!u) return '';
+    return '<a href="' + esc(u) + '" target="_blank" title="previously used tracker - open it to re-share or re-grant access">last shared tracker' +
+      (mem.tabName ? ' · ' + esc(mem.tabName) : '') + '</a>';
+  }).filter(Boolean);
   // Last-mail date from the weekly folder-activity scan - quiet clients
   // surface their staleness right in the note.
   const lastMail = Object.keys(CLIENT_FOLDERS)
@@ -552,6 +576,9 @@ function renderClientNote() {
       ? '<br>' + trackerIds.map(id =>
           '<a href="https://docs.google.com/spreadsheets/d/' + esc(id) +
           '" target="_blank">open tracker sheet</a>').join(' · ')
+      : '') +
+    (lastTrackerLinks(trackerIds).length
+      ? '<br><b>Last used:</b> ' + lastTrackerLinks(trackerIds).join(' · ')
       : '') +
     (client.er && client.er.sender
       ? '<br><b>ER sweep:</b> sender "' + esc(client.er.sender) + '"' +
@@ -4431,7 +4458,7 @@ function ingestPlan() {
       .map(m => ({
         id: clean(m.trackingId || m.id),
         title: clean(m.title),
-        brand: clean(m.brand),
+        brand: clean(ing.brandFixed) || clean(m.brand),
         espn: !!m.espn,
       })),
     opts: {
@@ -4460,7 +4487,11 @@ function renderIngestPreview() {
   const lines = [
     "Reporting ID ← '" + (ingestColName('id') || 'email') + "'" + (plan.opts.tickerSuffix ? " (+" + plan.opts.tickerSuffix + " on _ticker files)" : ''),
     plan.opts.nameTitle ? "Title ← '" + (ingestColName('title') || '?') + "' col" : 'Title — playbook leaves default',
-    plan.opts.advertiser ? "Advertiser/Brand/Vertical ← '" + (ingestColName('brand') || '?') + "' col" : 'Advertiser/Brand/Vertical — playbook leaves default',
+    plan.opts.advertiser
+      ? (ing.brandFixed
+        ? "Advertiser/Brand/Vertical ← '" + String(ing.brandFixed) + "' (playbook - not on the sheet)"
+        : "Advertiser/Brand/Vertical ← '" + (ingestColName('brand') || '?') + "' col")
+      : 'Advertiser/Brand/Vertical — playbook leaves default',
     'Fingerprint — video on _ticker files, otherwise untouched',
     'Realm · Type · Retention — never touched',
   ];

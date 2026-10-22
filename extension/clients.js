@@ -25,6 +25,8 @@
  *                   (fields the spec doesn't name are never added)
  *   advertiser    - true: advertiser/brand is required ingest metadata, so
  *                   the brand extracted from notification subjects is shown
+ *   brandFixed    - constant Advertiser/Brand/Vertical value (NFL): fills
+ *                   even when the tracking sheet carries no brand column
  *   retention     - e.g. '3-6 months'
  *   note          - conditional rules that don't fit fields
  *
@@ -210,8 +212,8 @@ var CLIENTS = [
       domains: [/nfl\.com/i],
     },
     delivery: 'links',
-    note: "'Inscape Fingerprinting - NFL' requests land under the Horizon umbrella even when sent from @nfl.com. Email is a per-spot manifest: title / initiative / title / nflit.sharepoint.com mp4 link / ISCI. Files nominally live in the OneDrive 'inscape doc' - check the current FY folder (spots have landed in last year's by mistake).",
-    ingest: { cidMap: 'horizonmedia', advertiser: true, nameTitle: true, ticker: 'flagged' },
+    note: "Advertiser/brand/vertical is always 'NFL' - the sheet never names it (fixed by playbook). Files sit behind nflit.sharepoint.com links that demand interactive 2FA - not fetchable; open the last shared link (below) or ask for a re-share. 'Inscape Fingerprinting - NFL' requests land under the Horizon umbrella even when sent from @nfl.com. Email is a per-spot manifest: title / initiative / title / nflit.sharepoint.com mp4 link / ISCI. Files nominally live in the OneDrive 'inscape doc' - check the current FY folder (spots have landed in last year's by mistake).",
+    ingest: { cidMap: 'horizonmedia', advertiser: true, brandFixed: 'NFL', nameTitle: true, ticker: 'flagged' },
   },
   {
     id: 'ae-media',
