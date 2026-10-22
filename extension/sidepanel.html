@@ -109,6 +109,11 @@
   #alertBox.warn, #alertBox.fail { border-left-color: #ec9a9a; }
   #alertBox.arrived { border-left-color: #9adfa8; }
   #alertBox a { float: right; }
+  /* Missing-dependency strip: the watcher/ffprobe being down kills the
+     whole file pipeline - say it up front, not at button-click time. */
+  #depWarn { width: 100%; font-size: 10px; color: #ec9a9a; background: #2a1618;
+    border-left: 3px solid #ec9a9a; border-radius: var(--r); padding: 4px 7px; margin-top: 6px; }
+  #depWarn a { color: inherit; text-decoration: underline; }
   /* Next-step guidance: accent-edged strip under the topbar. */
   #nextStep { width: 100%; margin-top: 6px; padding: 4px 8px; font-size: 10px; cursor: default;
     color: var(--text-dim); background: var(--surface); border: 1px solid var(--border);
@@ -205,6 +210,7 @@
   <a href="#" id="helpLink" title="Welcome + setup guide">help</a>
   <div id="nextStep"></div>
   <div id="alertBox" class="hidden"></div>
+  <div id="depWarn" class="hidden"></div>
 </div>
 <div id="settingsPanel" class="hidden" role="dialog" aria-label="Panel settings">
   <div style="font-weight:700;margin-bottom:4px">Show in panel</div>

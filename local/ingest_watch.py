@@ -139,6 +139,17 @@ def start_log_server():
             elif u.path == "/spec-failures":
                 self._send(200, json.dumps({"failures": spec_failures((q.get("job") or [""])[0])}).encode(),
                            "application/json")
+            elif u.path == "/health":
+                # Onboarding/dep check: everything the pipeline needs that
+                # the extension can't see - python is implied by answering.
+                self._send(200, json.dumps({
+                    "ok": True,
+                    "ffprobe": "/" in FFPROBE,
+                    "ffmpeg_dir": bool(FFMPEG_DIR),
+                    "espn_script": ESPN_SCRIPT.exists(),
+                    "ticker_img": TICKER_IMAGE.exists(),
+                    "watch_dir": str(WATCH_DIR),
+                }).encode(), "application/json")
             elif u.path == "/ticker-status":
                 self._send(200, json.dumps(ticker_status((q.get("job") or [""])[0])).encode(),
                            "application/json")

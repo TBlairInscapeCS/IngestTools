@@ -4786,6 +4786,32 @@ chrome.storage.local.get(['pendingIds', 'pendingFiles', 'erApiKey', 'erSender', 
   if (data.erDays) $('erDays').value = data.erDays;
 });
 
+// Dependency warn on open: a dead watcher (or missing ffprobe) kills the
+// file pipeline - say so up front, with a link to the setup checklist,
+// instead of letting every download/feed button fail one by one.
+function showDepWarn(msg) {
+  const el = $('depWarn');
+  if (!el) return;
+  el.innerHTML = esc(msg) + ' <a href="#" id="depWarnHelp">setup guide</a>';
+  el.classList.remove('hidden');
+  $('depWarnHelp').addEventListener('click', e => {
+    e.preventDefault();
+    chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+  });
+}
+(async function depWarnCheck() {
+  try {
+    const r = await fetch('http://127.0.0.1:8770/health', { signal: AbortSignal.timeout(2000) });
+    const h = r.ok ? await r.json() : null;
+    if (h && h.ffprobe) return; // everything the panel can't do itself is up
+    showDepWarn(h && !h.ffprobe
+      ? 'ffprobe not found - spec checks and _ticker builds are off (brew install ffmpeg).'
+      : 'download watcher not running - downloads, tickers and portal feed are offline.');
+  } catch (e) {
+    showDepWarn('download watcher not running - downloads, tickers and portal feed are offline.');
+  }
+})();
+
 // Exceptions sheet: restore the cached snapshot, then refresh live.
 chrome.storage.local.get('excData', d => {
   if (d.excData && d.excData.notes) {

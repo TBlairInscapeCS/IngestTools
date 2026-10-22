@@ -22,29 +22,38 @@
   ol.steps { margin:0; padding-left:20px; }
   ol.steps li { margin:5px 0; }
   ol.steps b { color:#fff; }
-  .acct { display:flex; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); }
-  .acct:last-child { border-bottom:none; }
-  .acct .need { min-width:150px; font-weight:600; }
-  .acct .for { color:var(--mut); }
-  .opt-tag { font-size:10px; border:1px solid var(--line); border-radius:8px;
-             padding:0 6px; color:var(--mut); margin-left:6px; }
   code { background:#0b0e12; border:1px solid var(--line); border-radius:5px;
          padding:1px 6px; font-size:12px; }
-  .kbd { background:#0b0e12; border:1px solid var(--line); border-bottom-width:2px;
-         border-radius:5px; padding:1px 6px; font-size:11px; }
-  .status { display:inline-block; margin-left:8px; padding:1px 9px;
-            border-radius:10px; font-size:11px; }
-  .status.on { background:#12351f; color:#7fd9a8; }
-  .status.off { background:#3a1d1d; color:#ec9a9a; }
+  a { color:var(--accent); }
+  ul { margin:6px 0; padding-left:20px; }
+  li { margin:3px 0; }
+  .fine { color:var(--mut); font-size:12px; }
+
+  /* dependency checklist */
+  #warnBanner { background:#3a1d1d; border:1px solid #5a2a2a; color:#ec9a9a;
+                border-radius:8px; padding:10px 14px; margin-top:18px; }
+  #warnBanner.ok { background:#12351f; border-color:#1f4a2e; color:#7fd9a8; }
+  .dep { display:flex; gap:10px; align-items:baseline; padding:8px 0;
+         border-bottom:1px solid var(--line); }
+  .dep:last-child { border-bottom:none; }
+  .dep .box { flex:0 0 20px; height:20px; border-radius:6px; border:1px solid var(--line);
+              display:inline-flex; align-items:center; justify-content:center;
+              font-size:12px; font-weight:700; color:var(--mut); }
+  .dep.ok .box { background:var(--ok); border-color:var(--ok); color:#fff; }
+  .dep.warn .box { background:var(--warn); border-color:var(--warn); color:#fff; }
+  .dep.miss .box { background:#3a1d1d; border-color:#5a2a2a; color:#ec9a9a; }
+  .dep .need { min-width:170px; font-weight:600; }
+  .dep .for { color:var(--mut); flex:1; }
+  .dep .fix { color:#e8b04a; font-size:11px; display:none; width:100%;
+              margin:2px 0 0 30px; }
+  .dep.miss .fix, .dep.warn .fix { display:block; }
+  .dep .opt-tag { font-size:10px; border:1px solid var(--line); border-radius:8px;
+                  padding:0 6px; color:var(--mut); margin-left:6px; }
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
   .cta { margin-top:26px; display:flex; gap:12px; align-items:center; }
   .cta span { color:var(--mut); font-size:12px; }
-  a { color:var(--accent); }
-  ul { margin:6px 0; padding-left:20px; }
-  li { margin:3px 0; }
-  .fine { color:var(--mut); font-size:12px; }
 </style>
 </head>
 <body>
@@ -57,6 +66,13 @@
         downloaded media &rarr; filled portal queue &rarr; Jira proof &rarr; reply.</p>
     </div>
   </div>
+
+  <div id="warnBanner">Checking your setup&hellip;</div>
+
+  <section>
+    <h2>Setup checklist <span class="fine" id="sum"></span></h2>
+    <div id="deps"></div>
+  </section>
 
   <section>
     <h2>How a job flows</h2>
@@ -80,60 +96,158 @@
   </section>
 
   <section>
-    <h2>Accounts you'll be signed into</h2>
-    <div class="acct"><span class="need">Outlook on the web</span>
-      <span class="for">Request emails are read from the open conversation (or pasted in).</span></div>
-    <div class="acct"><span class="need">Google</span>
-      <span class="for">Tracking sheets shared with you - read-only xlsx export, no API setup.</span></div>
-    <div class="acct"><span class="need">portal.cognet.tv</span>
-      <span class="for">The ingest queue. Files feed in and fills are pushed, but BEGIN INGEST is always your click.</span></div>
-    <div class="acct"><span class="need">Extreme Reach</span>
-      <span class="for">Logged-in ER tab for the delivery sweep. An API key (&#9881; Settings) adds the keyed fetch.<span class="opt-tag">optional</span></span></div>
-    <div class="acct"><span class="need">Microsoft sign-in</span>
-      <span class="for">Inbox watch + Grab Email via Graph - one-time app setup in &#9881; Settings.<span class="opt-tag">optional</span></span></div>
-    <div class="acct"><span class="need">Jira + Databricks</span>
-      <span class="for">Ticket posting and impression counts - credentials live in &#9881; Settings.<span class="opt-tag">optional</span></span></div>
-  </section>
-
-  <section>
-    <h2>The download watcher <span class="opt-tag">macOS, recommended</span>
-      <span class="status" id="wstat">checking&hellip;</span></h2>
-    <p>A small local service (<code>ingest_watch.py</code>) makes the file
-      pipeline hands-off: it watches <code>~/Downloads/Ingest/</code>, pairs
-      arrivals to manifest rows, spec-checks media with ffprobe, builds
-      <b>_ticker</b> versions, feeds files to the portal picker, and archives
-      finished jobs under <code>Documents/Customer Content/</code>.</p>
-    <ul>
-      <li><b>Full package:</b> unzip it, then double-click
-        <code>watcher/install.command</code> - it installs to
-        <code>~/Library/Application Support/IngestTools/</code> and starts it
-        at login via launchd.</li>
-      <li><b>From the repo:</b> <code>local/README.md</code> covers the same
-        install plus the launchd plist.</li>
-      <li><b>Needs:</b> macOS, <code>python3</code>, and
-        <code>ffmpeg/ffprobe</code> (<code>brew install ffmpeg</code>) for the
-        ticker builds and spec checks.</li>
-    </ul>
-    <p class="fine">The extension works without it - matching, highlighting,
-      Jira drafts - but downloads, tickers, and portal feeding need the
-      watcher listening on 127.0.0.1:8770.</p>
-  </section>
-
-  <section>
     <h2>First run</h2>
     <p>Open a request email in Outlook on the web, open this panel from the
       toolbar icon, and press <b>&#9654; Run all</b>. The panel walks the rest;
       every stage shows a status dot, and anything destructive (BEGIN INGEST,
       Post to Jira) is always your click.</p>
+    <p class="fine">Credentials for the optional features live in the panel's
+      &#9881; Settings - Microsoft Graph (inbox watch), Jira, Airtable,
+      Extreme Reach API, Databricks.</p>
   </section>
 
   <div class="cta">
     <button id="openPanel">Open the panel</button>
+    <button id="recheck" class="ghost">Re-check setup</button>
     <span id="openHint">or click the Ingest Streamlined toolbar icon anytime</span>
   </div>
 </main>
 <script>
+const WATCHER = 'http://127.0.0.1:8770';
 document.getElementById('ver').textContent = 'v' + chrome.runtime.getManifest().version;
+
+// Each check returns {state:'ok'|'warn'|'miss', note} — 'miss' on an
+// optional dep renders dim, on a required one it warns. `for` is what
+// the dependency unlocks; `fix` shows only when it isn't green.
+const DEPS = [
+  { id:'watcher', name:'Download watcher', req:true,
+    for:'downloads, _ticker builds, portal feed, job archive',
+    fix:'Double-click watcher/install.command (full package) or see local/README.md in the repo.' },
+  { id:'ffmpeg', name:'ffmpeg / ffprobe', req:true,
+    for:'spec checks and _ticker version builds',
+    fix:'brew install ffmpeg — or spec checks are skipped and tickers never build.' },
+  { id:'outlook', name:'Outlook on the web', req:true,
+    for:'reading request emails (or paste them manually)',
+    fix:'Open the request email in an Outlook web tab.' },
+  { id:'sheets', name:'Google / tracker access', req:true,
+    for:'loading tracking sheets (link-shared export or open tab)',
+    fix:'Sign into Google in Chrome, or keep the tracker tab open while you work.' },
+  { id:'portal', name:'portal.cognet.tv tab', req:true,
+    for:'feeding files + filling the ingest queue',
+    fix:'Log into portal.cognet.tv in a tab when you reach step 5.' },
+  { id:'er', name:'Extreme Reach tab', req:false,
+    for:'the delivery sweep for ER-delivered clients (Horizon et al.)',
+    fix:'Log into app.extremereach.com in a tab.' },
+  { id:'graph', name:'Microsoft sign-in', req:false,
+    for:'inbox watch, Grab Email, mark-read after posting',
+    fix:'⚙ Settings → sign in (one-time Entra app setup).',
+    check: async () => (await chrome.storage.local.get('msRefreshToken')).msRefreshToken },
+  { id:'jira', name:'Jira credentials', req:false,
+    for:'Verify & draft, Post to Jira',
+    fix:'⚙ Settings → Jira email + API token.',
+    check: async () => { const d = await chrome.storage.local.get(['jiraEmail','jiraToken']);
+      return d.jiraEmail && d.jiraToken; } },
+  { id:'erapi', name:'ER API key', req:false,
+    for:'keyed delivery fetch (no ER tab needed)',
+    fix:'⚙ Settings → Extreme Reach API key.',
+    check: async () => (await chrome.storage.local.get('erApiKey')).erApiKey },
+  { id:'airtable', name:'Airtable token', req:false,
+    for:'direct tracker pulls (no copy-paste)',
+    fix:'⚙ Settings → Airtable personal access token.',
+    check: async () => (await chrome.storage.local.get('atToken')).atToken },
+  { id:'dbx', name:'Databricks', req:false,
+    for:'impression counts in the panel',
+    fix:'⚙ Settings → workspace host, warehouse id, token.',
+    check: async () => { const d = await chrome.storage.local.get(['dbxHost','dbxTok']);
+      return d.dbxHost && d.dbxTok; } },
+];
+
+const hasTab = async patterns => {
+  const tabs = await chrome.tabs.query({});
+  return tabs.some(t => patterns.some(p => p.test(t.url || '')));
+};
+
+async function depStatus(id) {
+  switch (id) {
+    case 'watcher': {
+      try {
+        const r = await fetch(WATCHER + '/health', { signal: AbortSignal.timeout(2500) });
+        if (!r.ok) return { state: 'miss' };
+        const h = await r.json();
+        window.__health = h;
+        return { state: 'ok', note: 'watching ' + (h.watch_dir || '~/Downloads/Ingest') };
+      } catch (e) { window.__health = null; return { state: 'miss' }; }
+    }
+    case 'ffmpeg': {
+      const h = window.__health;
+      if (h === undefined) await depStatus('watcher');
+      if (!window.__health) return { state: 'warn', note: 'can\'t tell - watcher is down' };
+      return window.__health.ffprobe ? { state: 'ok' } : { state: 'miss' };
+    }
+    case 'outlook':
+      return { state: (await hasTab([/outlook\.(office|office365|live)\.com/i])) ? 'ok' : 'miss' };
+    case 'sheets':
+      return { state: (await hasTab([/docs\.google\.com/i])) ? 'ok' : 'warn',
+               note: 'no sheet tab open - link-shared sheets still load by URL' };
+    case 'portal':
+      return { state: (await hasTab([/portal\.cognet\.tv/i])) ? 'ok' : 'warn',
+               note: 'open it when you reach step 5' };
+    case 'er':
+      return { state: (await hasTab([/extremereach\.com/i])) ? 'ok' : 'warn',
+               note: 'only needed for ER-delivered clients' };
+    default: {
+      const d = DEPS.find(x => x.id === id);
+      return { state: (await d.check()) ? 'ok' : 'miss' };
+    }
+  }
+}
+
+async function runChecks() {
+  const box = document.getElementById('deps');
+  box.innerHTML = '';
+  const rows = DEPS.map(d => {
+    const el = document.createElement('div');
+    el.className = 'dep';
+    el.id = 'dep-' + d.id;
+    el.innerHTML = '<span class="box">…</span><span class="need">' + d.name +
+      (d.req ? '' : '<span class="opt-tag">optional</span>') + '</span>' +
+      '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') + '</span>';
+    box.appendChild(el);
+    return el;
+  });
+  // Watcher + ffmpeg first (they gate everything else), then the rest
+  // in parallel.
+  const results = [];
+  for (const d of DEPS.slice(0, 2)) results.push({ d, r: await depStatus(d.id) });
+  await Promise.all(DEPS.slice(2).map(async d => results.push({ d, r: await depStatus(d.id) })));
+  let miss = 0, warn = 0;
+  for (const { d, r } of results) {
+    const el = document.getElementById('dep-' + d.id);
+    const state = !d.req && r.state === 'miss' ? 'warn' : r.state;
+    el.classList.add(state === 'miss' ? 'miss' : state);
+    el.querySelector('.box').textContent =
+      r.state === 'ok' ? '✓' : (r.state === 'warn' ? '!' : '✕');
+    if (r.note) el.querySelector('.for').textContent = r.note;
+    if (d.req && r.state !== 'ok') miss++;
+    if (r.state === 'warn') warn++;
+  }
+  const banner = document.getElementById('warnBanner');
+  if (miss) {
+    banner.className = '';
+    banner.innerHTML = '<b>' + miss + ' required piece' + (miss > 1 ? 's' : '') +
+      ' missing.</b> The file pipeline won\'t work until the red boxes go green - fixes are under each item.';
+  } else if (warn) {
+    banner.className = 'ok';
+    banner.innerHTML = '<b>Core pipeline ready.</b> A few optional pieces are unset (amber) - configure them in ⚙ Settings when you need them.';
+  } else {
+    banner.className = 'ok';
+    banner.innerHTML = '<b>Everything\'s ready.</b> Open a request email and press ▶ Run all.';
+  }
+  document.getElementById('sum').textContent =
+    results.filter(r => r.r.state === 'ok').length + ' of ' + DEPS.length + ' ready';
+}
+
+document.getElementById('recheck').addEventListener('click', runChecks);
 document.getElementById('openPanel').addEventListener('click', async () => {
   try {
     const w = await chrome.windows.getLastFocused();
@@ -144,18 +258,7 @@ document.getElementById('openPanel').addEventListener('click', async () => {
       'click the Ingest Streamlined toolbar icon to open it';
   }
 });
-(async () => {
-  const el = document.getElementById('wstat');
-  try {
-    const r = await fetch('http://127.0.0.1:8770/ticker-status?job=__ping__',
-      { signal: AbortSignal.timeout(2000) });
-    el.textContent = r.ok ? 'running on this machine' : 'not responding';
-    el.className = 'status ' + (r.ok ? 'on' : 'off');
-  } catch (e) {
-    el.textContent = 'not running - install below';
-    el.className = 'status off';
-  }
-})();
+runChecks();
 </script>
 </body>
 </html>
