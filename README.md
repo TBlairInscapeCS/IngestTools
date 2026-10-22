@@ -20,8 +20,10 @@
 - [ ] **Inbox monitoring** — auto-detecting new request emails needs
       Microsoft Graph API + IT consent. Until then: open the email, click
       Grab.
-- [ ] **Extension distribution** — currently sideloaded (Load unpacked).
-      For teammates: Chrome Web Store or enterprise policy install.
+- [ ] **Extension distribution** — v1 ships as a sideload zip
+      (`./package.sh` -> `dist/ingest-streamlined-v*.zip`, see
+      "Install the extension" below). Chrome Web Store or enterprise
+      policy install is the wider-distribution step.
 - [ ] **`Code.gs`** — stays uninstalled entirely; it writes to sheets.
 
 Three pieces that together automate the ingest-request workflow:
@@ -36,6 +38,28 @@ Three pieces that together automate the ingest-request workflow:
 - **`Code.gs`** — the earlier Google Apps Script version, bound to a sheet.
   Only practical for sheets **you** own; superseded by the extension for
   client-owned sheets.
+
+## Install the extension (v1 package)
+
+```bash
+./package.sh   # -> dist/ingest-streamlined-v1.0.0.zip
+```
+
+Send the zip to whoever needs it. On their machine:
+
+1. Unzip it anywhere stable (the folder becomes the install — Chrome
+   reads it live, so don't park it somewhere that gets cleaned).
+2. `chrome://extensions` → toggle **Developer mode** → **Load unpacked**
+   → pick the unzipped folder.
+3. Pin it, open a request email in Outlook on the web, and click the
+   toolbar icon / "Ingest Reconcile" to open the side panel.
+
+What works without anything else: email parsing, tracker matching
+(Google Sheets + SharePoint workbooks), row highlighting, the reconcile,
+Jira draft, and reply drafting. The **download watcher** (`local/` —
+macOS + launchd) is needed for the file pipeline: manifest tracking,
+spec checks, `_ticker` builds, and feeding files into the portal picker.
+See `local/README.md` for its one-time setup.
 
 ## What the Apps Script does
 
