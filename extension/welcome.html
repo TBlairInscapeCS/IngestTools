@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <title>Ingest Streamlined - Welcome</title>
 <style>
+  /* Status palette mirrors the panel: same accent, same ok/warn/fail,
+     so a green light means the same thing in every view. */
   :root { --bg:#0f1216; --card:#171c24; --line:#262e3b; --text:#dde3ec;
-          --mut:#8b93a1; --accent:#187cff; --ok:#2e7d4f; --warn:#b06000; }
+          --mut:#8b93a1; --accent:#4f8ff7; --accent-hi:#6aa3ff;
+          --ok:#3fbf7f; --warn:#e8a13d; --fail:#e05c5c; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -30,18 +33,20 @@
   .fine { color:var(--mut); font-size:12px; }
 
   /* dependency checklist */
-  #warnBanner { background:#3a1d1d; border:1px solid #5a2a2a; color:#ec9a9a;
+  #warnBanner { background:#402224; border:1px solid #6b3434; color:#ec9a9a;
                 border-radius:8px; padding:10px 14px; margin-top:18px; }
-  #warnBanner.ok { background:#12351f; border-color:#1f4a2e; color:#7fd9a8; }
+  #warnBanner.ok { background:#1d3327; border-color:#2e5c3c; color:#9adfa8; }
   .dep { display:flex; gap:10px; align-items:baseline; padding:8px 0;
          border-bottom:1px solid var(--line); }
   .dep:last-child { border-bottom:none; }
   .dep .box { flex:0 0 20px; height:20px; border-radius:6px; border:1px solid var(--line);
               display:inline-flex; align-items:center; justify-content:center;
               font-size:12px; font-weight:700; color:var(--mut); }
-  .dep.ok .box { background:var(--ok); border-color:var(--ok); color:#fff; }
-  .dep.warn .box { background:var(--warn); border-color:var(--warn); color:#fff; }
-  .dep.miss .box { background:#3a1d1d; border-color:#5a2a2a; color:#ec9a9a; }
+  .dep.ok .box { background:var(--ok); border-color:var(--ok); color:#0f1218;
+    box-shadow:0 0 5px rgba(63,191,127,.5); }
+  .dep.warn .box { background:var(--warn); border-color:var(--warn); color:#0f1218;
+    box-shadow:0 0 5px rgba(232,161,61,.5); }
+  .dep.miss .box { background:#402224; border-color:#6b3434; color:#ec9a9a; }
   .dep .need { min-width:170px; font-weight:600; }
   .dep .for { color:var(--mut); flex:1; }
   .dep .fix { color:#e8b04a; font-size:11px; display:none; width:100%;
@@ -50,10 +55,12 @@
   .dep .opt-tag { display:none; }
   .grpbox { border:1px solid var(--line); border-radius:9px;
     padding:8px 14px 8px; margin-top:10px; }
-  .grpbox.install { background:#101f2d; border-color:#1e3d5c; }
-  .grpbox.install .grphead { color:#6fb1ec; }
-  .grpbox.tabs { background:#1b1830; border-color:#3a3560; }
-  .grpbox.tabs .grphead { color:#a89de0; }
+  /* group tints borrow the panel's stage colors: installs = s1 blue,
+     tabs = s6 teal */
+  .grpbox.install { background:#141d2b; border-color:#2c4468; }
+  .grpbox.install .grphead { color:#7fb7fb; }
+  .grpbox.tabs { background:#142728; border-color:#2e5050; }
+  .grpbox.tabs .grphead { color:#8fd8d8; }
   .grphead { font-weight:700; font-size:12px; margin:2px 0 4px; }
   /* tabs group: condensed, small round lights mirroring the panel's dots */
   .grpbox.tabs .dep { padding:4px 0; font-size:12px; }
@@ -70,24 +77,34 @@
   .fchip { flex:0 0 78px; text-align:center; border:1px solid var(--line);
     background:#0b0e12; border-radius:20px; padding:4px 0; font-size:11px;
     font-weight:700; color:#fff; margin-top:1px; }
+  /* chips carry the same stage colors as the panel's section accents */
+  .fchip.c1 { border-color:#4f9cf9; color:#7fb7fb; }
+  .fchip.c2 { border-color:#3fbf7f; color:#6ed3a2; }
+  .fchip.c3 { border-color:#a06cd5; color:#c09ae8; }
+  .fchip.c4 { border-color:#e8a13d; color:#f0bc6e; }
+  .fchip.c5 { border-color:#e06c9a; color:#ec9fbe; }
+  .fchip.c6 { border-color:#5cc8c8; color:#8fd8d8; }
   .fstep > div { flex:1; padding:2px 0; }
   .farrow { margin:1px 0 1px 36px; color:var(--mut); font-size:11px;
     line-height:1.2; }
   .dephelp { margin-top:5px; }
-  .dephelp summary { cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }
-  .dephelp ol { margin:6px 0 0; padding-left:18px; color:var(--txt); }
+  .dephelp summary { cursor:pointer; color:var(--accent-hi); font-weight:600; user-select:none; }
+  .dephelp ol { margin:6px 0 0; padding-left:18px; color:var(--text); }
   .dephelp li { margin:4px 0; }
-  .dephelp code { background:#f0f4f8; padding:1px 4px; border-radius:3px; font-size:11px; }
+  .dephelp code { background:#0b0e12; border:1px solid var(--line);
+    padding:1px 5px; border-radius:3px; font-size:11px; }
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
   .cta { margin-top:26px; }
   .cta .ctarow { display:flex; gap:12px; align-items:center; margin-top:12px; }
   .cta > span { display:block; margin-top:10px; color:var(--mut); font-size:12px; }
-  .banner2 { background:#3a1d1d; border:1px solid #5a2a2a; color:#ec9a9a;
+  .banner2 { background:#402224; border:1px solid #6b3434; color:#ec9a9a;
              border-radius:8px; padding:10px 14px; }
-  .banner2.ok { background:#12351f; border-color:#1f4a2e; color:#7fd9a8; }
+  .banner2.ok { background:#1d3327; border-color:#2e5c3c; color:#9adfa8; }
   button.go { font-size:15px; padding:11px 26px; border-radius:9px; }
+  button:hover { background:var(--accent-hi); }
+  button.ghost:hover, button.ghost.small:hover { background:#1e2530; color:var(--text); }
   button.ghost.small { font-size:11px; padding:5px 12px; color:var(--mut);
     border-color:var(--line); font-weight:500; }
   .optbox { margin-top:14px; border:1px solid var(--line); border-radius:10px;
@@ -133,30 +150,30 @@
   <section>
     <h2>How a job flows</h2>
     <div class="flow">
-      <div class="fstep"><span class="fchip">Request</span>
+      <div class="fstep"><span class="fchip c1">Request</span>
         <div>Open the request email in Outlook on the web; the panel grabs it,
           detects the client, and pulls the codes it asks for.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip">Tracker</span>
+      <div class="fstep"><span class="fchip c2">Tracker</span>
         <div>The tracking sheet loads from the email's link, an open sheet
           tab, or a manual pick. Matched rows show their line numbers - click
           one to highlight it in the sheet.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip">Match</span>
+      <div class="fstep"><span class="fchip c3">Match</span>
         <div>Email codes &harr; sheet rows. Exclude any row that doesn't
           belong; nothing downstream sees it.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip">Download</span>
+      <div class="fstep"><span class="fchip c4">Download</span>
         <div><b>Find &amp; download</b> tries direct links, then a delivery
           search, then any open page that lists files.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip">Portal</span>
+      <div class="fstep"><span class="fchip c5">Portal</span>
         <div>Feeds files into portal.cognet.tv's ingest queue and fills
           Reporting ID / Title / Advertiser / Fingerprint. Standard batch
           first; <b>_ticker</b> versions build automatically and feed as a
           separate video-only batch.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip">Report</span>
+      <div class="fstep"><span class="fchip c6">Report</span>
         <div>Verify the records, review the drafted ticket, post to Jira when
           you're happy, copy the reply back to the requester.</div></div>
     </div>
