@@ -12,3 +12,4 @@ examples/tatari*.json
 examples/*.pdf
 examples/*.app
 examples/*_files/
+portfolio/
