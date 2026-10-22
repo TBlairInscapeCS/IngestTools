@@ -411,6 +411,12 @@ function clearAll() {
   ['recResults', 'impResults', 'dateFilterHint']
     .forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
   $('erSender').value = ''; $('erDays').value = '14';
+  ['watchInfo', 'tickerInfo'].forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
+  ['feedTicker', 'ingestPush'].forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
+  const pp = $('portalPick'); if (pp) pp.value = '';
+  // Collapse to the fresh-load layout: sec1 open, every module and mini
+  // toggle shut - the progressive unlocks re-apply from the cleared dots.
+  document.querySelectorAll('details').forEach(d => { d.open = (d.id === 'sec1'); });
   // Persisted inputs must not resurrect on the next panel reload
   chrome.storage.local.remove(['emailText', 'idsText', 'filesText',
     'capturedByName', 'msLastSheet', 'pendingIds', 'pendingFiles',
