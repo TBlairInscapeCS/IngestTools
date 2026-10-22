@@ -51,6 +51,11 @@
   .grphead { font-weight:700; font-size:12px; margin:14px 0 4px; }
   .grphead:first-child { margin-top:2px; }
   .dep .fix b { color:inherit; }
+  .dephelp { margin-top:5px; }
+  .dephelp summary { cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }
+  .dephelp ol { margin:6px 0 0; padding-left:18px; color:var(--txt); }
+  .dephelp li { margin:4px 0; }
+  .dephelp code { background:#f0f4f8; padding:1px 4px; border-radius:3px; font-size:11px; }
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
@@ -136,10 +141,23 @@ document.getElementById('ver').textContent = 'v' + chrome.runtime.getManifest().
 const DEPS = [
   { id:'watcher', name:'Download watcher', req:true, grp:'install',
     for:'downloads, _ticker builds, portal feed, job archive',
-    fix:'Double-click <b>watcher/install.command</b> in the full package. It installs to ~/Library/Application Support/IngestTools and starts itself at login - that is the whole setup.' },
+    fix:'Double-click <b>watcher/install.command</b> in the full package. It installs to ~/Library/Application Support/IngestTools and starts itself at login - that is the whole setup.',
+    help:'<ol>' +
+      '<li>Unzip the <b>full package</b> (IngestTools-full-*.zip). Inside is a <b>watcher/</b> folder.</li>' +
+      '<li>Double-click <b>watcher/install.command</b>.</li>' +
+      '<li>If macOS says it can\'t be opened: right-click it → <b>Open</b> → Open anyway (or System Settings → Privacy &amp; Security → Open Anyway).</li>' +
+      '<li>It copies the watcher to <code>~/Library/Application Support/IngestTools/</code> and registers it to start at every login - no other setup, no terminal needed.</li>' +
+      '<li>This row flips green within a few seconds. Done.</li>' +
+      '</ol>' },
   { id:'ffmpeg', name:'ffmpeg / ffprobe', req:true, grp:'install',
     for:'spec checks and _ticker version builds',
-    fix:'brew install ffmpeg — get Homebrew at brew.sh if needed. Without it spec checks skip and tickers never build.' },
+    fix:'brew install ffmpeg — get Homebrew at brew.sh if needed. Without it spec checks skip and tickers never build.',
+    help:'<ol>' +
+      '<li>Open <b>Terminal</b> (Applications → Utilities).</li>' +
+      '<li>Install Homebrew if you don\'t have it - go to <b>brew.sh</b>, copy the one-line install command, paste it into Terminal. It asks for your Mac password once.</li>' +
+      '<li>Run: <code>brew install ffmpeg</code>. Takes a couple of minutes.</li>' +
+      '<li>That installs both <code>ffmpeg</code> and <code>ffprobe</code> - this row goes green on its own. Nothing else to configure.</li>' +
+      '</ol>' },
   { id:'outlook', name:'Outlook on the web', req:true, grp:'tabs',
     for:'reading request emails (or paste them manually)',
     fix:'Open the request email in an Outlook web tab.' },
@@ -237,7 +255,9 @@ async function runChecks() {
     el.className = 'dep';
     el.id = 'dep-' + d.id;
     el.innerHTML = '<span class="box">…</span><span class="need">' + d.name + '</span>' +
-      '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') + '</span>';
+      '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') +
+      (d.help ? '<details class="dephelp"><summary>step-by-step install</summary>' + d.help + '</details>' : '') +
+      '</span>';
     (d.grp === 'opt' ? optBox : box).appendChild(el);
     return el;
   });
