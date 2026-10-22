@@ -47,13 +47,18 @@
   .dep .fix { color:#e8b04a; font-size:11px; display:none; width:100%;
               margin:2px 0 0 30px; }
   .dep.miss .fix, .dep.warn .fix { display:block; }
-  .dep .opt-tag { font-size:10px; border:1px solid var(--line); border-radius:8px;
-                  padding:0 6px; color:var(--mut); margin-left:6px; }
+  .dep .opt-tag { display:none; }
   button { background:var(--accent); color:#fff; border:0; border-radius:7px;
            padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
   .cta { margin-top:26px; display:flex; gap:12px; align-items:center; }
   .cta span { color:var(--mut); font-size:12px; }
+  .optbox { margin-top:14px; border:1px solid var(--line); border-radius:10px;
+    padding:10px 14px; background:var(--card); }
+  .optbox > summary { cursor:pointer; font-weight:700; font-size:13px; list-style:none; }
+  .optbox > summary::-webkit-details-marker { display:none; }
+  .optbox > summary::before { content:'▸ '; color:var(--mut); }
+  .optbox[open] > summary::before { content:'▾ '; }
 </style>
 </head>
 <body>
@@ -72,6 +77,13 @@
   <section>
     <h2>Setup checklist <span class="fine" id="sum"></span></h2>
     <div id="deps"></div>
+    <details class="optbox">
+      <summary>Optional connections <span class="fine" id="optSum"></span></summary>
+      <p class="fine" style="margin:4px 0 2px">Nothing here blocks the pipeline - each row
+        says what it unlocks, and the panel tells you in place when a feature
+        needs one. All of it lives in the panel's &#9881; Settings.</p>
+      <div id="optDeps"></div>
+    </details>
   </section>
 
   <section>
@@ -85,7 +97,7 @@
       <li><b>Match</b> - email codes &harr; sheet rows. Exclude any row that
         doesn't belong; nothing downstream sees it.</li>
       <li><b>Download</b> - <b>Find &amp; download</b> tries direct links, then
-        the Extreme Reach sweep, then open delivery pages.</li>
+        a delivery search, then any open page that lists files.</li>
       <li><b>Portal</b> - feeds files into portal.cognet.tv's ingest queue and
         fills Reporting ID / Title / Advertiser / Fingerprint. Standard batch
         first; <b>_ticker</b> versions build automatically and feed as a
@@ -101,9 +113,8 @@
       toolbar icon, and press <b>&#9654; Run all</b>. The panel walks the rest;
       every stage shows a status dot, and anything destructive (BEGIN INGEST,
       Post to Jira) is always your click.</p>
-    <p class="fine">Credentials for the optional features live in the panel's
-      &#9881; Settings - Microsoft Graph (inbox watch), Jira, Airtable,
-      Extreme Reach API, Databricks.</p>
+    <p class="fine">Optional connections sit collapsed above - the panel also
+      names the one it needs, in place, when you use a feature that's missing it.</p>
   </section>
 
   <div class="cta">
@@ -135,27 +146,27 @@ const DEPS = [
   { id:'portal', name:'portal.cognet.tv tab', req:true,
     for:'feeding files + filling the ingest queue',
     fix:'Log into portal.cognet.tv in a tab when you reach step 5.' },
-  { id:'er', name:'Extreme Reach tab', req:false,
-    for:'the delivery sweep for ER-delivered clients (Horizon et al.)',
+  { id:'er', name:'Extreme Reach tab', req:false, grp:'main',
+    for:'the delivery search - most clients deliver here',
     fix:'Log into app.extremereach.com in a tab.' },
-  { id:'graph', name:'Microsoft sign-in', req:false,
+  { id:'graph', name:'Microsoft sign-in', req:false, grp:'opt',
     for:'inbox watch, Grab Email, mark-read after posting',
     fix:'⚙ Settings → sign in (one-time Entra app setup).',
     check: async () => (await chrome.storage.local.get('msRefreshToken')).msRefreshToken },
-  { id:'jira', name:'Jira credentials', req:false,
+  { id:'jira', grp:'opt', name:'Jira credentials', req:false,
     for:'Verify & draft, Post to Jira',
     fix:'⚙ Settings → Jira email + API token.',
     check: async () => { const d = await chrome.storage.local.get(['jiraEmail','jiraToken']);
       return d.jiraEmail && d.jiraToken; } },
-  { id:'erapi', name:'ER API key', req:false,
+  { id:'erapi', grp:'opt', name:'ER API key', req:false,
     for:'keyed delivery fetch (no ER tab needed)',
     fix:'⚙ Settings → Extreme Reach API key.',
     check: async () => (await chrome.storage.local.get('erApiKey')).erApiKey },
-  { id:'airtable', name:'Airtable token', req:false,
+  { id:'airtable', grp:'opt', name:'Airtable token', req:false,
     for:'direct tracker pulls (no copy-paste)',
     fix:'⚙ Settings → Airtable personal access token.',
     check: async () => (await chrome.storage.local.get('atToken')).atToken },
-  { id:'dbx', name:'Databricks', req:false,
+  { id:'dbx', grp:'opt', name:'Databricks', req:false,
     for:'impression counts in the panel',
     fix:'⚙ Settings → workspace host, warehouse id, token.',
     check: async () => { const d = await chrome.storage.local.get(['dbxHost','dbxTok']);
@@ -204,15 +215,15 @@ async function depStatus(id) {
 
 async function runChecks() {
   const box = document.getElementById('deps');
-  box.innerHTML = '';
+  const optBox = document.getElementById('optDeps');
+  box.innerHTML = ''; optBox.innerHTML = '';
   const rows = DEPS.map(d => {
     const el = document.createElement('div');
     el.className = 'dep';
     el.id = 'dep-' + d.id;
-    el.innerHTML = '<span class="box">…</span><span class="need">' + d.name +
-      (d.req ? '' : '<span class="opt-tag">optional</span>') + '</span>' +
+    el.innerHTML = '<span class="box">…</span><span class="need">' + d.name + '</span>' +
       '<span class="for">' + d.for + '</span><span class="fix">' + (d.fix || '') + '</span>';
-    box.appendChild(el);
+    (d.grp === 'opt' ? optBox : box).appendChild(el);
     return el;
   });
   // Watcher + ffmpeg first (they gate everything else), then the rest
@@ -245,6 +256,9 @@ async function runChecks() {
   }
   document.getElementById('sum').textContent =
     results.filter(r => r.r.state === 'ok').length + ' of ' + DEPS.length + ' ready';
+  const optOk = results.filter(r => r.d.grp === 'opt' && r.r.state === 'ok').length;
+  const optN = DEPS.filter(d => d.grp === 'opt').length;
+  document.getElementById('optSum').textContent = ' · ' + optOk + ' of ' + optN + ' set';
 }
 
 document.getElementById('recheck').addEventListener('click', runChecks);
