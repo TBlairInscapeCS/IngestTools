@@ -33,6 +33,9 @@
  * sheetless: true - no tracking sheet exists for this client; the email's
  *   cited IDs (+ any same-line links) are the manifest. Run-all proceeds
  *   to the email match instead of stopping at step 2.
+ * emailBrand: RegExp - sheetless brand source: first capture group fills
+ *   Advertiser/Brand/Vertical when ingest.advertiser is set (DPM's
+ *   "fingerprint for GM"). detectedAdvertiser (subject) still wins.
  *
  * inactive: true - keeps detection rules (old threads still surface the
  *   playbook, flagged "(inactive)") but hides the client from the manual
@@ -365,8 +368,9 @@ var CLIENTS = [
     detect: { keywords: [/data ?plus ?math|liveramp/i], domains: [/liveramp\.com|dataplusmath\.com/i] },
     delivery: 'links',
     sheetless: true,  // no tracking sheet - the email's IDs + direct links are the manifest
-    note: "No tracking sheet: the request email's per-spot IDs and direct download links are the whole manifest. Match/build runs sheet-free; Jira logs under DD-495.",
-    ingest: { cidMap: ['dataplusmath', 'liveramp'], fingerprint: 'both',
+    emailBrand: /(?:fingerprint|ingest(?:ion)?)[s]?\s+for\s+([A-Za-z0-9&' .-]{1,50})/i,  // "One fingerprint for GM"
+    note: "No tracking sheet: the request email's per-spot IDs and direct download links are the whole manifest. Brand comes from 'fingerprint for <X>' (GM etc). Links arrive Mimecast-wrapped - they resolve through to the dpm-share-extremereach S3 bucket on fetch. Jira logs under DD-495.",
+    ingest: { cidMap: ['dataplusmath', 'liveramp'], advertiser: true, fingerprint: 'both',
       note: 'Requests usually come from @liveramp.com addresses.' },
   },
   {

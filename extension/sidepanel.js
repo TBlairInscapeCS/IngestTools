@@ -2649,6 +2649,15 @@ function doEmailMatch() {
     extractCodes(line).concat(extractFileIds(line)).forEach(c => put(c, { link: urls[0] }));
   });
   const fresh = [...found.values()];
+  // Sheetless brand: subject-derived advertiser wins; the playbook's
+  // emailBrand regex (DPM's "fingerprint for GM") is the fallback, since
+  // there's no sheet column to supply Advertiser/Brand/Vertical.
+  const ing = (client && client.ingest) || {};
+  if (ing.advertiser) {
+    const eb = detectedAdvertiser ||
+      (client && client.emailBrand ? String(((matchText.match(client.emailBrand) || [])[1] || '')).replace(/[.!,;:]+$/, '').trim() : '');
+    if (eb) fresh.forEach(m => { if (!m.brand) m.brand = eb; });
+  }
   if (!fresh.length) {
     setStage('sdMatch', 'warn', 'email cites no IDs');
     toast('Nothing citable in that email - no IDs or filenames to build rows from.');
