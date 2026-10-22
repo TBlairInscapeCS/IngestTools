@@ -14,7 +14,8 @@ launchctl kickstart -k gui/$(id -u)/dev.ingest-watch
 ```
 
 Verify with `launchctl print gui/$(id -u)/dev.ingest-watch` (state =
-running) and `logs/watch.log`. The user does not restart it — that is
+running) and `local/logs/watch.log` (logs moved beside the script for
+portability). The user does not restart it — that is
 the agent's responsibility as the only editor of the file.
 
 ## Extension verification

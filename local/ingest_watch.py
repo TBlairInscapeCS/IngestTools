@@ -33,9 +33,12 @@ from pathlib import Path
 
 # ---- config ----------------------------------------------------------------
 WATCH_DIR = Path.home() / "Downloads" / "Ingest"
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
-ESPN_SCRIPT = Path("/Users/tim.blair/Devin/espn_ticker.sh")
-TICKER_IMAGE = Path("/Users/tim.blair/Devin/ticker.png")
+LOG_DIR = Path(__file__).resolve().parent / "logs"
+# espn_ticker.sh + ticker.png live beside this script - same folder in
+# the repo (local/) and in an installed copy (~/<install>/IngestTools/),
+# so no user-specific paths survive packaging.
+ESPN_SCRIPT = Path(__file__).resolve().parent / "espn_ticker.sh"
+TICKER_IMAGE = Path(__file__).resolve().parent / "ticker.png"
 POLL_SECONDS = 15
 LOG_PORT = 8770
 MEDIA_EXTS = {".mp4", ".mov", ".mpg", ".mxf", ".mkv"}
@@ -1360,12 +1363,41 @@ def tickerize_drops():
             alert_event("tickerize", f"Tickerize FAILED {p.name}: {msg}")
 
 
+PREV_JOBS_KEEP = 3  # newest job-slug groups kept in _previous jobs/
+
+
+def prune_prev_jobs():
+    """Jira evidence (<slug>-ingest-records.json / -ingest-screenshot.png)
+    lands in Ingest/_previous jobs/. Keep only the newest PREV_JOBS_KEEP
+    jobs - the files exist to attach to the current ticket, not to
+    accumulate. Grouping is by the slug prefix; unparseable names are
+    left alone."""
+    d = WATCH_DIR / "_previous jobs"
+    if not d.is_dir():
+        return
+    groups = {}
+    for p in d.iterdir():
+        if not p.is_file():
+            continue
+        slug = p.name.split("-ingest-")[0]
+        if slug == p.name:
+            continue
+        groups.setdefault(slug, []).append(p)
+    for slug in sorted(groups, reverse=True)[PREV_JOBS_KEEP:]:
+        for p in groups[slug]:
+            try:
+                p.unlink()
+            except OSError as e:
+                log(f"prev-jobs prune failed {p.name}: {e}")
+
+
 def run_once():
     if not WATCH_DIR.exists():
         return
     relocate_debug_logs()
     scoop_downloads()
     tickerize_drops()
+    prune_prev_jobs()
     for manifest in all_manifests():
         if MANIFEST_RE.match(manifest.name):
             process_job(manifest)

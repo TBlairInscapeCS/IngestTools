@@ -367,17 +367,16 @@ async function sheetCoversRequest() {
 
 // Job naming: flat ~/Downloads/Ingest/ layout - media lands at the top
 // level, per-job metadata is <slug>-manifest.json. The slug is fixed
-// format, no input: date+time the request was sent (now when the email
-// date won't parse), client, and the requester's name when known.
-// The timestamp keeps same-day/same-client jobs from colliding.
+// format, no input and NO names (the requester's name must never end up
+// on files that ship as Jira evidence): date+time the request was sent,
+// client. The timestamp keeps same-day/same-client jobs from colliding.
 function jobSlug() {
   const sent = Date.parse(emailDate);
   const t = isNaN(sent) ? (jobStampCache = jobStampCache || new Date()) : new Date(sent);
   const d = t.getFullYear() + String(t.getMonth() + 1).padStart(2, '0') + String(t.getDate()).padStart(2, '0');
   const ts = t.toTimeString().slice(0, 8).replace(/:/g, '');
   const cl = client ? client.name.split(' (')[0].split(' / ')[0].replace(/[^\w]+/g, '') : 'job';
-  const who = String(emailSender || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
-  return (d + '-' + ts + '-' + cl + (who ? '-' + who : '')).slice(0, 80);
+  return (d + '-' + ts + '-' + cl).slice(0, 80);
 }
 
 function saveInputs() {
@@ -1073,6 +1072,10 @@ $('grabEmail').addEventListener('click', async () => {
 
 $('clearEmail').addEventListener('click', () => { emailEl.value = ''; emailDate = ''; onEmailChange(); saveInputs(); });
 $('clearAll').addEventListener('click', clearAll);
+$('helpLink').addEventListener('click', e => {
+  e.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+});
 
 // Inbox-offline chip: msAccessToken flags msAuthDown when the refresh
 // token dies - background poll can flag it while the panel is closed,
@@ -5257,9 +5260,9 @@ $('saveRecords').addEventListener('click', async () => {
   }, null, 2);
   const blob = new Blob([payload], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-ingest-records.json' });
+  await chrome.downloads.download({ url, filename: 'Ingest/_previous jobs/' + job + '-ingest-records.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  toast('Saved ' + job + '-ingest-records.json to Ingest/ - attach it to the ticket.');
+  toast('Saved ' + job + '-ingest-records.json to Ingest/_previous jobs/ - attach it to the ticket.');
 });
 
 function buildJiraTicket() {
@@ -5294,8 +5297,8 @@ $('shotPortal').addEventListener('click', async () => {
   try {
     const dataUrl = await capturePortalShot();
     const job = jobSlug();
-    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/' + job + '-ingest-screenshot.png' });
-    toast('Screenshot saved to Ingest/');
+    await chrome.downloads.download({ url: dataUrl, filename: 'Ingest/_previous jobs/' + job + '-ingest-screenshot.png' });
+    toast('Screenshot saved to Ingest/_previous jobs/');
   } catch (e) {
     dbg('screenshot failed', e.message);
     toast('Screenshot failed: ' + e.message);
@@ -5495,11 +5498,11 @@ $('postJira').addEventListener('click', async () => {
       const blob = new Blob([JSON.stringify({ job, realm: ingestRealm(),
         queried_at: new Date().toISOString(), records }, null, 2)], { type: 'application/json' });
       const u = URL.createObjectURL(blob);
-      chrome.downloads.download({ url: u, filename: 'Ingest/' + job + '-ingest-records.json' });
+      chrome.downloads.download({ url: u, filename: 'Ingest/_previous jobs/' + job + '-ingest-records.json' });
       setTimeout(() => URL.revokeObjectURL(u), 30000);
     }
     if (shotUrl)
-      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/' + job + '-ingest-screenshot.png' });
+      chrome.downloads.download({ url: shotUrl, filename: 'Ingest/_previous jobs/' + job + '-ingest-screenshot.png' });
 
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
     const { issue, newest } = await jiraWeeklyTicket(epic);

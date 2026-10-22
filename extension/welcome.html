@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ingest Streamlined - Welcome</title>
+<style>
+  :root { --bg:#0f1216; --card:#171c24; --line:#262e3b; --text:#dde3ec;
+          --mut:#8b93a1; --accent:#187cff; --ok:#2e7d4f; --warn:#b06000; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:36px 24px 60px; }
+  .hero { display:flex; gap:18px; align-items:center; margin-bottom:8px; }
+  .hero img { width:72px; height:72px; }
+  h1 { font-size:24px; margin:0; }
+  .tag { color:var(--mut); font-size:14px; margin:2px 0 0; }
+  .ver { font-size:11px; color:var(--mut); border:1px solid var(--line);
+         border-radius:10px; padding:1px 8px; margin-left:10px; }
+  section { background:var(--card); border:1px solid var(--line);
+            border-radius:10px; padding:16px 20px; margin-top:18px; }
+  h2 { font-size:14px; margin:0 0 10px; color:#fff; }
+  ol.steps { margin:0; padding-left:20px; }
+  ol.steps li { margin:5px 0; }
+  ol.steps b { color:#fff; }
+  .acct { display:flex; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .acct:last-child { border-bottom:none; }
+  .acct .need { min-width:150px; font-weight:600; }
+  .acct .for { color:var(--mut); }
+  .opt-tag { font-size:10px; border:1px solid var(--line); border-radius:8px;
+             padding:0 6px; color:var(--mut); margin-left:6px; }
+  code { background:#0b0e12; border:1px solid var(--line); border-radius:5px;
+         padding:1px 6px; font-size:12px; }
+  .kbd { background:#0b0e12; border:1px solid var(--line); border-bottom-width:2px;
+         border-radius:5px; padding:1px 6px; font-size:11px; }
+  .status { display:inline-block; margin-left:8px; padding:1px 9px;
+            border-radius:10px; font-size:11px; }
+  .status.on { background:#12351f; color:#7fd9a8; }
+  .status.off { background:#3a1d1d; color:#ec9a9a; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:7px;
+           padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  .cta { margin-top:26px; display:flex; gap:12px; align-items:center; }
+  .cta span { color:var(--mut); font-size:12px; }
+  a { color:var(--accent); }
+  ul { margin:6px 0; padding-left:20px; }
+  li { margin:3px 0; }
+  .fine { color:var(--mut); font-size:12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <img src="icon128.png" alt="">
+    <div>
+      <h1>Ingest Streamlined<span class="ver" id="ver"></span></h1>
+      <p class="tag">Request email &rarr; tracking sheet &rarr; matched rows &rarr;
+        downloaded media &rarr; filled portal queue &rarr; Jira proof &rarr; reply.</p>
+    </div>
+  </div>
+
+  <section>
+    <h2>How a job flows</h2>
+    <ol class="steps">
+      <li><b>Request</b> - open the request email in Outlook on the web; the panel
+        grabs it, detects the client, and pulls the codes it asks for.</li>
+      <li><b>Tracker</b> - the tracking sheet loads from the email's link, an open
+        sheet tab, or a manual pick. Matched rows show their line numbers -
+        click one to highlight it in the sheet.</li>
+      <li><b>Match</b> - email codes &harr; sheet rows. Exclude any row that
+        doesn't belong; nothing downstream sees it.</li>
+      <li><b>Download</b> - <b>Find &amp; download</b> tries direct links, then
+        the Extreme Reach sweep, then open delivery pages.</li>
+      <li><b>Portal</b> - feeds files into portal.cognet.tv's ingest queue and
+        fills Reporting ID / Title / Advertiser / Fingerprint. Standard batch
+        first; <b>_ticker</b> versions build automatically and feed as a
+        separate video-only batch.</li>
+      <li><b>Report</b> - verify the records, review the drafted ticket, post to
+        Jira when you're happy, copy the reply back to the requester.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Accounts you'll be signed into</h2>
+    <div class="acct"><span class="need">Outlook on the web</span>
+      <span class="for">Request emails are read from the open conversation (or pasted in).</span></div>
+    <div class="acct"><span class="need">Google</span>
+      <span class="for">Tracking sheets shared with you - read-only xlsx export, no API setup.</span></div>
+    <div class="acct"><span class="need">portal.cognet.tv</span>
+      <span class="for">The ingest queue. Files feed in and fills are pushed, but BEGIN INGEST is always your click.</span></div>
+    <div class="acct"><span class="need">Extreme Reach</span>
+      <span class="for">Logged-in ER tab for the delivery sweep. An API key (&#9881; Settings) adds the keyed fetch.<span class="opt-tag">optional</span></span></div>
+    <div class="acct"><span class="need">Microsoft sign-in</span>
+      <span class="for">Inbox watch + Grab Email via Graph - one-time app setup in &#9881; Settings.<span class="opt-tag">optional</span></span></div>
+    <div class="acct"><span class="need">Jira + Databricks</span>
+      <span class="for">Ticket posting and impression counts - credentials live in &#9881; Settings.<span class="opt-tag">optional</span></span></div>
+  </section>
+
+  <section>
+    <h2>The download watcher <span class="opt-tag">macOS, recommended</span>
+      <span class="status" id="wstat">checking&hellip;</span></h2>
+    <p>A small local service (<code>ingest_watch.py</code>) makes the file
+      pipeline hands-off: it watches <code>~/Downloads/Ingest/</code>, pairs
+      arrivals to manifest rows, spec-checks media with ffprobe, builds
+      <b>_ticker</b> versions, feeds files to the portal picker, and archives
+      finished jobs under <code>Documents/Customer Content/</code>.</p>
+    <ul>
+      <li><b>Full package:</b> unzip it, then double-click
+        <code>watcher/install.command</code> - it installs to
+        <code>~/Library/Application Support/IngestTools/</code> and starts it
+        at login via launchd.</li>
+      <li><b>From the repo:</b> <code>local/README.md</code> covers the same
+        install plus the launchd plist.</li>
+      <li><b>Needs:</b> macOS, <code>python3</code>, and
+        <code>ffmpeg/ffprobe</code> (<code>brew install ffmpeg</code>) for the
+        ticker builds and spec checks.</li>
+    </ul>
+    <p class="fine">The extension works without it - matching, highlighting,
+      Jira drafts - but downloads, tickers, and portal feeding need the
+      watcher listening on 127.0.0.1:8770.</p>
+  </section>
+
+  <section>
+    <h2>First run</h2>
+    <p>Open a request email in Outlook on the web, open this panel from the
+      toolbar icon, and press <b>&#9654; Run all</b>. The panel walks the rest;
+      every stage shows a status dot, and anything destructive (BEGIN INGEST,
+      Post to Jira) is always your click.</p>
+  </section>
+
+  <div class="cta">
+    <button id="openPanel">Open the panel</button>
+    <span id="openHint">or click the Ingest Streamlined toolbar icon anytime</span>
+  </div>
+</main>
+<script>
+document.getElementById('ver').textContent = 'v' + chrome.runtime.getManifest().version;
+document.getElementById('openPanel').addEventListener('click', async () => {
+  try {
+    const w = await chrome.windows.getLastFocused();
+    await chrome.sidePanel.open({ windowId: w.id });
+    document.getElementById('openHint').textContent = 'panel open - check the right side';
+  } catch (e) {
+    document.getElementById('openHint').textContent =
+      'click the Ingest Streamlined toolbar icon to open it';
+  }
+});
+(async () => {
+  const el = document.getElementById('wstat');
+  try {
+    const r = await fetch('http://127.0.0.1:8770/ticker-status?job=__ping__',
+      { signal: AbortSignal.timeout(2000) });
+    el.textContent = r.ok ? 'running on this machine' : 'not responding';
+    el.className = 'status ' + (r.ok ? 'on' : 'off');
+  } catch (e) {
+    el.textContent = 'not running - install below';
+    el.className = 'status off';
+  }
+})();
+</script>
+</body>
+</html>

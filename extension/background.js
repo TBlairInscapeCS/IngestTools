@@ -1,8 +1,10 @@
 // Clicking the toolbar icon opens the side panel.
 importScripts('engine.js', 'clients.js', 'graph.js');
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(d => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // First install opens the welcome/onboarding page (updates stay quiet).
+  if (!d || d.reason === 'install') chrome.tabs.create({ url: 'welcome.html' });
 
   chrome.contextMenus.create({
     id: 'send-ids',
