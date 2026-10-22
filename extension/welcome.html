@@ -64,11 +64,15 @@
   .grpbox.tabs .dep .fix { margin-left:23px; }
   .dep .fix b { color:inherit; }
   .pitch p { margin:0 0 8px; font-size:13.5px; }
-  .pipe { display:flex; flex-wrap:wrap; gap:5px; align-items:center;
-    margin:8px 0 10px; }
-  .pipe span { border:1px solid var(--line); background:#0b0e12;
-    border-radius:20px; padding:3px 11px; font-size:11px; font-weight:600; }
-  .pipe i { color:var(--mut); font-style:normal; font-size:11px; }
+  .pitch .hook { font-size:16px; font-weight:700; color:#fff; margin:0 0 6px; }
+  .flow { margin-top:4px; }
+  .fstep { display:flex; gap:14px; align-items:flex-start; }
+  .fchip { flex:0 0 78px; text-align:center; border:1px solid var(--line);
+    background:#0b0e12; border-radius:20px; padding:4px 0; font-size:11px;
+    font-weight:700; color:#fff; margin-top:1px; }
+  .fstep > div { flex:1; padding:2px 0; }
+  .farrow { margin:1px 0 1px 36px; color:var(--mut); font-size:11px;
+    line-height:1.2; }
   .dephelp { margin-top:5px; }
   .dephelp summary { cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }
   .dephelp ol { margin:6px 0 0; padding-left:18px; color:var(--txt); }
@@ -98,16 +102,11 @@
   </div>
 
   <section class="pitch">
-    <p>Point it at a request email and it reads the ask, finds the tracking
-      sheet, matches the rows, downloads the media, fills the portal queue,
-      drafts the Jira ticket, and writes the reply - the steps that used to
-      eat your afternoon, collapsed into one watched pipeline where nothing
-      ships without your click.</p>
-    <div class="pipe">
-      <span>request</span><i>→</i><span>tracker</span><i>→</i><span>match</span><i>→</i><span>download</span><i>→</i><span>portal</span><i>→</i><span>Jira</span><i>→</i><span>reply</span>
-    </div>
-    <p class="fine" style="margin:0">Full stage-by-stage detail is in
-      <b>How a job flows</b> below.</p>
+    <p class="hook">Remember when ingest requests used to eat your afternoon?</p>
+    <p>This panel is why they don't anymore. Point it at a request email and
+      it reads the ask, finds the tracking sheet, matches the rows, downloads
+      the media, fills the portal queue, drafts the Jira ticket, and writes
+      the reply. Your click is still the only thing that ships anything.</p>
   </section>
 
   <div id="warnBanner">Checking your setup&hellip;</div>
@@ -126,23 +125,34 @@
 
   <section>
     <h2>How a job flows</h2>
-    <ol class="steps">
-      <li><b>Request</b> - open the request email in Outlook on the web; the panel
-        grabs it, detects the client, and pulls the codes it asks for.</li>
-      <li><b>Tracker</b> - the tracking sheet loads from the email's link, an open
-        sheet tab, or a manual pick. Matched rows show their line numbers -
-        click one to highlight it in the sheet.</li>
-      <li><b>Match</b> - email codes &harr; sheet rows. Exclude any row that
-        doesn't belong; nothing downstream sees it.</li>
-      <li><b>Download</b> - <b>Find &amp; download</b> tries direct links, then
-        a delivery search, then any open page that lists files.</li>
-      <li><b>Portal</b> - feeds files into portal.cognet.tv's ingest queue and
-        fills Reporting ID / Title / Advertiser / Fingerprint. Standard batch
-        first; <b>_ticker</b> versions build automatically and feed as a
-        separate video-only batch.</li>
-      <li><b>Report</b> - verify the records, review the drafted ticket, post to
-        Jira when you're happy, copy the reply back to the requester.</li>
-    </ol>
+    <div class="flow">
+      <div class="fstep"><span class="fchip">Request</span>
+        <div>Open the request email in Outlook on the web; the panel grabs it,
+          detects the client, and pulls the codes it asks for.</div></div>
+      <div class="farrow">↓</div>
+      <div class="fstep"><span class="fchip">Tracker</span>
+        <div>The tracking sheet loads from the email's link, an open sheet
+          tab, or a manual pick. Matched rows show their line numbers - click
+          one to highlight it in the sheet.</div></div>
+      <div class="farrow">↓</div>
+      <div class="fstep"><span class="fchip">Match</span>
+        <div>Email codes &harr; sheet rows. Exclude any row that doesn't
+          belong; nothing downstream sees it.</div></div>
+      <div class="farrow">↓</div>
+      <div class="fstep"><span class="fchip">Download</span>
+        <div><b>Find &amp; download</b> tries direct links, then a delivery
+          search, then any open page that lists files.</div></div>
+      <div class="farrow">↓</div>
+      <div class="fstep"><span class="fchip">Portal</span>
+        <div>Feeds files into portal.cognet.tv's ingest queue and fills
+          Reporting ID / Title / Advertiser / Fingerprint. Standard batch
+          first; <b>_ticker</b> versions build automatically and feed as a
+          separate video-only batch.</div></div>
+      <div class="farrow">↓</div>
+      <div class="fstep"><span class="fchip">Report</span>
+        <div>Verify the records, review the drafted ticket, post to Jira when
+          you're happy, copy the reply back to the requester.</div></div>
+    </div>
   </section>
 
   <section>
