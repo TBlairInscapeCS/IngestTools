@@ -163,6 +163,15 @@ eq('refs none', extractRowRefs('please ingest these spots'), []);
   eq('duration never an id', m.length === 1 && m[0].trackingId !== '30.0', true);
 }
 
+// Value shapes: digits INSIDE ids/titles are fine, numeric-only ids are
+// fine, durations and bare counts are not.
+eq('id shapes', ['30.0', '15', '30', 'Spot A'].map(v => isTrackingIdLike(v)),
+  [false, false, false, false]);
+eq('numeric + coded ids ok', ['12345', 'PZPR0147000H', '0926607ZKCH', 'FAL5H'].map(v => isTrackingIdLike(v)),
+  [true, true, true, true]);
+eq('titles with numerals ok', ['Sale :30', 'Season 2 Trailer', '40% Off'].map(v => isTitleLike(v)),
+  [true, true, true]);
+
 // Clue-finding fallback: vague email -> pending rows scored by shared
 // tokens + request date; no clues -> newest pending rows surface anyway.
 {

@@ -1218,9 +1218,17 @@ function isTitleLike(v) {
   return v.length > 2 && /[A-Za-z]/.test(v) && !isCodeLike(v);
 }
 
+// Column-shape test for trackingId: code-shaped OR a plain integer.
+// Numeric-only IDs are legitimate on some trackers; what must NOT pass
+// is a decimal ('30.0' - a spot length) or a bare 1-2 digit count.
+function isTrackingIdLike(v) {
+  v = String(v || '').trim();
+  return isCodeLike(v) || /^\d{4,}$/.test(v);
+}
+
 // What fraction of a column's filled cells match the field's value shape?
 function colLooksLike(rows, c, field) {
-  const test = field === 'trackingId' ? isCodeLike : isTitleLike;
+  const test = field === 'trackingId' ? isTrackingIdLike : isTitleLike;
   let hits = 0, n = 0;
   for (const r of rows.slice(0, 50)) {
     const v = String(r[c] || '').trim();
