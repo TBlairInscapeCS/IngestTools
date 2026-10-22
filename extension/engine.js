@@ -1351,7 +1351,11 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
     // The sheet's ID column is authoritative even when it isn't ISCI
     // (Icon Media uses 5-char codes like FAL5H); the title only backs it
     // up when the ID cell is empty (apostrophes -> underscores).
-    const trackingId = id.trim() || String(title || id).replace(/'/g, '_').trim();
+    // A decimal like '30.0' is a spot LENGTH, never an ID - it can only
+    // arrive here via a mis-mapped column. Treat it as empty so the
+    // title fallback applies instead of naming the file '30.0'.
+    const trackingId = (id.trim() && !/^\d+\.\d+$/.test(id.trim()) ? id.trim() : '')
+      || String(title || id).replace(/'/g, '_').trim();
     const entry = {
       row: rowNum,
       id,
@@ -1483,7 +1487,8 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
         // The sheet's ID column is authoritative even when it isn't ISCI
         // (Icon Media uses 5-char codes like FAL5H); title only backs it up
         // when the ID cell is empty.
-        trackingId: id.trim() || String(title || id).replace(/'/g, '_').trim(),
+        trackingId: (id.trim() && !/^\d+\.\d+$/.test(id.trim()) ? id.trim() : '')
+          || String(title || id).replace(/'/g, '_').trim(),
         fileName: get(cols.file), brand: get(cols.brand),
         matchType: 'GUESS', guessScore: score, guessClues: why.slice(0, 5),
         linkText: get(cols.link), link: firstUrl(get(cols.link)),

@@ -149,6 +149,20 @@ eq('refs none', extractRowRefs('please ingest these spots'), []);
   eq('code still matches', m2.filter(m => m.matchType === 'ID').map(m => m.id), ['TO230STH']);
 }
 
+// Mis-mapped column regression: a 'Spot Length' duration ('30.0') can
+// never be a tracking ID. When the ID column is wrong, the match must
+// fall back to the title rather than naming files '30.0 PrizePicks.mp4'
+// (the exact failure seen on the PrizePicks job).
+{
+  const cols = { id: 5, title: 2, file: 0, link: 3, brand: -1, access: -1, espn: 9, date: 8 };
+  const rows = [
+    // File Name | Spot Title | Client | Client Code | Tracking ID | Spot Length | Network(s) | Source | Ingest Request Date | ESPN Version
+    ['', 'A Place For Mom', 'PrizePicks', 'PZPR', 'PZPR0147000H', '30.0', 'Horizon Next', 'Extreme Reach', '10/22/2026', ''],
+  ];
+  const m = matchEmailToSheet('Please ingest PZPR0147000H when you get the chance', rows, cols, { headerRow: 1 });
+  eq('duration never an id', m.length === 1 && m[0].trackingId !== '30.0', true);
+}
+
 // Clue-finding fallback: vague email -> pending rows scored by shared
 // tokens + request date; no clues -> newest pending rows surface anyway.
 {

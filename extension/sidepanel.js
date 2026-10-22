@@ -2542,6 +2542,27 @@ async function doMatch() {
   const headerRow = Math.max(1, parseInt($('headerRow').value, 10) || 1);
   const dataRows = sheet.allRows.slice(headerRow);
 
+  // Column sanity: the resolved ID/title columns must actually hold
+  // ID-shaped / title-shaped values. A stale or shifted pick (observed:
+  // 'Spot Length' mapped as ID -> every tracking ID read as '30.0')
+  // poisons file names, the manifest, and portal fills - so when the
+  // values fail the shape test and the vocab guess disagrees, re-guess.
+  const idFix = guessField(sheet.headers, 'trackingId', dataRows, sheet.groupRow);
+  if (cols.id >= 0 && idFix >= 0 && idFix !== cols.id &&
+      !colLooksLike(dataRows, cols.id, 'trackingId') &&
+      colLooksLike(dataRows, idFix, 'trackingId')) {
+    dbg('col fix', { field: 'id', was: sheet.headers[cols.id], now: sheet.headers[idFix] });
+    toast('ID column was "' + sheet.headers[cols.id] + '" - using "' + sheet.headers[idFix] + '"');
+    cols.id = idFix; $('colId').value = idFix;
+  }
+  const tFix = guessField(sheet.headers, 'spotTitle', dataRows, sheet.groupRow);
+  if (cols.title >= 0 && tFix >= 0 && tFix !== cols.title &&
+      !colLooksLike(dataRows, cols.title, 'spotTitle') &&
+      colLooksLike(dataRows, tFix, 'spotTitle')) {
+    dbg('col fix', { field: 'title', was: sheet.headers[cols.title], now: sheet.headers[tFix] });
+    cols.title = tFix; $('colTitle').value = tFix;
+  }
+
   // AMC-style spot blocks carry bare sheet row numbers - feed them as row
   // refs (guarded: only numbers inside the sheet's actual row range).
   let matchText = latestSegment(emailEl.value);
