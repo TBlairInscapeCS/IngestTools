@@ -34,6 +34,10 @@
  *   playbook, flagged "(inactive)") but hides the client from the manual
  *   dropdown. Add it when a client is ruled inactive; remove to restore.
  *
+ * trackerBrands   - brand names mined from the doc's Client/Brand column:
+ *                   an email naming one selects this tracker; learned
+ *                   automatically into docBrands storage on every load too.
+ *
  * umbrella: true  - a master tracker covering every brand under the agency
  *   (e.g. the Horizon master sheet). Detection via its sheetId proves the
  *   agency; the email's brand keyword then refines which "Agency / Brand"
@@ -192,6 +196,28 @@ var CLIENTS = [
     er: { sender: 'horizon' },   // most Horizon-brand ER deliveries traffic as Horizon Media
     note: 'Horizon agency umbrella - check the subject for the advertiser; delivery varies (Yangaroo/Dropbox/Extreme Reach).',
     ingest: { cidMap: 'horizonmedia', advertiser: true, nameTitle: true },
+    // Mined from the master doc's Client column: an email naming one of
+    // these brands selects this tracker - and implies this umbrella when
+    // no playbook detected a client (new brands land on the doc first).
+    trackerBrands: [
+      'A Place For Mom', 'ADT', 'ARMRA', 'AdTalem - Chamberlain', 'AdTalem - Walden',
+      'Altice', 'AmeriSave', 'American Residential Services', 'Atlantis', 'Aura',
+      "Bob's Discount Furniture", 'Bombas', 'Boost Infinite', 'BrightStar Care',
+      'Care.com', 'Carvana', 'ChampionWindows', 'Covista (Adtalem)', 'CreditKarma',
+      'Curology', 'Custom Ink', 'DISH', 'DriveTime', 'EarnIn', 'Empire Today',
+      'Erie Home (Leaf Home Solutions )', 'Ernesta', 'FDUL', 'FanDuel', 'Fanatics',
+      'Fisher Investments', 'Gametime', 'Good Feet Corporate', 'Good Feet Midwest',
+      'Great Wolf Lodge', 'Grow Care Inc.', 'HelloFresh', 'Jenny Craig',
+      'Kinetic Dynamics', 'Kooth Digital', 'Leaf Home', 'LeafFilter',
+      'Little Sleepies', 'NOOM', 'Newfold Digital', 'Ninja', 'Orkin',
+      'Patio Enclosures', 'Peloton', 'Poshmark', 'Poshmark (US)', 'PrizePicks',
+      'Realtor', 'Redfin', 'Rover', 'Safelite', 'SeaWorld', 'Seed', 'Shark',
+      'SharkNinja', 'SharkNinja Beauty', 'SiriusXM', 'Skims', 'Sleep Number',
+      'Sling', 'SmileDirectClub', 'Sondermind', 'Spectrum', 'Squarespace US',
+      'Stamps', 'Stamps.com', 'Stitch Fix', 'The Good Feet Store', 'ThirdLove',
+      'Top Dog Law', 'Tripledot', 'Turo', 'Universal Windows', 'WBPK',
+      'Warby Parker', 'Weight Watchers', 'Zocdoc', 'eharmony',
+    ],
   },
   {
     id: 'yangaroo-delivery',

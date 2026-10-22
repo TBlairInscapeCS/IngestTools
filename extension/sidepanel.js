@@ -350,6 +350,73 @@ function rememberSheet() {
     m[client.id] = list;
     chrome.storage.local.set({ sheetByClient: m });
   });
+  mineDocBrands();
+}
+
+// Brand -> doc catalog: the tracker's Client/Brand column, learned on
+// every load into docBrands storage and seeded by playbook trackerBrands
+// (Horizon's master doc carries ~80 brands). An email naming a known
+// brand selects that doc - and implies its client when detection found
+// nothing, since new brands land on the sheet before any playbook.
+let docBrandsCache = {};
+chrome.storage.local.get('docBrands', d => { docBrandsCache = d.docBrands || {}; });
+
+function allDocBrands() {
+  const m = {};
+  CLIENTS.forEach(c => {
+    const sid = sheetIdsFor(c)[0];
+    if (sid && c.trackerBrands && c.trackerBrands.length)
+      m[sid] = { client: c.id, brands: c.trackerBrands.slice() };
+  });
+  for (const id in docBrandsCache) {
+    const e = docBrandsCache[id] || {};
+    if (m[id]) m[id].brands = [...new Set(m[id].brands.concat(e.brands || []))];
+    else m[id] = { client: e.client, brands: e.brands || [] };
+  }
+  return m;
+}
+
+function mineDocBrands() {
+  if (!sheet || !lastSheetRef || !lastSheetRef.id || !client) return;
+  const bi = currentCols().brand;
+  if (!(bi >= 0)) return;
+  const vals = new Set();
+  (sheet.allRows || sheet.rows || []).forEach(r => {
+    const v = String(r[bi] || '').trim();
+    if (v.length > 1 && v.length < 60 && v.toLowerCase() !== 'client') vals.add(v);
+  });
+  if (!vals.size) return;
+  const id = lastSheetRef.id;
+  chrome.storage.local.get('docBrands', d => {
+    const m = d.docBrands || {};
+    const e = m[id] || { client: client.id, brands: [] };
+    e.client = e.client || client.id;
+    e.brands = [...new Set(e.brands.concat([...vals]))].slice(0, 200);
+    m[id] = e; docBrandsCache = m;
+    chrome.storage.local.set({ docBrands: m });
+  });
+}
+
+const normBrand = s => ' ' + String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/^ | $/g, '') + ' ';
+function docForBrand(text) {
+  const hay = normBrand(text);
+  // A detected client narrows candidates to its agency's docs; nothing
+  // detected means any doc may be the answer (the implication path).
+  const fam = client ? topName(client) : '';
+  let best = null, bestLen = 0;
+  const m = allDocBrands();
+  for (const id in m) {
+    const dc = fam && CLIENTS.find(c => c.id === m[id].client);
+    if (fam && dc && topName(dc) !== fam) continue;
+    for (const b of m[id].brands) {
+      const nb = normBrand(b);
+      if (nb.trim().length >= 3 && hay.includes(nb) && nb.length > bestLen) {
+        best = { id, client: m[id].client, brand: b };
+        bestLen = nb.length;
+      }
+    }
+  }
+  return best;
 }
 
 // Can the loaded sheet plausibly cover this request? True when nothing
@@ -1625,6 +1692,17 @@ function onEmailChange() {
   if (!text.trim()) emailSender = '';
   else if (!emailSender) emailSender = senderFirstName(text);
   if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
+  // Brand->doc: an email naming a brand that lives in a known tracker
+  // selects that doc; when nothing detected a client at all, the doc's
+  // client is the answer (Turo/Zocdoc land on Horizon's doc first).
+  const brandHit = docForBrand((emailSubject || '') + '\n' + text);
+  if (!client && brandHit) {
+    const bc = CLIENTS.find(c => c.id === brandHit.client);
+    if (bc) {
+      applyClient(bc, 'brand');
+      toast('"' + brandHit.brand + '" lives on the ' + bc.name + ' tracker.');
+    }
+  }
   // Auto-pull the client's known tracker off its mined sheet id - the
   // request email no longer needs to carry the sheet link. Skipped when
   // the right doc (or a manual load) is already in place.
@@ -1643,6 +1721,7 @@ function onEmailChange() {
   // must not stomp a tracker already put in place.
   const sheetIsCurrent = sheet && lastSheetRef &&
     (sids.includes(lastSheetRef.id) || (refGid && lastSheetRef.id === refGid[1]) ||
+     (brandHit && lastSheetRef.id === brandHit.id) ||
      lastSheetRef.airtable || lastSheetRef.spUrl);
   // A&E keeps its tracker in Airtable - pull the pending views via API
   // when a token is configured, same auto-load slot as doc trackers.
@@ -1667,10 +1746,13 @@ function onEmailChange() {
       }
       return false;
     };
+    const rest = () => sids.length
+      ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok2 => ok2 || tryRemembered())
+      : tryRemembered();
     (aeApi ? fetchAirtableTracker(client.name + ' tracker')
            : loadRefTracker().then(ok => ok ||
-             (sids.length ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok2 => ok2 || tryRemembered())
-                          : tryRemembered())))
+             (brandHit ? loadSheetDoc(brandHit.id, 0, '', 'brand-matched tracker (' + brandHit.brand + ')')
+                       : Promise.resolve(false))).then(ok => ok || rest()))
       .then(ok => {
         if (!ok) return;
         toast('Auto-loaded the ' + client.name + ' tracker.');
