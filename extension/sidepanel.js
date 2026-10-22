@@ -2637,6 +2637,17 @@ function doEmailMatch() {
   (emailPairs || []).forEach(p => put(p.id, { title: p.title }));
   extractCodes(matchText).forEach(c => put(c));
   extractFileIds(matchText).forEach(c => put(c));
+  // Direct-link manifests (DataPlusMath, generic "ID link" lines): a line
+  // holding exactly one URL and one-or-more codes pairs them, covering
+  // layouts the spot-block scan doesn't know. put() never overwrites a
+  // link the block pass already found.
+  matchText.split(/\r?\n/).forEach(line => {
+    const urls = extractLinks(line);
+    // Never let a tracker/portal/boilerplate URL pose as a file download.
+    if (urls.length !== 1 ||
+        /docs\.google|spreadsheets|sharepoint\.com\/sites|airtable\.com|cognet\.tv|unsubscribe|support\.|privacy|terms\./i.test(urls[0])) return;
+    extractCodes(line).concat(extractFileIds(line)).forEach(c => put(c, { link: urls[0] }));
+  });
   const fresh = [...found.values()];
   if (!fresh.length) {
     setStage('sdMatch', 'warn', 'email cites no IDs');
@@ -3083,6 +3094,7 @@ function updateReplyCheck() {
 function dlChannelName() {
   const d = (client && client.delivery) || '';
   return ({ 'extreme-reach': 'Extreme Reach', yangaroo: 'Yangaroo', vimeo: 'Vimeo',
+    links: 'the emailed download links',
     dropbox: 'Dropbox', egnyte: 'Egnyte', onedrive: 'OneDrive', sharepoint: 'SharePoint',
     box: 'Box', 'google-drive': 'Google Drive' })[d] || 'Extreme Reach';
 }
@@ -4451,7 +4463,10 @@ $('runAll').addEventListener('click', async () => {
   }
   if (!sheet && st) await grabTrackerTab(st);
   if (!sheet) await resolveSheetLinks();
-  if (!sheet) return toast('No tracking sheet - open its tab or load a file.');
+  // Sheetless clients (DataPlusMath, Comscore): the email IS the manifest -
+  // doMatch falls into doEmailMatch and the pipeline runs tracker-free.
+  if (!sheet && !(client && client.sheetless))
+    return toast('No tracking sheet - open its tab or load a file.');
 
   // 3 · Match ('guess' stops at the confirm picker - that's the user step).
   if (await doMatch() !== true) return;

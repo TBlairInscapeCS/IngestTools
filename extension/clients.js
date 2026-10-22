@@ -30,6 +30,10 @@
  *   retention     - e.g. '3-6 months'
  *   note          - conditional rules that don't fit fields
  *
+ * sheetless: true - no tracking sheet exists for this client; the email's
+ *   cited IDs (+ any same-line links) are the manifest. Run-all proceeds
+ *   to the email match instead of stopping at step 2.
+ *
  * inactive: true - keeps detection rules (old threads still surface the
  *   playbook, flagged "(inactive)") but hides the client from the manual
  *   dropdown. Add it when a client is ruled inactive; remove to restore.
@@ -324,6 +328,7 @@ var CLIENTS = [
       domains: [/comscore\.com/i],
     },
     delivery: 'other',
+    sheetless: true,  // no tracking sheet - the upload-portal email is the manifest
     note: 'Files arrive via the BSLWeb upload portal ("New Commercials Uploaded" emails) - open the portal link, grab the file list, reconcile, Download found.',
     ingest: {
       cidMap: 'comscore',
@@ -357,9 +362,12 @@ var CLIENTS = [
   {
     id: 'dataplusmath',
     name: 'DataPlusMath',
-    detect: { keywords: [/data ?plus ?math/i], domains: [/liveramp\.com/i] },
-    delivery: 'other',
-    ingest: { fingerprint: 'both', note: 'Requests usually come from @liveramp.com addresses.' },
+    detect: { keywords: [/data ?plus ?math|liveramp/i], domains: [/liveramp\.com|dataplusmath\.com/i] },
+    delivery: 'links',
+    sheetless: true,  // no tracking sheet - the email's IDs + direct links are the manifest
+    note: "No tracking sheet: the request email's per-spot IDs and direct download links are the whole manifest. Match/build runs sheet-free; Jira logs under DD-495.",
+    ingest: { cidMap: ['dataplusmath', 'liveramp'], fingerprint: 'both',
+      note: 'Requests usually come from @liveramp.com addresses.' },
   },
   {
     id: 'digitalremedy',
