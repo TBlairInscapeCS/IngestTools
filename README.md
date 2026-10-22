@@ -56,6 +56,18 @@ open if the watcher or ffprobe is missing.
 | ER API key | keyed delivery fetch (no ER tab) | stored in ⚙ Settings (optional) |
 | Databricks | impression counts | stored in ⚙ Settings (optional) |
 
+## Customer reference sheet
+
+A link-shared Google Sheet (`Customer | Exceptions & rules | Tracker |
+Files / share`) is the live per-customer store: the panel fetches it on
+open and every 15 min, and its values beat the built-in playbooks —
+the Tracker column drives tracker auto-load, the exceptions note shows
+as the client caveat, and both render as links for sheets/shares the
+tool can't reach itself (2FA, expired links). `customer-reference.tsv`
+seeds it from `clients.js` (`node extension/gen_reference.js` to
+regenerate); rows match clients by name containment, so "Horizon Media"
+covers every `Horizon / <brand>` child.
+
 ## How a job flows
 
 1. **Request** — open the request email in Outlook web; the panel grabs

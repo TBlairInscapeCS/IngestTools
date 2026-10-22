@@ -484,13 +484,16 @@ let excFetchedAt = 0;
 // inside "Adobe (TubeMogul)". The longest customer key wins on overlaps.
 function mapExceptions(notes) {
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const custKeys = Object.keys(notes).map(k => ({ k, n: norm(k), note: notes[k] }))
+  // Tolerate the legacy 2-col snapshot (note as a bare string) and the
+  // structured form ({note, tracker, files}) the header-aware parse writes.
+  const rec = v => typeof v === 'string' ? { note: v } : (v || {});
+  const custKeys = Object.keys(notes).map(k => ({ k, n: norm(k), rec: rec(notes[k]) }))
     .filter(c => c.n);
   const out = {};
   CLIENTS.forEach(c => {
     const names = [norm(topName(c)), norm(c.name), norm(c.id)];
     const hits = custKeys.filter(cu => names.some(nm => nm && (cu.n.includes(nm) || nm.includes(cu.n))));
-    if (hits.length) out[c.id] = hits.sort((a, b) => b.n.length - a.n.length)[0].note;
+    if (hits.length) out[c.id] = hits.sort((a, b) => b.n.length - a.n.length)[0].rec;
   });
   return out;
 }
@@ -503,10 +506,29 @@ async function fetchExceptions(force) {
       { credentials: 'omit' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const wb = await readXlsx(await r.arrayBuffer(), '');
+    // Header-driven: Customer | Exceptions & rules | Tracker | Files / share.
+    // Extra columns are ignored; a legacy 2-col sheet (no header) still
+    // reads as customer+note. Rows need only ONE field to count - a row
+    // that only carries a tracker link is a valid reference.
+    const rows = wb.rows;
+    const hi = rows.findIndex(r => /^customer$/i.test(String(r[0] || '').trim()));
+    const hdr = hi >= 0 ? rows[hi].map(h => String(h || '').toLowerCase()) : null;
+    const colOf = re => hdr ? hdr.findIndex(h => re.test(h)) : -1;
+    const ci = {
+      note: colOf(/except|note|rule|caveat/) >= 0 ? colOf(/except|note|rule|caveat/) : 1,
+      tracker: colOf(/tracker|tracking|sheet/),
+      files: colOf(/file|share|folder|deliver/),
+    };
     const notes = {};
-    wb.rows.forEach(row => {
-      const cust = String(row[0] || '').trim(), note = String(row[1] || '').trim();
-      if (cust && note && !/^customer$/i.test(cust)) notes[cust] = note;
+    rows.slice(hi >= 0 ? hi + 1 : 0).forEach(row => {
+      const cust = String(row[0] || '').trim();
+      if (!cust || /^customer$/i.test(cust)) return;
+      const rec = {
+        note: String(row[ci.note] || '').trim(),
+        tracker: ci.tracker >= 0 ? String(row[ci.tracker] || '').trim() : '',
+        files: ci.files >= 0 ? String(row[ci.files] || '').trim() : '',
+      };
+      if (rec.note || rec.tracker || rec.files) notes[cust] = rec;
     });
     excByClient = mapExceptions(notes);
     excFetchedAt = Date.now();
@@ -537,7 +559,8 @@ function renderClientNote() {
   const ing = ingestSummary(client);
   // The exceptions sheet is the authoritative caveat source - live text
   // wins over the static playbook note (which stays behind the ? bubble).
-  const live = excByClient[client.id];
+  const liveRec = excByClient[client.id] || {};
+  const live = liveRec.note;
   const caveat = live
     ? live.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0]
     : (client.note || '').split(/\s+[–-]\s+|\.\s/)[0];
@@ -577,6 +600,12 @@ function renderClientNote() {
           '<a href="https://docs.google.com/spreadsheets/d/' + esc(id) +
           '" target="_blank">open tracker sheet</a>').join(' · ')
       : '') +
+    (liveRec.tracker
+      ? '<br><b>Tracker:</b> <a href="' + esc(liveRec.tracker) + '" target="_blank" title="from the customer reference sheet">open reference tracker</a>'
+      : '') +
+    (liveRec.files
+      ? (liveRec.tracker ? ' · ' : '<br>') + '<b>Files:</b> <a href="' + esc(liveRec.files) + '" target="_blank" title="file share from the customer reference sheet">open file share</a>'
+      : '') +
     (lastTrackerLinks(trackerIds).length
       ? '<br><b>Last used:</b> ' + lastTrackerLinks(trackerIds).join(' · ')
       : '') +
@@ -612,7 +641,7 @@ function nameForIngest(trackingId, title, deliveredName) {
 // The live exception text rides along so ingest_watch's report shows the
 // rules in effect at download time.
 function clientInfo() {
-  return client ? { name: client.name, ...(client.ingest || {}), exceptions: excByClient[client.id] || '' } : null;
+  return client ? { name: client.name, ...(client.ingest || {}), exceptions: (excByClient[client.id] || {}).note || '' } : null;
 }
 function tickerAlways() {
   return !!(client && client.ingest && client.ingest.ticker === 'always');
@@ -1600,11 +1629,21 @@ function onEmailChange() {
   // request email no longer needs to carry the sheet link. Skipped when
   // the right doc (or a manual load) is already in place.
   const sids = sheetIdsFor(client);
-  // A loaded sheet counts as current when it's the playbook doc, an
-  // Airtable pull, or any SharePoint load - auto-pull must not stomp a
-  // tracker the user (or the email link) already put in place.
+  // The reference sheet's Tracker column is the live-editable source of
+  // truth: it outranks static playbook ids (a re-share never needs a
+  // release) but falls through to them when it can't load.
+  const refTr = client && excByClient[client.id] && excByClient[client.id].tracker;
+  const refGid = refTr && refTr.match(/\/d\/([\w-]+)/);
+  const loadRefTracker = () => !refTr ? Promise.resolve(false)
+    : refGid ? loadSheetDoc(refGid[1], 0, '', client.name + ' tracker (reference)')
+    : /sharepoint|onedrive/i.test(refTr) ? loadSharePointUrl(refTr)
+    : Promise.resolve(false);
+  // A loaded sheet counts as current when it's the playbook doc, the
+  // reference doc, an Airtable pull, or any SharePoint load - auto-pull
+  // must not stomp a tracker already put in place.
   const sheetIsCurrent = sheet && lastSheetRef &&
-    (sids.includes(lastSheetRef.id) || lastSheetRef.airtable || lastSheetRef.spUrl);
+    (sids.includes(lastSheetRef.id) || (refGid && lastSheetRef.id === refGid[1]) ||
+     lastSheetRef.airtable || lastSheetRef.spUrl);
   // A&E keeps its tracker in Airtable - pull the pending views via API
   // when a token is configured, same auto-load slot as doc trackers.
   const aeApi = client && client.id === 'ae-media' && hasAtToken() && !sheetIsCurrent;
@@ -1629,8 +1668,9 @@ function onEmailChange() {
       return false;
     };
     (aeApi ? fetchAirtableTracker(client.name + ' tracker')
-           : sids.length ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok => ok || tryRemembered())
-           : tryRemembered())
+           : loadRefTracker().then(ok => ok ||
+             (sids.length ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok2 => ok2 || tryRemembered())
+                          : tryRemembered())))
       .then(ok => {
         if (!ok) return;
         toast('Auto-loaded the ' + client.name + ' tracker.');

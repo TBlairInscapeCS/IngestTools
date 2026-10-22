@@ -1,0 +1,58 @@
+Customer	Exceptions & rules	Tracker	Files / share
+InMarket	Sheet link cells carry Drive folder links under display text - the XLSX grab resolves them and Download picks the matching file in each folder.	https://docs.google.com/spreadsheets/d/1f8gES1wBV9gMLDsmmJXuW81uP_DuLJ6E1_79_HYy25U	
+Horizon / Kohl's	Files arrive via Yangaroo - open the 'ADVERTISING DELIVERY' email and Grab it for per-spot download links.		
+Horizon / Bob's Discount Furniture	Files arrive via a Dropbox link in the email - the sheet has ISCI codes; reconcile catches extras/missing.		
+Horizon / Credit Karma	Credit Karma creatives deliver via Extreme Reach (KARM codes on Spot Deliveries) - grab the list, reconcile, Download found files.		
+Horizon / Fisher Investments			
+Horizon / Empire Today	Requests come via Horizon Next ('Ingest & Fingerprint'); deliveries arrive on ER as 'Empire Today-Horizon DR'. Email lists Spot Title/Ad-ID/Length/Start Date per line and cites '(rows #####-#####)' - refs into the master sheet's NEXT tab.		
+Horizon / Spectrum	Spectrum Resi ingest requests via Horizon Next - delivery channel not yet confirmed (check the email for a link).		
+Horizon / SeaWorld	Delivers on ER as 'SeaWorld Parks & Entertainment'. Emails cite '(lines #####-#####)' - row refs into the master sheet's NEXT tab; no inline manifest, the sheet is the spec.		
+Horizon / AMC Networks	Email is an inline manifest: sheet row# + spot title + ISCI + creativehub share link per spot. Shares are viewer pages (open to download); tracker 'Working List' tab is the Bible.		
+Horizon / Good Feet (Kinetic Dynamics)	Requests via Horizon Media naming both brands; delivers on ER as 'Kinetic Dynamics' ('XR sent the spots' = Extreme Reach). Emails cite 'NEXT tab lines 13,286-13,289' - row refs into the Horizon master sheet's NEXT tab.		
+Horizon (other advertisers)	Horizon agency umbrella - check the subject for the advertiser; delivery varies (Yangaroo/Dropbox/Extreme Reach).	https://docs.google.com/spreadsheets/d/1zPD9LkK_SzWYDhGYRKAwR-eWLIkS-SENRkNvWFdZugQ	
+Yangaroo delivery email	Delivery notification, not a request - the email itself carries per-spot Download links. Grab it, then match to the client sheet.		
+Horizon / NFL	Advertiser/brand/vertical is always 'NFL' - the sheet never names it (fixed by playbook). Files sit behind nflit.sharepoint.com links that demand interactive 2FA - not fetchable; open the last shared link (below) or ask for a re-share. 'Inscape Fingerprinting - NFL' requests land under the Horizon umbrella even when sent from @nfl.com. Email is a per-spot manifest: title / initiative / title / nflit.sharepoint.com mp4 link / ISCI. Files nominally live in the OneDrive 'inscape doc' - check the current FY folder (spots have landed in last year's by mistake).		
+Horizon / A+E Global Media	Airtable automation emails carry ISCI/Campaign/Spot Title rows with per-spot aenetworks.files.com download links; the Airtable link is the tracker for confirming ingestion.		
+Kantar (file arrival)	SharePoint arrival notice - 'new files added to Documents'. Filenames may or may not appear in the subject; the tracking sheet remains the source of truth for IDs.		
+Kantar	Tracker is SharePoint Excel; files via the SharePoint doc library or an Extreme Reach account share (Spot Deliveries page).		
+Adobe (TubeMogul)			
+Amobee			
+Chief Media	Email lists 'CODE  Title' pairs inline (titles feed ingest naming when the sheet lacks a title column); files live in their linked folder + tracking document.		
+Comscore	Files arrive via the BSLWeb upload portal ("New Commercials Uploaded" emails) - open the portal link, grab the file list, reconcile, Download found.		
+Cuebiq	Email carries the inline ID list (mixed formats incl. VIA_#####) + a tracking-doc link; files are in the linked doc/drive.		
+Dativa			
+DataPlusMath			
+DigitalRemedy			
+Warner / Hearts & Science			
+Warner / WB Theatrical			
+Warner / WBD USN			
+Discovery			
+EMX Digital	Tracker is SharePoint Excel (enginedrive.sharepoint.com).	https://docs.google.com/spreadsheets/d/D3D24E07-DB92-4F40-813F-707E5A1F1D38	
+Icon Media Direct	Standalone client with their own tracking sheet - not under an agency umbrella. Request email carries an Egnyte folder link (+ password) for files and the Vizio_Ingestion_Form_IMD.xlsx link; brand varies per request ("this time for Crepe Erase").		
+LWD Direct		https://docs.google.com/spreadsheets/d/1eR7opu0NPKOCpVLgCD-pu4DpqrtvoEq_	
+Marketing Evolution		https://docs.google.com/spreadsheets/d/1s1sXAa_xdW1DPxOn2FmTtYr23fMe7fu-nJRyEVGE7xE	
+MediaMath			
+MediaIQ	Google Drive files require the inscapeCS download account (credentials in the client notes sheet, not in this tool).		
+Ninth Decimal			
+Omnicom / OMD			
+Tatari	Weekly batch email carries brand_slug + ISCI pairs inline - 'use as requested IDs' seeds the list. Files deliver on ER per-brand (the ER long-tail IS Tatari's roster); group the job by agency, not brand.	https://docs.google.com/spreadsheets/d/1qVjlD7WJky6f5s7MJNwROLkIpynEdnAKIbhQeDrAvJ8	
+TVadSync			
+Sony Pictures			
+Viant			
+VideoAmp			
+WWE	Seen only as an internal thread ("Creative files for ingest - WWE Measurement") - believed a one-off.		
+Extreme Reach delivery notice	Delivery CONFIRMATION, not the ingest trigger - files are ingested only when a client request references them. The subject names the advertiser; a known brand here is a heads-up that the owning agency will send a request shortly.		
+Extreme Reach (generic)	Files arrive via Extreme Reach - open Spot Deliveries, Grab file list, Reconcile, then Download found files.		
+Millenia3	"Inscape Ingest - <show>" requests; network promos trafficked as spot files.		
+ITN Networks	"ITN Networks ISCI codes" mails carry the code list inline.		
+AdImpact	"Ingest & Assign Creatives to AdImpact" / "Creatives for Ingestion" requests.		
+Cadent	"Commercial Ingestion Request" and "New Files for Download" notices.		
+MarketCast	"Lifetime IAWL Content Ingestion Request" / "Ingest Request: <brand>" - mixed with Content Feed backfill ops.		
+Greenlight			
+Broadbeam Media	"Broadbeam Media + Inscape - TV commercials for <brand>" requests.	https://docs.google.com/spreadsheets/d/1wv6dcs0Fk_gJgguACdq3v7JRKTDnPYvN	
+Optimum / a4 / Altice	"<Client> - Creatives for Fingerprinting" - file deliveries despite the fingerprinting subject.	https://docs.google.com/spreadsheets/d/1iY7VHZR-2w7OwwUKipTmQzvkwFL4jo9UAauAkNtMA7s	
+PGA Tour		https://docs.google.com/spreadsheets/d/12qOs1UYKsJ65k3dNpakSR1r2VKpO7YeakrOi6iUQjsc	
+Havas Edge			
+Comcast delivery notice	Delivery confirmation like the ER notice - a heads-up the owning agency will send the request.		
+CBS delivery notice	Scheduled "Inscape Delivery From CBS" feed notices - confirmations, not request triggers.		
+Vizio Ads (internal)	Internal studio clip requests ('Clips for Ingestion - <studio> <title>': PHE = Paramount, WBHE = Warner Bros Home Entertainment) from @vizio.com teammates. The body names the portal customers - 'ingest as Commercial Video + Audio to geniusdigital and vizio' - so ingest to EVERY customer the email names, not just one.		
