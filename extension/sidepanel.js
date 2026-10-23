@@ -113,6 +113,20 @@ function setStage(id, cls, tip) {
   if (cls === 'fail') alertSound('fail', id + ': ' + (tip || cls), 'Ingest error: ' + (tip || id));
 }
 
+// modstat: per-section live status under the buttons. modStat(id, text,
+// frac) shows text + fills the thin bar when the work is countable;
+// modStatDone leaves a full bar + final line; modStatOff hides it.
+function modStat(id, txt, frac) {
+  const el = $(id); if (!el) return;
+  el.classList.add('on');
+  el.classList.toggle('hidebar', frac == null);
+  if (frac != null)
+    el.querySelector('.bar i').style.width = Math.max(3, Math.round(frac * 100)) + '%';
+  el.querySelector('.txt').textContent = txt;
+}
+function modStatDone(id, txt) { modStat(id, txt, 1); }
+function modStatOff(id) { const el = $(id); if (el) el.classList.remove('on'); }
+
 // ---------- Helpers ----------
 
 function toast(msg) {
@@ -526,6 +540,8 @@ function resetRun() {
   $('replyArea').classList.add('hidden'); $('replyPreview').value = '';
   const rk = $('replyKind'); if (rk) rk.value = 'auto';
   $('capInfo').innerHTML = '';
+  ['stEmail', 'stSheet', 'stMatch', 'stDl', 'stIngest', 'stJira'].forEach(modStatOff);
+  dlTotal = 0;
   stopPortalLive();
   portalFailAlerted.clear();
   const pl = $('portalLive'); if (pl) pl.textContent = '';
@@ -1172,6 +1188,7 @@ function airtableCopyAll(doCopy) {
 // Read the request email (+ Yangaroo delivery links) off an Outlook tab.
 // Takes a Tab object so callers pick the source tab, not focus.
 async function grabEmailFrom(tab) {
+  modStat('stEmail', 'Grabbing email…');
   let res;
   try {
     [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: grabEmailText });
@@ -1186,6 +1203,7 @@ async function grabEmailFrom(tab) {
   yangaroo = (yr.spots && yr.spots.length) ? yr : null;
   setEmailText(text, (res.result && res.result.subject) || '', (res.result && res.result.sender) || '',
     (res.result && res.result.date) || '');
+  modStatDone('stEmail', extractCodes(latestSegment(text)).length + ' code(s) cited');
   return true;
 }
 
@@ -1900,6 +1918,7 @@ const COLS = [
 // id, so an email-linked tracker loads with no sheet tab open at all.
 // XLSX first (keeps hyperlinks + every tab); CSV fallback needs a gid.
 async function loadSheetDoc(id, gid, tabName, sourceLabel) {
+  modStat('stSheet', 'Loading ' + (sourceLabel || 'tracker') + '…');
   sheetSourceTab = null; // cleared here; tab-grabs re-set it on success
   scoreCache = { key: '', scores: null }; // new workbook = new tab map
   try {
@@ -2472,6 +2491,7 @@ function loadSheetRows(wb, sourceLabel) {
     }
   }
   pendingRows = pendingIdxArr.map(i => liveRows[i]);
+  modStatDone('stSheet', liveRows.length + ' rows · ' + pendingRows.length + ' pending');
   sheetSource = sourceLabel;
   stamp('tsSheet');
   // Green when the ID column auto-mapped; orange when it needs a pick.
@@ -2574,6 +2594,7 @@ function currentCols() {
 // is committed (results shown), 'guess' when it stopped at the confirm
 // picker, false on failure (a toast already explains why).
 async function doMatch() {
+  modStat('stMatch', 'Matching…');
   if (!sheet) {
     // Sheetless path (Comscore + tracker-less clients): the email's own
     // cited IDs become the match set - downloads, portal fill, Jira and
@@ -2674,6 +2695,7 @@ async function doMatch() {
       .map((r, i) => ndl.some(n => normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '').includes(n)) ? i + 1 : 0)
       .filter(Boolean);
     setStage('sdMatch', 'fail', 'no rows matched');
+    modStat('stMatch', 'No rows matched.');
     toast(sliced.length
       ? 'Cited code(s) sit at row ' + sliced.slice(0, 5).join(', ') + ' - above the detected header (row ' +
         headerRow + '). Lower the Header row and re-match.'
@@ -2708,6 +2730,8 @@ async function doMatch() {
   if (fresh.every(m => m.matchType === 'GUESS')) { setStage('sdMatch', 'warn', 'confirm the guessed rows below'); presentGuessPicker(fresh); return 'guess'; }
   matched = mergeMatches(fresh);
   presentMatches();
+  modStatDone('stMatch', fresh.length + ' row(s) matched' +
+    (fresh.some(m => m.matchType === 'GUESS') ? ' (some guessed)' : ''));
   if (idUnmapped) {
     setStage('sdMatch', 'warn', 'matched, but no ID column mapped - pick it for correct tracking IDs');
   }
@@ -2769,6 +2793,7 @@ function doEmailMatch() {
   matched = mergeMatches(fresh);
   presentMatches();
   setStage('sdMatch', 'ok', fresh.length + ' row(s) from email (no tracker)');
+  modStatDone('stMatch', fresh.length + ' row(s) from email (no tracker)');
   return true;
 }
 
@@ -3763,7 +3788,12 @@ $('download').addEventListener('click', downloadLinked);
 
 function updateDlStatus() {
   const d = $('dateFilterHint');
-  if (dlTotal) d.textContent = 'Downloads: ' + dlDone + '/' + dlTotal + ' complete' + (dlFailed ? ', ' + dlFailed + ' failed' : '');
+  if (dlTotal) {
+    const fin = dlDone + dlFailed;
+    d.textContent = 'Downloads: ' + dlDone + '/' + dlTotal + ' complete' + (dlFailed ? ', ' + dlFailed + ' failed' : '');
+    modStat('stDl', 'Downloading ' + fin + '/' + dlTotal + ' (' + Math.round(fin / dlTotal * 100) + '%)' +
+      (dlFailed ? ' · ' + dlFailed + ' failed' : ''), fin / dlTotal);
+  }
   if (dlTotal && dlFailed && dlDone + dlFailed >= dlTotal && !dlFailAlerted) {
     dlFailAlerted = true;
     alertSound('fail', dlFailed + ' of ' + dlTotal + ' download(s) failed',
@@ -4372,6 +4402,7 @@ async function fetchErApi() {
         }
       }
     }));
+    modStat('stDl', 'Querying ER API… ' + Math.min(i + 4, want.length) + '/' + want.length, (i + 4) / want.length);
     if (want.length > 8 && i % 40 === 0 && i)
       toast('Querying ER API… ' + i + '/' + want.length);
   }
@@ -4501,6 +4532,7 @@ async function sweepEr() {
     const rows = parseErRows(new DOMParser().parseFromString(html, 'text/html'));
     if (!rows.length) break;
     entries.push(...rows);
+    modStat('stDl', 'Sweeping ER… ' + entries.length + ' deliveries (page ' + p + ')', Math.min(p / 12, 0.95));
     if (rows.length < 100) break;
     if (p % 3 === 0) toast('Sweeping… ' + entries.length + ' rows so far (page ' + p + ')');
   }
@@ -4524,6 +4556,7 @@ async function sweepEr() {
         return e;
       }));
       batch.forEach(e => { if (e.sender && e.sender.toLowerCase().includes(senderFilter)) kept.push(e); });
+      modStat('stDl', 'Checking senders… ' + Math.min(i + 5, toCheck.length) + '/' + toCheck.length, (i + 5) / toCheck.length);
       if (i % 20 === 0 && toCheck.length > 20) toast('Checking senders… ' + i + '/' + toCheck.length);
     }
     dbg('erSweep senders', { checked: toCheck.length, kept: kept.length,
@@ -4982,8 +5015,10 @@ $('ingestPush').addEventListener('click', async () => {
   if (!plan.rows.length) { toast('No committed matches - run Match first'); return; }
   const tab = await portalTab();
   if (!tab) { toast('No portal.cognet.tv tab open'); setStage('sdIngest', 'warn', 'no portal tab open'); return; }
+  modStat('stIngest', 'Writing ' + plan.rows.length + ' fills into the portal…');
   const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalFill, args: [plan] });
   const n = (res && res.result && res.result.queued) || 0;
+  modStatDone('stIngest', 'Queued ' + n + '/' + plan.rows.length + ' fill(s)');
   const [pr] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalProbe });
   const p = pr && pr.result;
   stamp('tsIngest');
@@ -5832,7 +5867,12 @@ $('verifyIngest').addEventListener('click', async () => {
   ensureMatchRows();
   const wanted = ingestReportIds();
   if (!wanted.length) return toast('No matched rows - run Match first.');
-  try { await runVerify(wanted); startPortalLive(); } catch (e) { toast(e.message); }
+  try {
+    modStat('stJira', 'Checking ' + realm + ' records…');
+    await runVerify(wanted);
+    modStatDone('stJira', lastIngestRecords.length + '/' + wanted.length + ' record(s) found');
+    startPortalLive();
+  } catch (e) { toast(e.message); }
 });
 
 // Filtered records JSON = the attach-able proof for the Jira ticket -
@@ -6074,6 +6114,7 @@ $('postJira').addEventListener('click', async () => {
   $('jiraApprove').classList.add('hidden');
   pendingJira = null;
   try {
+    modStat('stJira', wanted.length ? 'Checking records…' : 'Drafting…', 0.15);
     const records = wanted.length ? await runVerify(wanted) : [];
     let shotUrl = null, shotErr = null;
     try {
@@ -6104,6 +6145,7 @@ $('postJira').addEventListener('click', async () => {
       chrome.downloads.download({ url: shotUrl, filename: 'Ingest/_previous jobs/' + job + '-ingest-screenshot.png' });
 
     st.textContent = 'Finding this week\'s ticket under ' + epic + '…';
+    modStat('stJira', 'Finding this week\'s ticket…', 0.7);
     const { issue, newest } = await jiraWeeklyTicket(epic);
     let createName = null;
     if (!issue) {
@@ -6111,6 +6153,7 @@ $('postJira').addEventListener('click', async () => {
       createName = weeklyTicketName(newest, epi.fields.summary);
     }
     pendingJira = { epic, wanted, proof, issue, createName };
+    modStatDone('stJira', 'Staged - review the draft');
     $('jiraPreview').value = buildJiraTicket();
     $('jiraBox').classList.remove('hidden');
     $('jiraApprove').classList.remove('hidden');

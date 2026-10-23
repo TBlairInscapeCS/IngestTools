@@ -193,6 +193,14 @@
   .sdot.ok { background: #3fbf7f; border-color: #3fbf7f; box-shadow: 0 0 5px rgba(63,191,127,.6); }
   .sdot.warn { background: #e8a13d; border-color: #e8a13d; box-shadow: 0 0 5px rgba(232,161,61,.6); }
   .sdot.fail { background: #e05c5c; border-color: #e05c5c; box-shadow: 0 0 5px rgba(224,92,92,.6); }
+  /* modstat: live per-section status line under the buttons - text plus
+     a thin progress bar where the work is countable. */
+  .modstat { display: none; align-items: center; gap: 7px; margin: 5px 0 2px; font-size: 10.5px; color: #8b93a1; }
+  .modstat.on { display: flex; }
+  .modstat .bar { width: 90px; height: 5px; border-radius: 3px; background: #262b33; overflow: hidden; flex: none; }
+  .modstat .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+  .modstat.hidebar .bar { visibility: hidden; }
+  .s4 .modstat .bar i { background: #d38e2b; }
   /* 'skip' = step intentionally not applicable (sheetless clients: no
      tracker exists) - a checked-off hollow, dimmer than idle ring. */
   .sdot.skip { background: transparent; border-color: #3fbf7f; opacity: .5; }
@@ -305,6 +313,7 @@
       </div>
     </details>
   </div>
+  <div class="modstat" id="stEmail"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="info" id="inboxList" data-opt="graph"></div>
   <div class="info msg" id="emailInfo"></div>
 </details>
@@ -341,6 +350,7 @@
     <textarea id="sheetPaste" placeholder="Paste the tracker rows here, then Load pasted" style="height:56px"></textarea>
     <button id="pasteSheetLoad">Load pasted</button>
   </div>
+  <div class="modstat" id="stSheet"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="msg" id="colSummary"></div>
   <div class="info msg" id="sheetInfo"></div>
 </details>
@@ -354,6 +364,7 @@
     <button id="download" class="hidden"></button>
     <button id="showSheet" class="hidden" title="Scroll the tracker to the matched rows - reopens the workbook in a background tab if it isn't open">Show on sheet</button>
   </div>
+  <div class="modstat" id="stMatch"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="scrollbox" id="matchResults"></div>
 </details>
 
@@ -392,6 +403,7 @@
     </details>
     <span class="hint" id="watchInfo"></span>
   </div>
+  <div class="modstat" id="stDl"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="msg" id="capInfo"></div>
   <div class="hint" id="dateFilterHint"></div>
   <div id="counts"></div>
@@ -415,6 +427,7 @@
       </div>
     </details>
   </div>
+  <div class="modstat" id="stIngest"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="msg" id="ingestInfo"></div>
   <div class="hint" id="tickerInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
@@ -454,6 +467,7 @@
       </div>
     </details>
   </div>
+  <div class="modstat" id="stJira"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="msg" id="verifyInfo"></div>
   <div class="hint" id="portalLive"></div>
   <div class="msg" id="jiraStatus"></div>
