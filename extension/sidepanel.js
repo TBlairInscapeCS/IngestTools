@@ -40,6 +40,7 @@ const portalFailAlerted = new Set(); // INGEST_FAILED ids already chimed this ru
 let matchCols = {};        // column picks in effect for the current match
 let detectedAdvertiser = ''; // brand from delivery-notification subjects
 let pendingRows = [];      // sheet rows with empty fill-back columns
+let pendingIdxArr = [];    // their data-row indices (for real row numbers)
 let emailPairs = [];       // code+title pairs from the email (Chief Media)
 let emailSpots = [];       // row#/title/code/link blocks from the email (AMC)
 let yangaroo = null;       // {spots, orderName, orderId} from delivery email
@@ -473,7 +474,7 @@ function clearAll() {
   // Order matters: client and sheet clear BEFORE onEmailChange, or the
   // auto-pull sees the old client's sheetIds and re-fetches the tracker.
   client = null; clientSource = ''; $('clientSel').value = '';
-  sheet = null; pendingRows = []; lastSheetRef = null; sheetAutoLoaded = '';
+  sheet = null; pendingRows = []; pendingIdxArr = []; lastSheetRef = null; sheetAutoLoaded = '';
   $('sheetInfo').style.display = 'none'; $('sheetInfo').innerHTML = '';
   $('colSummary').textContent = '';
   setStage('sdSheet'); $('tsSheet').textContent = '';
@@ -2452,9 +2453,8 @@ function loadSheetRows(wb, sourceLabel) {
     const v = String(c || '').trim();
     return v && !/^[_\-~.]+$/.test(v);  // '___' placeholder cells aren't data
   }));
-  pendingRows = fbCols.length
-    ? pendingRowIndices(liveRows, fbCols).map(i => liveRows[i])
-    : [];
+  pendingIdxArr = fbCols.length ? pendingRowIndices(liveRows, fbCols) : [];
+  pendingRows = pendingIdxArr.map(i => liveRows[i]);
   sheetSource = sourceLabel;
   stamp('tsSheet');
   // Green when the ID column auto-mapped; orange when it needs a pick.
@@ -2481,6 +2481,33 @@ function loadSheetRows(wb, sourceLabel) {
     if (idc < 0) return toast('Pick the ID column first.');
     idsEl.value = pendingRows.map(r => String(r[idc] || '').trim()).filter(Boolean).join('\n');
     saveInputs();
+    // Get-ahead mode (Tatari trafficks files before the request email):
+    // with no email yet, commit the pending rows as the match set so
+    // download, portal fill and the Jira draft all run off the sheet
+    // alone - the email can land whenever it wants.
+    if (!emailEl.value.trim()) {
+      const c = currentCols(), hRow = Math.max(1, parseInt($('headerRow').value, 10) || 1);
+      const fresh = pendingRows.map((r, k) => {
+        const get = kk => c[kk] >= 0 ? String(r[c[kk]] || '').trim() : '';
+        const id = get('id'), title = get('title');
+        return {
+          row: pendingIdxArr[k] + hRow + 1, id, title,
+          trackingId: (id.trim() && !/^\d+\.\d+$/.test(id.trim()) ? id.trim() : '') || title || id,
+          fileName: get('file'), brand: get('brand'),
+          matchType: 'PENDING',
+          linkText: get('link'), link: firstUrl(get('link')),
+          access: c.access >= 0 ? truthyFlag(get('access')) : null,
+          espn: (c.espn >= 0 && truthyFlag(get('espn'))) || tickerAlways(),
+          date: get('date'),
+        };
+      }).filter(m => m.id || m.trackingId);
+      if (fresh.length) {
+        matched = mergeMatches(fresh);
+        matchedFor = emailEl.value;
+        presentMatches();
+        setStage('sdMatch', 'ok', fresh.length + ' pending row(s) committed (no email yet)');
+      }
+    }
     toast(pendingRows.length + ' pending row ID(s) set as requested IDs.');
   });
   toast('Sheet loaded.');
