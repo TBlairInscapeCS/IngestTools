@@ -557,6 +557,15 @@ function buildConfirmationEmail(results, sender) {
   return lines.join('\n');
 }
 
+// Last-resort draft for runs with no match or downloads yet: acknowledge
+// the request and echo the cited IDs - never claims files are in hand.
+function buildAckReply(ids, sender) {
+  if (!ids || !ids.length) return null;
+  return [greet(sender), '',
+    'Confirming receipt - getting the following IDs into the ingest queue:', '',
+    ...ids.slice(0, 20).map(i => '  - ' + i), '', 'Thanks!'].join('\n');
+}
+
 // ---------- Request-email extraction ----------
 
 // Minimal .eml reader: split headers/body, prefer the text/plain part,

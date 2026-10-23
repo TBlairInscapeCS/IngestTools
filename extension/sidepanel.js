@@ -3266,6 +3266,10 @@ function refreshReply(force) {
   }
   if (!text && matched && kind === 'auto' && selectedMatches().length)
     text = buildMatchConfirmation(selectedMatches(), emailSender);
+  // Bare request, nothing matched or downloaded yet: still draft the
+  // receipt ack - a partial reply beats an empty box.
+  if (!text && kind === 'auto')
+    text = buildAckReply([...new Set(extractCodes(latestSegment(emailEl.value)))], emailSender);
   if (!text) { area.classList.add('hidden'); setStage('sdReply'); return; }
   area.classList.remove('hidden');
   const det = area.closest('details');
@@ -5780,6 +5784,7 @@ function buildJiraTicket() {
   // provenance-clear, without rewriting the email itself.
   const eml = (emailDate ? 'Date: ' + emailDate + '\n' : '') + ticketEmail(emailEl.value);
   const lines = [eml, '', '----', '', 'Ingest:'];
+  if (!wanted.length) lines.push('(no IDs cited yet - add lines here)');
   wanted.forEach(w => lines.push(w.reporting + (w.title ? ' - ' + w.title : '') + (w.espn ? ' (ESPN)' : '')));
   return lines.join('\n');
 }
@@ -5990,12 +5995,13 @@ $('postJira').addEventListener('click', async () => {
   }
   ensureMatchRows();
   const wanted = ingestReportIds();
-  if (!wanted.length) return toast('No matched rows - run Match first.');
+  if (!wanted.length && !emailEl.value.trim())
+    return toast('Nothing to draft - no request email or IDs.');
   const st = $('jiraStatus');
   $('jiraApprove').classList.add('hidden');
   pendingJira = null;
   try {
-    const records = await runVerify(wanted);
+    const records = wanted.length ? await runVerify(wanted) : [];
     let shotUrl = null, shotErr = null;
     try {
       st.textContent = 'Capturing portal screenshot…';
@@ -6003,7 +6009,7 @@ $('postJira').addEventListener('click', async () => {
     } catch (e) { shotErr = e; dbg('screenshot failed', e.message); }
 
     const proof = { records, shotBlob: shotUrl ? await (await fetch(shotUrl)).blob() : null };
-    if (!records.length && !proof.shotBlob && !draftWithoutProof) {
+    if (!records.length && !proof.shotBlob && !draftWithoutProof && wanted.length) {
       draftWithoutProof = true;
       st.innerHTML = '<span style="color:#ec9a9a"><b>No proof captured</b> - 0 records found' +
         (shotErr ? ' and screenshot failed (' + esc(shotErr.message) + ')' : '') +
@@ -6042,7 +6048,8 @@ $('postJira').addEventListener('click', async () => {
       ' · attaching ' + [proof.records.length ? proof.records.length + ' record(s) JSON' : null,
         proof.shotBlob ? 'screenshot' : null].filter(Boolean).join(' + ') +
       (proof.records.length < wanted.length
-        ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '');
+        ? ' <span style="color:#ec9a9a">(verify: only ' + proof.records.length + '/' + wanted.length + ' found)</span>' : '') +
+      (!wanted.length ? ' <span style="color:#ec9a9a">(no IDs cited - add lines under "Ingest:")</span>' : '');
   } catch (e) {
     st.textContent = 'Jira: ' + e.message;
   }
