@@ -193,6 +193,9 @@
   .sdot.ok { background: #3fbf7f; border-color: #3fbf7f; box-shadow: 0 0 5px rgba(63,191,127,.6); }
   .sdot.warn { background: #e8a13d; border-color: #e8a13d; box-shadow: 0 0 5px rgba(232,161,61,.6); }
   .sdot.fail { background: #e05c5c; border-color: #e05c5c; box-shadow: 0 0 5px rgba(224,92,92,.6); }
+  /* 'skip' = step intentionally not applicable (sheetless clients: no
+     tracker exists) - a checked-off hollow, dimmer than idle ring. */
+  .sdot.skip { background: transparent; border-color: #3fbf7f; opacity: .5; }
 
   button:focus-visible, summary:focus-visible, a:focus-visible,
   select:focus-visible, input:focus-visible, textarea:focus-visible {

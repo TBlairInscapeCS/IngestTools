@@ -849,18 +849,26 @@ function detectClient(sig) {
       if ((d(c).subjects || []).some(re => re.test(sig.subject))) return c;
     }
   }
-  // 3. keywords over subject+body - brand-level signal, beats domains
+  // 3. mail folder - the user's own Outlook rules already classified this
+  //    sender; that deliberate sorting outranks body keywords (a Horizon
+  //    person's signature inside a Comscore request must not flip it).
+  //    Keywords within the SAME agency family still refine umbrella->brand.
   const text = (sig.subject || '') + '\n' + (sig.emailText || '');
+  const topOf = x => x.name.split(' / ')[0].replace(/ *\(.*/, '').trim();
+  if (sig.folderName && CLIENT_FOLDERS[sig.folderName]) {
+    const c = CLIENTS.find(x => x.id === CLIENT_FOLDERS[sig.folderName]);
+    if (c) {
+      const top = topOf(c);
+      const br = text.trim() && CLIENTS.find(x =>
+        topOf(x) === top && (d(x).keywords || []).some(re => re.test(text)));
+      return br || c;
+    }
+  }
+  // 4. keywords over subject+body - brand-level signal, beats domains
   if (text.trim()) {
     for (const c of CLIENTS) {
       if ((d(c).keywords || []).some(re => re.test(text))) return c;
     }
-  }
-  // 4. mail folder name - the user's own rules classified the sender
-  //    (agency-level: brand keywords above still refine the umbrella)
-  if (sig.folderName && CLIENT_FOLDERS[sig.folderName]) {
-    const c = CLIENTS.find(x => x.id === CLIENT_FOLDERS[sig.folderName]);
-    if (c) return c;
   }
   // 5. sender/cc domains - weakest signal, shared across advertisers
   if (text.trim()) {

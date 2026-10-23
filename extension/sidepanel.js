@@ -788,6 +788,11 @@ function applyErPreset(c) {
 
 function applyClient(c, via) {
   if (!c) { renderClientNote(); return; }
+  // A sheetless detection is anchor-strength: a tracker doc's sheetIds can
+  // never belong to it, so no sheet signal may override it (only a manual
+  // pick or an email signal can).
+  if (client && client.sheetless && via === 'sheet' && clientSource !== 'manual')
+    { renderClientNote(); return; }
   const agencyOf = x => x.name.split(' / ')[0].split(' ')[0];
   const refine = (base, cand) => {
     const agency = agencyOf(base);
@@ -809,6 +814,9 @@ function applyClient(c, via) {
   clientSource = via;
   setSelFor(c);
   applyErPreset(c);
+  // Sheetless clients have no tracker stage - dim its dot to 'skip' so the
+  // empty section reads as intentional, not unfinished.
+  if (c.sheetless) setStage('sdSheet', 'skip', c.name + ': no tracking sheet - the email is the manifest');
   renderClientNote();
 }
 
@@ -1740,7 +1748,7 @@ function onEmailChange() {
   // A&E keeps its tracker in Airtable - pull the pending views via API
   // when a token is configured, same auto-load slot as doc trackers.
   const aeApi = client && client.id === 'ae-media' && hasAtToken() && !sheetIsCurrent;
-  if (client && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
+  if (client && !client.sheetless && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
     // Fallback when the playbook has no doc (or its pull fails): remembered
     // trackers for this client profile, most recent first - but a doc only
@@ -2716,6 +2724,13 @@ function doEmailMatch() {
   presentMatches();
   setStage('sdMatch', 'ok', fresh.length + ' row(s) from email (no tracker)');
   return true;
+}
+
+// Sheetless clients never run a sheet match - any stage that needs rows
+// (ingest push, verify, Jira) builds them from the email on demand.
+function ensureMatchRows() {
+  if ((!matched || !selectedMatches().length) && client && client.sheetless)
+    doEmailMatch();
 }
 
 // Requests can span trackers/tabs/views: batch A on sheet 1, batch B on
@@ -4619,24 +4634,27 @@ $('runAll').addEventListener('click', async () => {
   // outranks open tabs and remembered sheets (WB theatrical vs TV, or two
   // Horizon brand docs, can share one client family). Tabs come next
   // (host-matched to the email), then remembered docs, then resolution.
-  const st = pickTrackerTab(cls.sheet.concat(cls.sharepoint, cls.airtable), active);
-  const ref = emailSheetRefs()[0];
-  if (ref && (!sheet || !lastSheetRef || lastSheetRef.id !== ref.id)) {
-    applyClient(detectClient({ sheetId: ref.id }), 'sheet');
-    await loadSheetDoc(ref.id, ref.gid, '', 'email-linked tracker');
+  // Sheetless clients (DataPlusMath, Comscore) skip this ENTIRE stage -
+  // no tab grab, no remembered doc, nothing may re-detect them through a
+  // stale open tracker. The email IS the manifest.
+  if (!(client && client.sheetless)) {
+    const st = pickTrackerTab(cls.sheet.concat(cls.sharepoint, cls.airtable), active);
+    const ref = emailSheetRefs()[0];
+    if (ref && (!sheet || !lastSheetRef || lastSheetRef.id !== ref.id)) {
+      applyClient(detectClient({ sheetId: ref.id }), 'sheet');
+      await loadSheetDoc(ref.id, ref.gid, '', 'email-linked tracker');
+    }
+    for (const u of emailSharePointUrls()) {
+      // SharePoint/guest-access links resolve at fetch - skip only when the
+      // loaded sheet provably came from THIS link already.
+      if (sheet && lastSheetRef && lastSheetRef.spSrc === u) continue;
+      if (await loadSharePointUrl(u)) break;
+    }
+    if (!sheet && st) await grabTrackerTab(st);
+    if (!sheet) await resolveSheetLinks();
+    if (!sheet)
+      return toast('No tracking sheet - open its tab or load a file.');
   }
-  for (const u of emailSharePointUrls()) {
-    // SharePoint/guest-access links resolve at fetch - skip only when the
-    // loaded sheet provably came from THIS link already.
-    if (sheet && lastSheetRef && lastSheetRef.spSrc === u) continue;
-    if (await loadSharePointUrl(u)) break;
-  }
-  if (!sheet && st) await grabTrackerTab(st);
-  if (!sheet) await resolveSheetLinks();
-  // Sheetless clients (DataPlusMath, Comscore): the email IS the manifest -
-  // doMatch falls into doEmailMatch and the pipeline runs tracker-free.
-  if (!sheet && !(client && client.sheetless))
-    return toast('No tracking sheet - open its tab or load a file.');
 
   // 3 · Match ('guess' stops at the confirm picker - that's the user step).
   if (await doMatch() !== true) return;
@@ -4884,6 +4902,7 @@ $('ingestCheck').addEventListener('click', async () => {
 });
 
 $('ingestPush').addEventListener('click', async () => {
+  ensureMatchRows();
   const plan = ingestPlan();
   if (!plan.rows.length) { toast('No committed matches - run Match first'); return; }
   const tab = await portalTab();
@@ -5708,6 +5727,7 @@ async function runVerify(wanted) {
 $('verifyIngest').addEventListener('click', async () => {
   const realm = ingestRealm();
   if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
+  ensureMatchRows();
   const wanted = ingestReportIds();
   if (!wanted.length) return toast('No matched rows - run Match first.');
   try { await runVerify(wanted); startPortalLive(); } catch (e) { toast(e.message); }
@@ -5933,6 +5953,7 @@ let pendingJira = null, draftWithoutProof = false;
 $('postJira').addEventListener('click', async () => {
   const epic = jiraEpicFor();
   if (!epic) return toast('No Jira epic mapped for this client - tell Devin the epic key.');
+  ensureMatchRows();
   const wanted = ingestReportIds();
   if (!wanted.length) return toast('No matched rows - run Match first.');
   const st = $('jiraStatus');
