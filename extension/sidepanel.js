@@ -4507,9 +4507,9 @@ function erLoggedOut(html) {
   return /type=["']password|\/Account\/Log(on|in)|login\.aspx|\bsign[\s-]?in\b/i.test(String(html || ''));
 }
 
-async function sweepEr() {
+async function sweepEr(daysOverride) {
   const senderFilter = $('erSender').value.trim().toLowerCase();
-  const days = Math.min(Math.max(parseInt($('erDays').value, 10) || 14, 1), 90);
+  const days = Math.min(Math.max(parseInt(daysOverride != null ? daysOverride : $('erDays').value, 10) || 14, 1), 90);
   toast('Sweeping ER deliveries (last ' + days + ' days)…');
   // Fresh anti-forgery token from the deliveries landing page.
   const landing = await (await fetch(ER_APP + '/Delivery', { credentials: 'include' })).text();
@@ -4517,7 +4517,7 @@ async function sweepEr() {
   if (!token || erLoggedOut(landing)) {
     toast('No ER session - log into Extreme Reach in this browser first.');
     $('capInfo').innerHTML = '<i>ER sweep needs a signed-in Extreme Reach session - log in, then sweep again.</i>';
-    return false;
+    return null; // null = don't retry wider; [] = empty window, keep escalating
   }
   // Pull every page in the window (pageSize is capped at 100 server-side).
   const entries = [];
@@ -4527,7 +4527,7 @@ async function sweepEr() {
     if (p === 1) dbg('erSweep page1', { len: html.length, head: html.slice(0, 200) });
     if (erLoggedOut(html)) {
       toast('ER session expired mid-sweep - log into Extreme Reach and try again.');
-      return false;
+      return null;
     }
     const rows = parseErRows(new DOMParser().parseFromString(html, 'text/html'));
     if (!rows.length) break;
@@ -4537,7 +4537,7 @@ async function sweepEr() {
     if (p % 3 === 0) toast('Sweeping… ' + entries.length + ' rows so far (page ' + p + ')');
   }
   dbg('erSweep rows', { rows: entries.length, pages: p - 1, days, senderFilter });
-  if (!entries.length) { toast('No deliveries in that window - widen the days or check the destination.'); return false; }
+  if (!entries.length) { toast('No deliveries in the last ' + days + ' day(s) - widening or check the destination.'); return []; }
 
   // Sender filter via detail pages. When requested IDs exist, only check
   // the rows that already match them - a full sender sweep checks all.
@@ -4568,7 +4568,7 @@ async function sweepEr() {
   $('capInfo').innerHTML = 'ER sweep: <b>' + entries.length + '</b> deliveries in window' +
     (senderFilter ? ' · <b>' + kept.length + '</b> from "' + esc(senderFilter) + '"' : '') +
     ' · ' + linked + ' with links';
-  if (!kept.length) { toast(senderFilter ? 'Nothing from that sender in the window.' : 'Nothing captured.'); return false; }
+  if (!kept.length) { toast(senderFilter ? 'Nothing from that sender in the window.' : 'Nothing captured.'); return []; }
   return kept;
 }
 
@@ -4583,7 +4583,11 @@ $('erDays').addEventListener('input', e => chrome.storage.local.set({ erDays: e.
 
 // The full sweep path: query ER, seed IDs when nothing else defines the
 // wanted set, reconcile, download FOUND. Shared by the button and Run.
-async function sweepAndDownload() {
+// windows: the day ranges to try in order (auto path escalates 2 -> 7 ->
+// configured; a manual ER-search press honors the typed window exactly).
+// Missing IDs widen the window; an empty window widens too - files often
+// land days before the request email does.
+async function sweepAndDownload(windows) {
   // Surgical first: per-ID API queries pull ONLY the requested codes -
   // no trawling the whole delivery window. The broad scrape stays the
   // fallback for IDs the API misses and for sender-only (no IDs) sweeps.
@@ -4594,19 +4598,31 @@ async function sweepAndDownload() {
     if (!(lastResults || []).some(r => r.status === 'MISSING')) return downloadFound();
     toast('API missed some IDs - falling back to the delivery sweep for the rest…');
   }
-  const kept = await sweepEr();
+  const wins = (windows || [parseInt($('erDays').value, 10) || 14])
+    .map(d => Math.min(Math.max(parseInt(d, 10) || 14, 1), 90));
+  let anyKept = null;
+  for (let w = 0; w < wins.length; w++) {
+    const kept = await sweepEr(wins[w]);
+    if (kept === null) return false;          // session lost - widening won't help
+    if (!kept.length) continue;               // empty window - try wider
+    anyKept = kept;
+    // Sender-only sweep (no requested IDs): treat every kept row as wanted
+    // so reconcile marks them all FOUND and downloads the lot.
+    const ids = idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (!ids.length && !(matched || []).length) {
+      idsEl.value = kept.map(erCodeOf).filter(Boolean).join('\n');
+      saveInputs();
+    }
+    if (!runReconcile()) return false;
+    const missing = (lastResults || []).filter(r => r.status === 'MISSING').length;
+    if (w === wins.length - 1 || !missing) return downloadFound();
+    toast(missing + ' still missing - widening the sweep to ' + wins[w + 1] + ' days…');
+    modStat('stDl', missing + ' missing - widening to ' + wins[w + 1] + ' days…');
+  }
   // Nothing delivered yet and a request is pending -> keep re-checking
   // every 5 min; the 'arrived' chime fires when files land.
-  if (!kept) { maybeArmWatch(); return false; }
-  // Sender-only sweep (no requested IDs): treat every kept row as wanted
-  // so reconcile marks them all FOUND and downloads the lot.
-  const ids = idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  if (!ids.length && !(matched || []).length) {
-    idsEl.value = kept.map(erCodeOf).filter(Boolean).join('\n');
-    saveInputs();
-  }
-  if (!runReconcile()) return false;
-  return downloadFound();
+  maybeArmWatch();
+  return false;
 }
 
 $('erSweep').addEventListener('click', sweepAndDownload);
@@ -4691,15 +4707,10 @@ $('recheck').addEventListener('click', () => recheckDelivery(false));
 async function autoDownload() {
   const nDl = selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
   if (nDl) { await downloadLinked(); return; }
-  let swept = await sweepAndDownload();
-  const missingNow = () => (lastResults || []).filter(r => r.status === 'MISSING').length;
+  // Narrow-first sweep: fresh deliveries usually landed within 2 days,
+  // so trawl a small window before paying for the full 14-day scrape.
   const days = parseInt($('erDays').value, 10) || 14;
-  if (missingNow() > 0 && days < 30) {
-    $('erDays').value = Math.min(days * 2, 30);
-    chrome.storage.local.set({ erDays: String($('erDays').value) });
-    toast(missingNow() + ' still missing - widening the sweep to ' + $('erDays').value + ' days…');
-    swept = (await sweepAndDownload()) || swept;
-  }
+  const swept = await sweepAndDownload([...new Set([2, 7, days])].sort((a, b) => a - b));
   if (swept) return;
   if (await captureTabs()) {
     if (runReconcile()) { await downloadFound(); return; }
