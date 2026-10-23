@@ -59,6 +59,8 @@ let sheetGids = {};        // tab name -> web gid (for #gid= navigation)
 let lastSheetRef = null;   // {id, gid, tabName} - re-exportable w/o the tab
 let sheetAutoLoaded = '';  // client.id whose tracker auto-pulled this run
 let dlTotal = 0, dlDone = 0, dlFailed = 0;
+let dlStop = false;          // Stop button: halt queueing + cancel in-flight
+const dlRunIds = [];         // download ids started this run (cancel targets)
 const ourDlIds = new Set(); // chrome.downloads ids we started - onChanged fires for ALL browser downloads
 let lastCapTab = null;     // tab the last page capture ran against
 
@@ -2454,6 +2456,21 @@ function loadSheetRows(wb, sourceLabel) {
     return v && !/^[_\-~.]+$/.test(v);  // '___' placeholder cells aren't data
   }));
   pendingIdxArr = fbCols.length ? pendingRowIndices(liveRows, fbCols) : [];
+  // Pending is a live queue, not all-time unclaimed: trackers carry
+  // hundreds of never-filled stale rows (350 "pending" vs 118 real).
+  // Keep unclaimed rows dated within ~2 weeks of the NEWEST unclaimed
+  // request date; undated rows survive only when nothing unclaimed is
+  // dated at all.
+  const unclaimedAll = pendingIdxArr.length;
+  const dcPend = parseInt($('colDate').value, 10);
+  if (pendingIdxArr.length > 1 && dcPend >= 0) {
+    const dated = pendingIdxArr.map(i => ({ i, ms: cellDateMs(liveRows[i][dcPend]) }))
+      .filter(x => !isNaN(x.ms));
+    if (dated.length) {
+      const cutoff = Math.max.apply(null, dated.map(x => x.ms)) - 14 * 864e5;
+      pendingIdxArr = dated.filter(x => x.ms >= cutoff).map(x => x.i);
+    }
+  }
   pendingRows = pendingIdxArr.map(i => liveRows[i]);
   sheetSource = sourceLabel;
   stamp('tsSheet');
@@ -2469,7 +2486,9 @@ function loadSheetRows(wb, sourceLabel) {
     ' (header row ' + (hIdx + 1) + (nLinks ? ', ' + nLinks + ' hyperlinks' : '') +
     '). Verify the column dropdowns, then match.') +
     (pendingRows.length
-      ? ' <a href="#" id="usePending"><b>' + pendingRows.length + '</b> pending row(s) (fill-back empty) - use as requested IDs</a>'
+      ? ' <a href="#" id="usePending"><b>' + pendingRows.length + '</b> pending row(s)' +
+        (unclaimedAll > pendingRows.length ? ' (of ' + unclaimedAll + ' unclaimed - recent dates only)' : ' (fill-back empty)') +
+        ' - use as requested IDs</a>'
       : '');
   // Clean fresh load (ID column mapped) -> collapse step 2, matching is next.
   // Stays open on a column-pick need or a background refresh.
@@ -4128,6 +4147,7 @@ async function downloadFound() {
   }
   const jobs = [];
   const noUrl = [];
+  const seenFiles = new Set(); // same file under two deliveries = one download, never "x (1).mp4"
   lastResults.filter(r => r.status === 'FOUND').forEach(r => {
     const e = capturedByName[r.matched.split(' | ')[0]];
     if (e && e.url) {
@@ -4157,11 +4177,15 @@ async function downloadFound() {
       if (!e.apiAuth) url = directUrl(url);
       const fname = /\.(mp4|mov|mxf|mpg|mpeg|avi|wmv|webm|mkv|ts|m2ts|mp3|wav|aac|srt|vtt)$/i.test(expected)
         ? expected : expected + '.mp4';
-      jobs.push({
-        file: nameForIngest(r.id, titleMap[rid] || '', fname), url: url, dkey: e.url,
-        tracking_id: r.id, title: titleMap[rid] || '', expected_name: expected, row: 0,
-        needs_espn: !!espnMap[rid] || tickerAlways(),
-      });
+      const finalName = nameForIngest(r.id, titleMap[rid] || '', fname);
+      if (!seenFiles.has(finalName.toLowerCase())) {
+        seenFiles.add(finalName.toLowerCase());
+        jobs.push({
+          file: finalName, url: url, dkey: e.url,
+          tracking_id: r.id, title: titleMap[rid] || '', expected_name: expected, row: 0,
+          needs_espn: !!espnMap[rid] || tickerAlways(),
+        });
+      }
     } else noUrl.push(r.matched);
   });
   // Skip files already queued this session - re-running grab&download on a
@@ -4218,17 +4242,25 @@ async function downloadFound() {
   if (!fresh.length) { setStage('sdDl', 'warn', skipped ? 'all matches already downloaded' : 'no downloadable links captured'); toast((skipped ? 'All ' + skipped + ' match(es) already downloaded this session' : 'No downloadable links captured') + (noUrl.length ? ' - ' + noUrl.length + ' matched by name only' : '') + '.'); return false; }
   const job = jobSlug();
   dlTotal = fresh.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
+  dlStop = false; dlRunIds.length = 0; $('stopDl').classList.remove('hidden');
   updateDlStatus();
   const dlUrlCache2 = new Map();
   for (const j of fresh) {
+    if (dlStop) break;
     try {
       j.url = await resolveDlUrl(j.url, dlUrlCache2);
       const id = await chrome.downloads.download({ url: j.url, filename: 'Ingest/' + j.file, conflictAction: 'uniquify' });
       // Mark only on a live download id - a thrown call or dead queue
       // leaves the URL free so the next attempt can actually retry.
-      if (id != null) { ourDlIds.add(id); queuedUrls.add(j.dkey || j.url); dlKeys.set(id, j.dkey || j.url); }
+      if (id != null) { ourDlIds.add(id); queuedUrls.add(j.dkey || j.url); dlKeys.set(id, j.dkey || j.url); dlRunIds.push(id); }
       else dlFailed++;
     } catch (e) { dlFailed++; updateDlStatus(); }
+  }
+  $('stopDl').classList.add('hidden');
+  if (dlStop) {
+    toast('Stopped - cancelled ' + dlRunIds.length + ' in-flight download(s).');
+    setStage('sdDl', 'warn', 'stopped by user');
+    dlStop = false;
   }
   const blob = new Blob([buildManifest(job, fresh, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -4643,6 +4675,11 @@ async function autoDownload() {
 }
 
 $('grabAndDl').addEventListener('click', autoDownload);
+$('stopDl').addEventListener('click', () => {
+  dlStop = true;
+  dlRunIds.forEach(id => chrome.downloads.cancel(id).catch(() => {}));
+  toast('Stopping downloads…');
+});
 
 // Open-pages-only override (lives under the "overrides" dropdown): read
 // every open delivery page, reconcile, queue FOUND - no ER search.
