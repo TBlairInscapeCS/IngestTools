@@ -4293,23 +4293,30 @@ async function fetchErApi() {
   toast('Querying ER API for ' + want.length + ' ID(s)…');
   const entries = [];
   const misses = [];
-  let sampleLogged = false;
-  for (const id of want) {
-    const r = await erApiGet('/deliveries?AdId=' + encodeURIComponent(id));
-    if (r.status === 401) { toast('API key rejected (401) - check the key.'); dbg('erApi', { id, status: 401 }); return false; }
-    if (r.status !== 200 || !r.data) { failsafe(id, r); continue; }
-    if (!sampleLogged) { sampleLogged = true; dbg('erApi sample', { raw: r.raw.slice(0, 2000) }); }
-    const deliveries = r.data.Deliveries || r.data.deliveries || (Array.isArray(r.data) ? r.data : []);
-    if (!deliveries.length) { misses.push(id); continue; }
-    for (const d of deliveries) {
-      const got = await erResolveDelivery(d, id);
-      if (got.length) got.forEach(e => entries.push(e));
-      else {
-        const name = d.FileName || d.AssetName || d.AdId || id;
-        entries.push({ name: String(name), url: '', line: String(name) });
+  let sampleLogged = false, authDead = false;
+  // Four IDs in flight: hundreds of Tatari codes stay quick without
+  // hammering the API. A 401 aborts the whole batch.
+  for (let i = 0; i < want.length && !authDead; i += 4) {
+    await Promise.all(want.slice(i, i + 4).map(async id => {
+      const r = await erApiGet('/deliveries?AdId=' + encodeURIComponent(id));
+      if (r.status === 401) { authDead = true; return; }
+      if (r.status !== 200 || !r.data) { failsafe(id, r); return; }
+      if (!sampleLogged) { sampleLogged = true; dbg('erApi sample', { raw: r.raw.slice(0, 2000) }); }
+      const deliveries = r.data.Deliveries || r.data.deliveries || (Array.isArray(r.data) ? r.data : []);
+      if (!deliveries.length) { misses.push(id); return; }
+      for (const d of deliveries) {
+        const got = await erResolveDelivery(d, id);
+        if (got.length) got.forEach(e => entries.push(e));
+        else {
+          const name = d.FileName || d.AssetName || d.AdId || id;
+          entries.push({ name: String(name), url: '', line: String(name) });
+        }
       }
-    }
+    }));
+    if (want.length > 8 && i % 40 === 0 && i)
+      toast('Querying ER API… ' + i + '/' + want.length);
   }
+  if (authDead) { toast('API key rejected (401) - check the key.'); dbg('erApi', { status: 401 }); return false; }
   function failsafe(id, r) {
     misses.push(id);
     dbg('erApi fail', { id, status: r.status, raw: r.raw.slice(0, 400) });
@@ -5733,7 +5740,9 @@ async function runVerify(wanted) {
   if (!realm) throw new Error('no ingest realm (cidMap) on this playbook');
   $('verifyInfo').textContent = 'Querying ' + realm + ' records…';
   try {
-    const all = await fetchRealmRecords(realm, 2);
+    // Pages scale with batch size: records return newest-first, and a big
+    // Tatari push can bury older IDs under today's other ingests.
+    const all = await fetchRealmRecords(realm, Math.max(2, Math.ceil(wanted.length / 500) + 1));
     const want = new Map(wanted.map(w => [normalizeName(w.reporting).replace(/ /g, ''), w.reporting]));
     lastIngestRecords = all.filter(r => want.has(normalizeName(r.reportingId || '').replace(/ /g, '')));
     const hitIds = new Set(lastIngestRecords.map(r => normalizeName(r.reportingId).replace(/ /g, '')));
