@@ -5411,6 +5411,31 @@ function ingestRealm() {
   return FI_ALIASES[n] || n;
 }
 
+// Rare blocking ask: a stage missing exactly one datum prompts for it
+// instead of dead-ending on a toast. Cancel returns ''.
+function askFor(what, hint) {
+  return (prompt('Ingest needs ' + what + (hint ? '\n(' + hint + ')' : '') + ':') || '').trim();
+}
+
+// Verify/Jira realm: playbook cidMap first, then the persisted records-
+// lookup realm, then - rarely - ask once and save it for next time.
+function resolveRealm() {
+  const v = (ingestRealm() || $('recRealm').value.trim() || $('impRealm').value.trim() ||
+    '').toLowerCase().replace(/ /g, '');
+  if (v) return FI_ALIASES[v] || v;
+  const a = askFor('the portal customer realm', 'e.g. discovery, horizonmedia');
+  if (!a) return '';
+  const realm = (FI_ALIASES[a.toLowerCase()] || a).toLowerCase();
+  $('recRealm').value = $('impRealm').value = realm;
+  chrome.storage.local.set({ recRealm: realm });
+  return realm;
+}
+
+// Learned epic overrides: an epic keyed in at ask-time sticks to that
+// client id, so the prompt is once per client, not once per run.
+let epicOverrides = {};
+chrome.storage.local.get('epicOverrides', d => { epicOverrides = d.epicOverrides || {}; });
+
 // Reporting IDs exactly as pushed to the portal: bare id per row, plus
 // id+suffix for rows flagged for a ticker version.
 // Standalone record lookup: "was this creative ingested / is it
@@ -5700,7 +5725,7 @@ let lastIngestRecords = [];
 // and leave lastIngestRecords set for the Jira proof. Returns the filtered
 // records (empty on API failure - caller treats it as "no records proof").
 async function runVerify(wanted) {
-  const realm = ingestRealm();
+  const realm = resolveRealm();
   if (!realm) throw new Error('no ingest realm (cidMap) on this playbook');
   $('verifyInfo').textContent = 'Querying ' + realm + ' records…';
   try {
@@ -5725,7 +5750,7 @@ async function runVerify(wanted) {
 }
 
 $('verifyIngest').addEventListener('click', async () => {
-  const realm = ingestRealm();
+  const realm = resolveRealm();
   if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
   ensureMatchRows();
   const wanted = ingestReportIds();
@@ -5809,6 +5834,7 @@ async function jiraFetch(path, opts) {
   return r.status === 204 ? null : r.json();
 }
 function jiraEpicFor() {
+  if (client && epicOverrides[client.id]) return epicOverrides[client.id];
   const ing = (client && client.ingest) || {};
   if (ing.jiraEpic) return ing.jiraEpic;
   return JIRA_EPICS[ingestRealm()] || null;
@@ -5951,8 +5977,17 @@ async function postJiraComment(issue, wanted, st, proof) {
 // until "Post to Jira" approves the staged run.
 let pendingJira = null, draftWithoutProof = false;
 $('postJira').addEventListener('click', async () => {
-  const epic = jiraEpicFor();
-  if (!epic) return toast('No Jira epic mapped for this client - tell Devin the epic key.');
+  let epic = jiraEpicFor();
+  if (!epic) {
+    const v = askFor('a Jira epic for ' + (client ? client.name : 'this client'),
+      'the weekly-ticket parent key, e.g. DD-726');
+    if (!v) return toast('No Jira epic mapped for this client - tell Devin the epic key.');
+    epic = v.toUpperCase();
+    if (client) {
+      epicOverrides[client.id] = epic;
+      chrome.storage.local.set({ epicOverrides });
+    }
+  }
   ensureMatchRows();
   const wanted = ingestReportIds();
   if (!wanted.length) return toast('No matched rows - run Match first.');
