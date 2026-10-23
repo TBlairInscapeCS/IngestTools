@@ -4578,6 +4578,9 @@ function erCodeOf(e) {
   return m ? normalizeName(m[0]).replace(/ /g, '') : '';
 }
 
+chrome.storage.local.get('fillProfile', d => { if (d.fillProfile && $('fillProfile')) $('fillProfile').value = d.fillProfile; });
+if ($('fillProfile')) $('fillProfile').addEventListener('change', e => chrome.storage.local.set({ fillProfile: e.target.value }));
+
 $('erSender').addEventListener('input', e => chrome.storage.local.set({ erSender: e.target.value }));
 $('erDays').addEventListener('input', e => chrome.storage.local.set({ erDays: e.target.value }));
 
@@ -4866,7 +4869,10 @@ function portalFill(plan) {
     const marker = ticker ? tk[0] : '';
     const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
     write(tr, 'file_reporting', ticker ? withMarker(r.id) : r.id);
-    if (plan.opts.nameTitle && r.title) write(tr, 'file_title', ticker ? withMarker(r.title) : r.title);
+    // Title defaults to the reporting ID - playbooks with nameTitle get
+    // their real title; everyone else ingests ISCI-as-title.
+    write(tr, 'file_title', ticker ? withMarker(plan.opts.nameTitle && r.title ? r.title : r.id)
+                                  : (plan.opts.nameTitle && r.title ? r.title : r.id));
     if (plan.opts.advertiser && r.brand) {
       write(tr, 'file_comm_advertiser', r.brand);
       write(tr, 'file_comm_brand', r.brand);
@@ -4905,12 +4911,17 @@ function ingestPlan() {
         brand: clean(ing.brandFixed) || clean(m.brand),
         espn: !!m.espn,
       })),
-    opts: {
-      advertiser: !!ing.advertiser,
-      nameTitle: !!ing.nameTitle,
-      tickerSuffix: ing.tickerSuffix || '_ticker',
-      cidMap: ing.cidMap,
-    },
+    opts: (() => {
+      // Fill profile override: 'id' = ID as title (no advertiser/brand),
+      // 'title' = + real title, 'full' = + advertiser. Empty = playbook.
+      const prof = ($('fillProfile') && $('fillProfile').value) || '';
+      return {
+        advertiser: prof ? prof === 'full' : !!ing.advertiser,
+        nameTitle: prof ? prof !== 'id' : !!ing.nameTitle,
+        tickerSuffix: ing.tickerSuffix || '_ticker',
+        cidMap: ing.cidMap,
+      };
+    })(),
   };
 }
 
@@ -4930,7 +4941,7 @@ function renderIngestPreview() {
   const ing = (client && client.ingest) || {};
   const lines = [
     "Reporting ID ← '" + (ingestColName('id') || 'email') + "'" + (plan.opts.tickerSuffix ? " (+" + plan.opts.tickerSuffix + " on _ticker files)" : ''),
-    plan.opts.nameTitle ? "Title ← '" + (ingestColName('title') || '?') + "' col" : 'Title — playbook leaves default',
+    plan.opts.nameTitle ? "Title ← '" + (ingestColName('title') || '?') + "' col" : 'Title ← reporting ID (default)',
     plan.opts.advertiser
       ? (ing.brandFixed
         ? "Advertiser/Brand/Vertical ← '" + String(ing.brandFixed) + "' (playbook - not on the sheet)"
@@ -4975,7 +4986,8 @@ function renderIngestVerify(probe) {
       const marker = ticker ? tk[0] : '';
       const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
       const wantRep = ticker ? withMarker(r.id) : r.id;
-      const wantTitle = plan.opts.nameTitle && r.title ? (ticker ? withMarker(r.title) : r.title) : q.title;
+      const wantTitle = ticker ? withMarker(plan.opts.nameTitle && r.title ? r.title : r.id)
+                               : (plan.opts.nameTitle && r.title ? r.title : r.id);
       const wantFp = ticker ? 'video' : q.fingerprint;
       const bad = [];
       if (q.reporting !== wantRep) bad.push('rep');

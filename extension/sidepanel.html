@@ -424,6 +424,13 @@
     <details class="mini"><summary>more</summary>
       <div class="row">
         <button id="pickPortal" title="Pick media anywhere on disk - files land in the job folder, pair to manifest rows, then feed the portal picker">⇧ Pick &amp; feed</button>
+        <span class="grp"><label class="col" title="Portal fill profile: which fields get written. Auto follows the detected playbook; the rest are overrides for unusual queues.">fill
+          <select id="fillProfile">
+            <option value="">auto (playbook)</option>
+            <option value="id">ID as title</option>
+            <option value="title">ID + title</option>
+            <option value="full">ID + title + advertiser</option>
+          </select></label></span>
       </div>
     </details>
   </div>

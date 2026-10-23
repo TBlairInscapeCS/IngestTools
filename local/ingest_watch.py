@@ -1118,6 +1118,22 @@ def find_manifest_for_job(slug: str):
         if slug and (m.get("job") == slug or mp.stem == slug
                      or mp.stem == slug + "-manifest"):
             return mp, m
+    # Fallback: the panel regenerates its slug timestamp when the cache is
+    # lost mid-job (reset/reload) - the date + client parts stay stable,
+    # so match the newest manifest sharing them.
+    parts = slug.split("-", 2)
+    if len(parts) == 3:
+        cands = []
+        for mp in all_manifests():
+            stem = mp.stem[:-len("-manifest")] if mp.stem.endswith("-manifest") else mp.stem
+            sp = stem.split("-", 2)
+            if len(sp) == 3 and sp[0] == parts[0] and sp[2].lower() == parts[2].lower():
+                cands.append(mp)
+        if cands:
+            try:
+                return cands[-1], json.loads(cands[-1].read_text())
+            except Exception:
+                pass
     return None, None
 
 
