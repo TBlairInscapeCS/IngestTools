@@ -198,8 +198,8 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     const records = await ctx.runVerify([{ reporting: 'QYPS0437000H' }, { reporting: 'QYPS0438000H' }]);
     assert.equal(records.length, 2);
     assert(ctx.lastResults.every(r => r.status === 'FOUND'));
-    assert.match(element('replyPreview').value, /Confirmed ingest for:/);
-    assert.doesNotMatch(element('replyPreview').value, /not.*available|waiting to locate/i);
+    assert.match(element('replyPreview').value, /following IDs?:/);
+    assert.doesNotMatch(element('replyPreview').value, /not.*available|tracking down/i);
     ctx.filesEl.value = 'STILLUNRELATED1234.mp4';
     ctx.runReconcile();
     assert(ctx.lastResults.every(r => r.status === 'FOUND'), 'later unsuccessful search must not erase ingest proof');
@@ -211,7 +211,7 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     ctx.fetchRealmRecords = async () => [{ reportingId: 'QYPS0437000H', status: 'DETECTION_COMPLETED', detection_result: 'fail' }];
     await ctx.runVerify([{ reporting: 'QYPS0437000H' }]);
     assert.match(element('replyPreview').value, /reported a failure/);
-    assert.doesNotMatch(element('replyPreview').value, /Confirmed ingest for/);
+    assert.doesNotMatch(element('replyPreview').value, /following IDs?:/);
   });
   await asyncTest('partial verification distinguishes confirmed from still missing IDs', async () => {
     const { ctx, element } = setup('simulmedia');
@@ -219,8 +219,8 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     ctx.doEmailMatch();
     ctx.fetchRealmRecords = async () => [{ reportingId: 'QYPS0437000H', status: 'DETECTION_COMPLETED' }];
     await ctx.runVerify([{ reporting: 'QYPS0437000H' }, { reporting: 'QYPS0438000H' }]);
-    assert.match(element('replyPreview').value, /Confirmed ingest for:\n  - QYPS0437000H/);
-    assert.match(element('replyPreview').value, /Still waiting to locate or verify:\n  - QYPS0438000H/);
+    assert.match(element('replyPreview').value, /following IDs?:\n  - QYPS0437000H/);
+    assert.match(element('replyPreview').value, /Still tracking down the remaining items:\n  - QYPS0438000H/);
   });
   await asyncTest('late verification from another request is discarded', async () => {
     const { ctx } = setup('simulmedia');
@@ -256,8 +256,8 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
       return { ok: true, json: async () => ({ files: [{ id: 'QYPS0437000H', name: 'QYPS0437000H.mp4', kind: 'standard', source: 'Downloads' }], ambiguous: [] }) };
     };
     assert.equal(await ctx.discoverLocalFiles(), true);
-    assert.match(element('replyPreview').value, /Files located; ingest is not yet confirmed/);
-    assert.doesNotMatch(element('replyPreview').value, /Confirmed ingest for/);
+    assert.match(element('replyPreview').value, /Files located - ingest is still pending/);
+    assert.doesNotMatch(element('replyPreview').value, /following IDs?:/);
     assert.equal(ctx.lastResults[0].status, 'FOUND');
   });
   await asyncTest('Comcast parser never shifts links across an unlinked spot row', async () => {

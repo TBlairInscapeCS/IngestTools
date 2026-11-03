@@ -463,8 +463,6 @@ var CLIENTS = [
       jiraEpic: 'DD-726',
       fingerprint: 'both',
       cidMap: 'discovery',  // Warner ingests under the discovery customer
-      nameTitle: true,
-      advertiser: true,
       metadata: 'adid + creative_name; network col is the advertiser (DSC/HGTV/CNN)',
       note: 'Starcom/Publicis traffic desk; request email itself carries direct dmds.com mp4 links. Tracker: USN ACR Metadata Tracker - their cols end at "Promoted App"; Date Ingested/Ingested By are ours.',
     },

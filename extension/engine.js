@@ -621,19 +621,38 @@ function recordEvidenceStage(record) {
 }
 function buildWorkflowReply(rows, sender) {
   if (!rows.some(r => r.stage)) return null;
-  const groups = [
-    ['complete', 'Confirmed ingest for:'],
-    ['processing', 'Records found; processing is not yet confirmed complete for:'],
-    ['located', 'Files located; ingest is not yet confirmed for:'],
-    ['failed', 'Ingest reported a failure for:'],
-    ['', 'Still waiting to locate or verify:'],
-  ];
-  const lines = [greet(sender)];
-  groups.forEach(([stage, label]) => {
-    const selected = rows.filter(r => (r.stage || '') === stage);
-    if (selected.length) lines.push('', label, ...selected.map(r => '  - ' + r.id + (stage === 'failed' && r.status ? ' (' + r.status + ')' : '')));
-  });
-  lines.push('', 'Thanks!');
+  const at = s => rows.filter(r => (r.stage || '') === s);
+  const done = at('complete'), proc = at('processing'), located = at('located'),
+    failed = at('failed'), pending = at('');
+  const seed = hashStr(rows.map(r => (r.id || '') + ':' + (r.stage || '')).join('|'));
+  const lines = [greet(sender), ''];
+  if (done.length) {
+    lines.push(pick(CONF_INTRO[done.length === 1 ? 'single' : 'none'], seed));
+    done.forEach(r => lines.push('  - ' + r.id));
+    lines.push('');
+  }
+  if (failed.length) {
+    lines.push('One thing to flag - the ingest reported a failure for:');
+    failed.forEach(r => lines.push('  - ' + r.id + (r.status ? ' (' + r.status + ')' : '')));
+    lines.push('');
+  }
+  if (proc.length) {
+    lines.push('Records are in and still finishing up for:');
+    proc.forEach(r => lines.push('  - ' + r.id));
+    lines.push('');
+  }
+  if (located.length) {
+    lines.push('Files located - ingest is still pending on:');
+    located.forEach(r => lines.push('  - ' + r.id));
+    lines.push('');
+  }
+  if (pending.length) {
+    lines.push('Still tracking down the remaining items:');
+    pending.forEach(r => lines.push('  - ' + r.id));
+    lines.push('');
+  }
+  lines.push('Happy to resend or check anything that looks off - just let me know.',
+    '', 'Thanks!');
   return lines.join('\n');
 }
 function buildAckReply(ids, sender) {
