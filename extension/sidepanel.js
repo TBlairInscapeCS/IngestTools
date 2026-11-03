@@ -3196,16 +3196,29 @@ function presentMatches(quiet) {
       : m.yangarooUrl ? '<a href="' + esc(m.yangarooUrl) + '" target="_blank">yangaroo</a>'
       : m.linkText ? '<i title="not a URL">' + esc(m.linkText.slice(0, 30)) + '</i>' : '<i>none</i>') + '</td></tr>'
   ).join('');
-  // Codes the email cited but no matched row carries: likely on another
-  // tracker tab - surface them instead of silently dropping.
+  // Codes the email cited but no matched row carries. Split them: codes
+  // sitting ON this tab were simply outside the matched rows (a "rows
+  // X-Y" request scope is exclusive), while codes absent everywhere mean
+  // the tracker or tab is wrong - different problem, different hint.
   const cited = requestRefs().codes;
-  const missed = cited.filter(c => {
+  const missed = [], unmatched = [];
+  const liveHay = sheetIndex && sheetIndex.has(sheetTabName)
+    ? indexHay(sheetIndex.get(sheetTabName))
+    : (sheet && sheet.allRows
+      ? normalizeName(sheet.allRows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '')
+      : '');
+  cited.forEach(c => {
     const n = normalizeName(c).replace(/[\s:_-]+/g, '');
-    return !matched.some(m =>
-      normalizeName([m.id, m.trackingId, m.title, m.fileName, m.brand].join(' '))
-        .replace(/[\s:_-]+/g, '').includes(n));
+    if (matched.some(m =>
+        normalizeName([m.id, m.trackingId, m.title, m.fileName, m.brand].join(' '))
+          .replace(/[\s:_-]+/g, '').includes(n))) return;
+    (liveHay.includes(n) ? unmatched : missed).push(c);
   });
   $('matchResults').innerHTML =
+    (unmatched.length
+      ? '<div class="hint"><b>cited but outside the matched rows:</b> ' + esc(unmatched.join(', ')) +
+        ' - present on this tab; exclude deliberately or add them manually.</div>'
+      : '') +
     (missed.length
       ? '<div class="hint" id="missedNote"><b>not found on this tab:</b> ' + esc(missed.join(', ')) +
         ' - loaded: ' + esc(sheetSource || '?') + ' · checking other tabs…</div>'
@@ -3506,8 +3519,11 @@ async function sheetTabScores(codes, rowNums) {
       rowHits++;
       if (e.liveEnd && n > e.liveEnd - 200) edgeHits++;
     }
+    // 2-char tokens count when they carry a digit - 'q1', 's2', 'h2' are
+    // how real tabs get named (and how senders cite them).
     const nameHits = name.toLowerCase().split(/[^a-z0-9]+/)
-      .filter(w => w.length >= 3 && !TAB_STOP.test(w) && reqHay.includes(w)).length;
+      .filter(w => (w.length >= 3 || (w.length === 2 && /[a-z]/.test(w) && /\d/.test(w))) &&
+        !TAB_STOP.test(w) && reqHay.includes(w)).length;
     // Recency of the tab's newest dated row: ~today is the live tab,
     // months old is an archive. Bounded so it nudges, never decides.
     const ageDays = isNaN(e.newestMs) ? Infinity : (now - e.newestMs) / 864e5;
