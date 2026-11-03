@@ -833,14 +833,6 @@ function isAutoSender(addr) {
 // `selfAddr` = the user's own address - self-sent confirmations quoted back
 // into the inbox aren't requests. Address-only: colleagues on the same
 // domain carry most real request traffic.
-// Reply-shaped subjects ("RE: ..." incl. [External] prefixes). Replies on
-// request threads - ingest confirmations, acknowledgements - are thread
-// context, not new work: they may still surface as candidates but must
-// never fire the new-request alert.
-function isReplySubject(subject) {
-  return /^\s*(?:\[\s*external\s*\]\s*)*re\s*:/i.test(String(subject || ''));
-}
-
 function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   const s = String(subject || ''), a = String(fromAddr || '');
   if (isAutoSender(a)) return false;

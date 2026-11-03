@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const clients = fs.readFileSync(__dirname + '/clients.js', 'utf8');
-const names = ['trackerDocId', 'pickTrackerTab', 'docOwner', 'foreignDoc', 'trackerAllowed', 'cleanTrackerReferences', 'trackerDocumentTitle', 'clearSheetIndex', 'loadSheetDoc', 'refreshSheet', 'rememberSheet'];
+const names = ['trackerDocId', 'pickTrackerTab', 'docOwner', 'foreignDoc', 'trackerAllowed', 'cleanTrackerReferences', 'trackerDocumentTitle', 'clearSheetIndex', 'bufSig', 'loadSheetDoc', 'refreshSheet', 'rememberSheet'];
 const functions = names.map(name => {
   const re = new RegExp('(?:async )?function ' + name + '\\(');
   const start = source.search(re);
@@ -20,7 +20,7 @@ function setup() {
   const ctx = vm.createContext({
     console, URL, Promise, store, commits, logs,
     client: null, lastSheetRef: null, docBrandsCache: {}, sheetSourceTab: null,
-    sheetBuf: null, sheetTabs: [], sheetTabName: '', scoreCache: {},
+    sheet: null, sheetBuf: null, sheetBufSig: '', sheetTabs: [], sheetTabName: '', scoreCache: {},
     request: 1,
     trackerContext() { return ctx.request + ':' + (ctx.client && ctx.client.id); },
     topName(c) { return c.name.split(' / ')[0].replace(/ *\(.*/, '').trim(); },

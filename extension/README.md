@@ -192,11 +192,11 @@ the request's cited codes, cited row numbers (counted double at the grid's
 bottom edge — trackers fill top-to-bottom, so new rows land there), tab-name
 overlap with the request/brand, how recent its newest dated row is (the
 "last edited" area is where new lines would be), and its pending-row queue,
-then switches to the tab that holds the request — the open Sheets tab follows
-so the flip is visible. Cited codes and rows always outrank the softer
-signals, and a tab already covering the request is never left for a weaker
-signal. Cited codes found only on sibling tabs are listed under the results
-with click-to-switch links that re-match there.
+then switches to the top-scoring tab — the open Sheets tab follows so the
+flip is visible. Cited codes and rows always outrank the softer signals, and
+a soft-signal switch needs a real margin so borderline tabs don't flap.
+Cited codes found only on sibling tabs are listed under the results with
+click-to-switch links that re-match there.
 
 For sheet-first work before an email arrives, **N pending row(s) — use as
 requested IDs** seeds the request and commits pending rows when the email is

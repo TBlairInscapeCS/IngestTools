@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const engine = fs.readFileSync(__dirname + '/engine.js', 'utf8');
-const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'sheetIndexEntry', 'ensureSheetIndex', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab'];
+const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab'];
 const functions = names.map(name => {
   const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
   assert(start >= 0, name);

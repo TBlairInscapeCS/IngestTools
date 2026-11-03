@@ -67,6 +67,16 @@ let sheetSourceTab = null; // the open Sheets tab the workbook came from
 let sheetGids = {};        // tab name -> web gid (for #gid= navigation)
 let sheetIndex = null;     // Map tab -> {rows, links, headerRow, colMap, pendingCount,...}
 let sheetIndexJob = null;  // in-flight build promise (one parse per workbook)
+let sheetBufSig = '';      // hash of sheetBuf - identical bytes = unchanged workbook
+// Cheap whole-buffer hash (FNV-1a). The 5-min and match-time refreshes
+// re-export the whole workbook; identical bytes let them skip the parse
+// and the cross-tab index rebuild entirely.
+function bufSig(ab) {
+  const b = new Uint8Array(ab);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i], 0x01000193);
+  return ab.byteLength + ':' + (h >>> 0).toString(36);
+}
 let lastSheetRef = null;   // {id, gid, tabName} - re-exportable w/o the tab
 let sheetAutoLoaded = '';  // client.id whose tracker auto-pulled this run
 let dlTotal = 0, dlDone = 0, dlFailed = 0;
@@ -324,9 +334,12 @@ async function loadSpDownload(u, sourceLabel, src) {
     const ab = await r.arrayBuffer();
     const b = new Uint8Array(ab);
     if (b[0] !== 0x50 || b[1] !== 0x4b) return false; // viewer page, not a workbook
+    const sig = bufSig(ab);
+    if (sig === sheetBufSig && sheet) { dbg('sheet unchanged - refresh skipped'); return true; }
     const wb = await readXlsx(ab, '');
     if (context !== trackerContext()) return false;
     sheetBuf = ab;
+    sheetBufSig = sig;
     sheetSourceTab = null;
     sheetGids = {};
     clearSheetIndex();
@@ -917,7 +930,7 @@ function applyClient(c, via) {
   if (lastSheetRef && foreignDoc(lastSheetRef.id)) {
     dbg('foreign loaded tracker cleared', { client: c.id, doc: lastSheetRef.id });
     trackerEpoch++;
-    sheet = null; lastSheetRef = null; sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null;
+    sheet = null; lastSheetRef = null; sheetBuf = null; sheetBufSig = ''; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null;
     clearSheetIndex();
     matched = null; lastResults = null; idsEl.value = '';
     $('matchResults').innerHTML = ''; $('sheetInfo').innerHTML = ''; $('trackerDocTitle').textContent = '';
@@ -1582,8 +1595,11 @@ async function tryLoadTrackerAttachment(msgId) {
       $('emailInfo').innerHTML = 'attachments: ' + others.map(a => esc(a.name)).join(', ');
     if (!wb) return;
     const ab = await graphAttachmentBytes(msgId, wb.id);
+    const sig = bufSig(ab);
+    if (sig === sheetBufSig && sheet) return; // same workbook already loaded
     const w = await readXlsx(ab, '');
     sheetBuf = ab;
+    sheetBufSig = sig;
     sheetTabs = w.sheetNames || [];
     sheetTabName = w.sheetName;
     loadSheetRows(w, 'email attachment');
@@ -1784,7 +1800,7 @@ async function loadMailById(id) {
 setInterval(() => { if (MS.refreshToken) checkInbox(true); }, 5 * 60 * 1000);
 // Keep a doc-loaded tracker near-real-time: re-export every 5 min in the
 // background. Safe because loadSheetDoc only needs the stored doc id.
-setInterval(() => { if (lastSheetRef) refreshSheet(true); }, 5 * 60 * 1000);
+setInterval(() => { if (lastSheetRef && !document.hidden) refreshSheet(true); }, 5 * 60 * 1000);
 
 // Learned request senders: each confirmed ingest bumps the sender's address
 // (trusted at 1) and their domain (trusted at 3), stored across sessions.
@@ -2092,10 +2108,13 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
       { credentials: 'include' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const buffer = await r.arrayBuffer();
+    const sig = bufSig(buffer);
+    if (sig === sheetBufSig && sheet) { dbg('sheet unchanged - refresh skipped'); return true; }
     const wb = await readXlsx(buffer, tabName || '', gid);
     const documentTitle = await trackerDocumentTitle(id, wb);
     if (context !== trackerContext() || !trackerAllowed(id, sourceLabel)) { dbg('stale tracker load discarded', { id, sourceLabel }); return false; }
     sheetBuf = buffer;
+    sheetBufSig = sig;
     sheetTabs = wb.sheetNames || [];
     sheetTabName = wb.sheetName;
     if (tabName && wb.sheetName !== tabName) {
@@ -2122,7 +2141,7 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
     const text = await r2.text();
     const documentTitle = await trackerDocumentTitle(id);
     if (context !== trackerContext() || !trackerAllowed(id, sourceLabel)) return false;
-    sheetBuf = null; sheetTabs = []; sheetTabName = '';
+    sheetBuf = null; sheetBufSig = ''; sheetTabs = []; sheetTabName = '';
     clearSheetIndex();
     lastSheetRef = { id, gid: gid || 0, documentTitle, clientId: client && client.id };
     loadSheetText(text, 'Sheet tab gid=' + (gid || '0'));
@@ -2187,8 +2206,11 @@ async function grabSheetTab(tab) {
         const ab = await r.arrayBuffer();
         const b = new Uint8Array(ab);
         if (b[0] === 0x50 && b[1] === 0x4b) { // 'PK' zip magic = real workbook
+          const sig = bufSig(ab);
+          if (sig === sheetBufSig && sheet) { dbg('sheet unchanged - refresh skipped'); return true; }
           const wb = await readXlsx(ab, '');
           sheetBuf = ab;
+          sheetBufSig = sig;
           sheetTabs = wb.sheetNames || [];
           sheetTabName = wb.sheetName;
           sheetGids = {};
@@ -2297,7 +2319,7 @@ async function fetchAirtableView(tab) {
       offset = page.offset || '';
     } while (offset);
     if (rows.length < 2) throw new Error('view returned no records');
-    sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
+    sheetBuf = null; sheetBufSig = ''; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
     clearSheetIndex();
     loadSheetRows({ rows, links, sheetName: t.name }, 'Airtable ' + t.name);
     lastSheetRef = { airtable: true, baseName: t.name };
@@ -2436,7 +2458,7 @@ async function fetchAirtableTracker(label) {
       } while (offset);
     }
     if (rows.length < 2) throw new Error('pending views returned no records');
-    sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
+    sheetBuf = null; sheetBufSig = ''; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
     clearSheetIndex();
     loadSheetRows({ rows, links, sheetName: base.name }, label + ' (' + base.name + ')');
     lastSheetRef = { airtable: true, baseName: base.name };
@@ -2606,11 +2628,14 @@ $('fileInput').addEventListener('change', e => {
     const r = new FileReader();
     r.onload = async () => {
       try {
+        const sig = bufSig(r.result);
+        if (sig === sheetBufSig && sheet) { toast('Same workbook already loaded.'); return; }
         const wb = await readXlsx(r.result, '');
         sheetSourceTab = null; sheetGids = {};
         lastSheetRef = null;
         clearSheetIndex();
         sheetBuf = r.result;
+        sheetBufSig = sig;
         sheetTabs = wb.sheetNames || [];
         sheetTabName = wb.sheetName;
         loadSheetRows(wb, f.name);
@@ -2627,7 +2652,7 @@ $('fileInput').addEventListener('change', e => {
 });
 
 function loadSheetText(text, sourceLabel) {
-  sheetBuf = null; sheetTabs = []; sheetTabName = '';
+  sheetBuf = null; sheetBufSig = ''; sheetTabs = []; sheetTabName = '';
   sheetSourceTab = null; sheetGids = {};
   lastSheetRef = null;
   clearSheetIndex();
@@ -2822,13 +2847,15 @@ async function doMatch() {
     // out-score a hit on paper but must never outrank one.
     const best = [...scores].sort((a, b) =>
       b.hits - a.hits || b.rowHits - a.rowHits || b.score - a.score)[0];
-    // Switch when the other tab provably holds more of the request, or
-    // when this tab shows no request signal at all and it does - a bare
-    // pending/name/recency lead never yanks a tab that's already covering.
+    // Auto-select: when the top-ranked tab isn't the loaded one, take it -
+    // the user shouldn't have to hunt tabs. Hard evidence decides outright;
+    // on the soft tier the lead must clear ~one name hit so borderline
+    // tabs don't flap on noise.
     const better = best && best.name !== cur.name &&
       (best.hits > cur.hits ||
         (best.hits === cur.hits && best.rowHits > cur.rowHits) ||
-        (!cur.hits && !cur.rowHits && best.score > cur.score));
+        (best.hits === cur.hits && best.rowHits === cur.rowHits &&
+          best.score > cur.score + 2));
     if (better) {
       const why = [best.hits ? best.hits + ' of ' + reqCodes.length + ' requested IDs' : '',
         best.rowHits ? best.rowHits + ' cited row(s)' : '',
@@ -3378,6 +3405,15 @@ function matchGridRow(m) {
   return g ? g.rows[m.row - 1] : null;
 }
 
+// Lazily-built normalized text of a tab's whole grid - one pass, shared by
+// code scoring and code-location searches (a tab whose hay lacks every
+// needle can skip the per-row scan entirely).
+function indexHay(e) {
+  if (e.hay == null)
+    e.hay = normalizeName(e.rows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '');
+  return e.hay;
+}
+
 // Per-tab request coverage - the wrong-tab guard. Each tab scores on
 // signals in descending strength: cited-code hits dominate (one hit
 // outweighs every vibe); cited row numbers that exist on the grid point
@@ -3405,9 +3441,8 @@ async function sheetTabScores(codes, rowNums) {
   const now = Date.now();
   const scores = [];
   for (const [name, e] of idx) {
-    if (e.hay == null)
-      e.hay = normalizeName(e.rows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '');
-    const hits = needles.filter(n => e.hay.includes(n)).length;
+    const hay = indexHay(e);
+    const hits = needles.filter(n => hay.includes(n)).length;
     // Cited rows near the grid's bottom edge are where a fresh request
     // would be appended; the same numbers mid-sheet are likelier old rows
     // sharing the range.
@@ -3571,6 +3606,10 @@ async function findCodeTabs(codes) {
   const needles = codes.map(c => normalizeName(c).replace(/[\s:_-]+/g, ''));
   for (const [name, e] of idx) {
     if (name === sheetTabName) continue;
+    // Whole-tab hay precheck: a tab holding none of the needles skips the
+    // per-row scan (the common case on multi-tab trackers).
+    const hay = indexHay(e);
+    if (!needles.some(n => n && hay.includes(n))) continue;
     e.rows.forEach((r, i) => {
       const rowHay = normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '');
       needles.forEach((n, k) => {
@@ -6367,14 +6406,6 @@ bindUiAction('alreadyHaveFiles', async () => {
     $('operationNotice').textContent = 'No unique local matches. Use the portal file picker, then return to continue.';
   }
 });
-function portalPickerGuide() {
-  const input = document.getElementById('multifile') || document.querySelector('#bulkdrop input[type=file], input.bulk-btn-upload');
-  if (!input) return { error: 'Open the File Ingest view in the portal first.' };
-  const dropzone = document.getElementById('bulkdrop') || input;
-  dropzone.scrollIntoView({ block: 'center' });
-  input.focus();
-  return { ready: true };
-}
 // The portal-picker shortcut was removed: users select files in the portal
 // page itself; the in-panel "I already have the files" path covers the rest.
 $('alreadyIngested').addEventListener('click', () => {
