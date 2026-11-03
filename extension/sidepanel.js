@@ -2792,7 +2792,8 @@ function requestRefs() {
   const src = emailEl.value;
   if (reqRefCache.src !== src) {
     const seg = latestSegment(src);
-    reqRefCache = { src, seg, codes: extractCodes(seg),
+    reqRefCache = { src, seg,
+      codes: extractCodes(seg), fileIds: extractFileIds(seg),
       rowRefs: [...new Set(extractRowRefs(seg)
         .concat((emailSpots || []).map(s => s.row).filter(Boolean)))] };
   }
@@ -2832,7 +2833,9 @@ async function doMatch() {
   // previous match's IDs, and those stale codes can out-score the freshly
   // grabbed tab and drag the sheet back to the old request's tab.
   const refs = requestRefs();
-  const emailCodes = refs.codes;
+  // Filename-cited IDs count as request codes for tab scoring - a
+  // "New Media Available: X.mp4" request is as much evidence as an ISCI.
+  const emailCodes = [...new Set(refs.codes.concat(refs.fileIds || []))];
   const reqCodes = [...new Set(emailCodes.length ? emailCodes
     : idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
   const reqRows = refs.rowRefs;

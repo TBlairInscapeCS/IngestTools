@@ -36,7 +36,12 @@ const CLIENTS = [
   { name: 'Northstar Ads', brand: 'Northstar', idfmt: 'num', tick: '_t' },
   { name: 'Kilo Partners', brand: 'Kilo', idfmt: 'alpha', tick: '_t' },
   { name: 'Vela Group', brand: 'Vela', idfmt: 'comscore', tick: '_t' },
+  { name: 'Quill Sports', brand: 'Quill', idfmt: 'qyps', tick: '_t' },
+  { name: 'Sable Pics', brand: 'Sable', idfmt: 'spx', tick: '_t' },
+  { name: 'Ion Trails', brand: 'Ion', idfmt: 'colon', tick: '_t' },
+  { name: 'Tempo One', brand: 'Tempo', idfmt: 'mp4ish', tick: '_t' },
 ];
+// ID shapes mirror what real trackers carry - every one fictional.
 const IDMAKERS = {
   isci: r => pick(r, 'ABCDEFGHKLMNPQRSTUVWXYZ'.split('')) + pick(r, 'ABCDEFGHKLMNPQRSTUVWXYZ'.split('')) +
     pick(r, 'ABCDEFGHKLMNPQRSTUVWXYZ'.split('')) + pick(r, 'ABCDEFGHKLMNPQRSTUVWXYZ'.split('')) +
@@ -44,6 +49,10 @@ const IDMAKERS = {
   num: r => String(rint(r, 10000000, 999999999)),
   alpha: r => 'KV' + String(rint(r, 100, 999)) + 'X' + String(rint(r, 1000, 9999)),
   comscore: r => 'p' + rint(r, 100000000000, 999999999999) + '_' + rint(r, 1000, 9999),
+  qyps: r => 'QY' + pick(r, 'PSKLM'.split('')) + '0' + String(rint(r, 100000, 999999)) + 'H',
+  spx: r => 'SP' + pick(r, 'XBQZ'.split('')) + '4' + String(rint(r, 100000, 999999)) + 'H',
+  colon: r => pick(r, ['ITO', 'KTO', 'ZTR']) + String(rint(r, 10, 999)) + ':',
+  mp4ish: r => pick(r, ['TO', 'ZN', 'KR']) + String(rint(r, 100, 999)) + pick(r, ['ST', 'HD', 'BN']) + 'H',
 };
 const HEADER_SETS = [
   { id: 'Tracking ID', title: 'Spot Title', date: 'Request Date', file: 'File Name', link: 'Link', brand: 'Brand', done: 'Ingest Complete Date', by: 'Completed By' },
@@ -60,11 +69,13 @@ function genScenario(seed) {
   const client = pick(r, CLIENTS);
   const H = pick(r, HEADER_SETS);
   const idType = pick(r, ID_TYPES);
-  const sender = pick(r, ['Sam', 'Jordan', 'Priya', 'Marcus', 'Elena']);
+  const sender = pick(r, ['Sam', 'Jordan', 'Priya', 'Marcus', 'Elena', 'Dev', 'Aiko', 'Ren', 'Pat', 'Quinn']);
 
   // --- workbook: 1-4 tabs, one holds the request ---
   const nTabs = rint(r, 1, 4);
-  const tabNames = ['Master Tracker', client.brand + ' Q4 2026', client.brand + ' Q1 2025', 'Archive 2023'].slice(0, nTabs);
+  const tabPool = ['Master Tracker', client.brand + ' Q4 2026', client.brand + ' Q1 2025', 'Archive 2023',
+    'NEXT', 'Shared ' + client.brand, '2026 Ingest', client.brand + ' Spots', 'S1 ' + client.brand];
+  const tabNames = tabPool.slice(0, nTabs);
   const reqTab = tabNames[rint(r, 0, nTabs - 1)];
   const tabs = {};
   const totalRows = rint(r, 200, 4000);
@@ -109,21 +120,39 @@ function genScenario(seed) {
   if (ghostRow < startRow) t.rows[ghostRow - 1][0] = ghost;
 
   // --- email ---
-  const greet = pick(r, ['Hi Tim', 'Hey team', 'Hello', 'Hi']);
+  const greet = pick(r, ['Hi Tim', 'Hey team', 'Hello', 'Hi', 'Good morning', 'Tim -']);
   const sign = 'Thanks!\n' + sender;
+  const comma = n => n.toLocaleString('en-US');
   const cite = {
-    rows: 'rows ' + startRow + '-' + (startRow + nReq - 1),
+    rows: r() < 0.3 ? 'lines ' + comma(startRow) + '-' + comma(startRow + nReq - 1)
+                    : 'rows ' + startRow + '-' + (startRow + nReq - 1),
     codes: reqIds.slice(0, Math.min(nReq, 6)).join(', '),
-    files: reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase() + '.mp4').join('\n'),
+    files: r() < 0.5
+      ? reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase() + '.mp4').join('\n')
+      : 'File Name\n' + reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase() + '.mp4').join('\n'),
     mixed: 'rows ' + startRow + '-' + (startRow + Math.floor(nReq / 2) - 1) + ', plus ' + ghost + ' and ' + stray,
     vague: '',
   }[idType];
   const asks = {
-    rows: 'Please ingest the ' + client.brand + ' spots on ' + cite + '.',
-    codes: 'Please ingest: ' + cite + (r() < 0.5 ? '\nAlso ' + stray : ''),
-    files: 'New files for ' + client.brand + ':\n' + cite,
+    rows: r() < 0.3
+      ? 'Please ingest the new ' + client.brand + ' spots outlined on ' + reqTab.split(' ')[0] + ' tab ' + cite + '.'
+      : 'Please ingest the ' + client.brand + ' spots on ' + cite + '.',
+    codes: pick(r, [
+      'Please ingest: ' + cite + (r() < 0.5 ? '\nAlso ' + stray : ''),
+      'New ' + client.brand + ' creatives to ingest:\n' + cite,
+      'When you get a chance, ingest ' + cite,
+    ]),
+    files: pick(r, [
+      'New files for ' + client.brand + ':\n' + cite,
+      'New Commercials Uploaded\n' + cite,
+      'New Media Available\n' + reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase() + '.mp4 Download').join('\n'),
+    ]),
     mixed: 'Please ingest the ' + client.brand + ' spots on ' + cite + '.',
-    vague: 'Please ingest the new ' + client.brand + ' spots on the tracker.',
+    vague: pick(r, [
+      'Please ingest the new ' + client.brand + ' spots on the tracker.',
+      'The ' + client.brand + ' batch is ready on the tracker - please ingest.',
+      'New ' + client.brand + ' rows added, same process as usual.',
+    ]),
   }[idType];
   const email = greet + ',\n\n' + asks + '\n' + sign +
     (r() < 0.25 ? '\n\nFrom: someone@' + client.brand.toLowerCase() + '.com\nSent: last week\n' + greet + ',\nold request, already done' : '');
