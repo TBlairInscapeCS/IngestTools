@@ -65,6 +65,8 @@ let sheetTabs = [];        // tab names in that workbook
 let sheetTabName = '';     // which tab was loaded
 let sheetSourceTab = null; // the open Sheets tab the workbook came from
 let sheetGids = {};        // tab name -> web gid (for #gid= navigation)
+let sheetIndex = null;     // Map tab -> {rows, links, headerRow, colMap, pendingCount,...}
+let sheetIndexJob = null;  // in-flight build promise (one parse per workbook)
 let lastSheetRef = null;   // {id, gid, tabName} - re-exportable w/o the tab
 let sheetAutoLoaded = '';  // client.id whose tracker auto-pulled this run
 let dlTotal = 0, dlDone = 0, dlFailed = 0;
@@ -327,7 +329,7 @@ async function loadSpDownload(u, sourceLabel, src) {
     sheetBuf = ab;
     sheetSourceTab = null;
     sheetGids = {};
-    scoreCache = { key: '', scores: null };
+    clearSheetIndex();
     sheetTabs = wb.sheetNames || [];
     sheetTabName = wb.sheetName;
     lastSheetRef = { spUrl: u, spSrc: src || u, clientId: client && client.id };
@@ -916,6 +918,7 @@ function applyClient(c, via) {
     dbg('foreign loaded tracker cleared', { client: c.id, doc: lastSheetRef.id });
     trackerEpoch++;
     sheet = null; lastSheetRef = null; sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null;
+    clearSheetIndex();
     matched = null; lastResults = null; idsEl.value = '';
     $('matchResults').innerHTML = ''; $('sheetInfo').innerHTML = ''; $('trackerDocTitle').textContent = '';
     cleanTrackerReferences();
@@ -2082,7 +2085,7 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
   const context = trackerContext();
   modStat('stSheet', 'Loading ' + (sourceLabel || 'tracker') + '…');
   sheetSourceTab = null; // cleared here; tab-grabs re-set it on success
-  scoreCache = { key: '', scores: null }; // new workbook = new tab map
+  clearSheetIndex(); // new workbook = new tab map
   try {
     const r = await fetch(
       `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`,
@@ -2120,6 +2123,7 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
     const documentTitle = await trackerDocumentTitle(id);
     if (context !== trackerContext() || !trackerAllowed(id, sourceLabel)) return false;
     sheetBuf = null; sheetTabs = []; sheetTabName = '';
+    clearSheetIndex();
     lastSheetRef = { id, gid: gid || 0, documentTitle, clientId: client && client.id };
     loadSheetText(text, 'Sheet tab gid=' + (gid || '0'));
     chrome.storage.local.set({ msLastSheet: lastSheetRef });
@@ -2188,7 +2192,7 @@ async function grabSheetTab(tab) {
           sheetTabs = wb.sheetNames || [];
           sheetTabName = wb.sheetName;
           sheetGids = {};
-          scoreCache = { key: '', scores: null };
+          clearSheetIndex();
           lastSheetRef = { spUrl: u, viewUrl: loc.pageUrl, documentTitle: wb.documentTitle || tab.title || '', clientId: client && client.id };
           loadSheetRows(wb, 'SharePoint workbook');
           // The winning download URL IS the refresh handle - without it the
@@ -2294,6 +2298,7 @@ async function fetchAirtableView(tab) {
     } while (offset);
     if (rows.length < 2) throw new Error('view returned no records');
     sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
+    clearSheetIndex();
     loadSheetRows({ rows, links, sheetName: t.name }, 'Airtable ' + t.name);
     lastSheetRef = { airtable: true, baseName: t.name };
     rememberSheet();
@@ -2432,6 +2437,7 @@ async function fetchAirtableTracker(label) {
     }
     if (rows.length < 2) throw new Error('pending views returned no records');
     sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null; sheetGids = {};
+    clearSheetIndex();
     loadSheetRows({ rows, links, sheetName: base.name }, label + ' (' + base.name + ')');
     lastSheetRef = { airtable: true, baseName: base.name };
     rememberSheet();
@@ -2603,7 +2609,7 @@ $('fileInput').addEventListener('change', e => {
         const wb = await readXlsx(r.result, '');
         sheetSourceTab = null; sheetGids = {};
         lastSheetRef = null;
-        scoreCache = { key: '', scores: null };
+        clearSheetIndex();
         sheetBuf = r.result;
         sheetTabs = wb.sheetNames || [];
         sheetTabName = wb.sheetName;
@@ -2624,7 +2630,7 @@ function loadSheetText(text, sourceLabel) {
   sheetBuf = null; sheetTabs = []; sheetTabName = '';
   sheetSourceTab = null; sheetGids = {};
   lastSheetRef = null;
-  scoreCache = { key: '', scores: null };
+  clearSheetIndex();
   const p = parseInput(text);
   if (!p.rows.length) { setStage('sdSheet', 'fail', 'nothing parsed'); return toast('Nothing parsed from ' + sourceLabel); }
   if (!p.isTable) {
@@ -2713,7 +2719,7 @@ function loadSheetRows(wb, sourceLabel) {
         const get = kk => c[kk] >= 0 ? String(r[c[kk]] || '').trim() : '';
         const id = get('id'), title = get('title');
         return {
-          row: pendingIdxArr[k] + hRow + 1, id, title,
+          row: pendingIdxArr[k] + hRow + 1, id, title, tab: sheetTabName,
           trackingId: (id.trim() && !/^\d+\.\d+$/.test(id.trim()) ? id.trim() : '') || title || id,
           fileName: get('file'), brand: get('brand'),
           matchType: 'PENDING',
@@ -2732,10 +2738,16 @@ function loadSheetRows(wb, sourceLabel) {
     }
     toast(pendingRows.length + ' pending row ID(s) set as requested IDs.');
   });
+  // Cross-tab index: warm the parse now so the wrong-tab guard and
+  // sibling-tab hints are lookups, not a stall mid-match.
+  if (sheetBuf && (sheetTabs || []).length > 1) ensureSheetIndex();
   toast('Sheet loaded.');
 }
 
 function buildColumnDropdowns() {
+  // guessedCols runs the vocab guess + playbook pin once for the whole
+  // row set - the same mapping cross-tab index entries carry.
+  const guesses = guessedCols(sheet.headers, sheet.dataRows, sheet.groupRow);
   COLS.forEach(c => {
     const sel = $(c.el);
     sel.innerHTML = '<option value="-1">(none)</option>';
@@ -2745,15 +2757,7 @@ function buildColumnDropdowns() {
       o.textContent = h || '(col ' + (i + 1) + ')';
       sel.appendChild(o);
     });
-    sel.value = c.guess(sheet.headers, sheet.dataRows, sheet.groupRow);
-    // Playbook column pin overrides the guess: amcn's sheet carries an
-    // ISCI column of source codes while a further-right 'Tracking ID'
-    // column waits for OUR confirmation - the pin picks ISCI every time.
-    const pin = client && client.cols && client.cols[c.key];
-    if (pin) {
-      const p = sheet.headers.findIndex(h => pin.test(String(h)));
-      if (p >= 0) sel.value = p;
-    }
+    sel.value = guesses[c.key];
   });
   // One-line detected summary; the dropdowns stay tucked away unless the
   // ID column can't be guessed.
@@ -2803,17 +2807,39 @@ async function doMatch() {
   // Score the email's own cited codes only: idsEl is repopulated from the
   // previous match's IDs, and those stale codes can out-score the freshly
   // grabbed tab and drag the sheet back to the old request's tab.
-  const emailCodes = extractCodes(latestSegment(emailEl.value));
+  const seg = latestSegment(emailEl.value);
+  const emailCodes = extractCodes(seg);
   const reqCodes = [...new Set(emailCodes.length ? emailCodes
     : idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
-  const scores = await sheetTabScores(reqCodes);
+  const reqRows = [...new Set(
+    extractRowRefs(seg).concat((emailSpots || []).map(s => s.row).filter(Boolean)))];
+  const scores = await sheetTabScores(reqCodes, reqRows);
   if (scores) {
-    const cur = scores.find(s => s.name === sheetTabName) || { name: sheetTabName, hits: 0 };
-    const best = [...scores].sort((a, b) => b.hits - a.hits)[0];
-    if (best && best.hits > cur.hits) {
+    const cur = scores.find(s => s.name === sheetTabName) ||
+      { name: sheetTabName, hits: 0, rowHits: 0, pending: 0, score: 0 };
+    // Rank hard evidence first: code hits, then cited-row coverage, then
+    // the soft score (name overlap, recency, pending). Soft signals can
+    // out-score a hit on paper but must never outrank one.
+    const best = [...scores].sort((a, b) =>
+      b.hits - a.hits || b.rowHits - a.rowHits || b.score - a.score)[0];
+    // Switch when the other tab provably holds more of the request, or
+    // when this tab shows no request signal at all and it does - a bare
+    // pending/name/recency lead never yanks a tab that's already covering.
+    const better = best && best.name !== cur.name &&
+      (best.hits > cur.hits ||
+        (best.hits === cur.hits && best.rowHits > cur.rowHits) ||
+        (!cur.hits && !cur.rowHits && best.score > cur.score));
+    if (better) {
+      const why = [best.hits ? best.hits + ' of ' + reqCodes.length + ' requested IDs' : '',
+        best.rowHits ? best.rowHits + ' cited row(s)' : '',
+        best.pending ? best.pending + ' pending row(s)' : '',
+        best.newest ? 'latest row ' + best.newest : '']
+        .filter(Boolean).join(', ');
       await switchSheetTab(best.name,
-        cur.hits + ' of ' + reqCodes.length + ' requested IDs were on "' + cur.name +
-        '", ' + best.hits + ' are on "' + best.name + '"');
+        'it holds ' + why + ' ("' + cur.name + '" had ' +
+        (cur.hits || cur.rowHits
+          ? cur.hits + ' ID(s), ' + cur.rowHits + ' cited row(s)'
+          : 'none of them') + ')');
       cols = currentCols();
     } else if (reqCodes.length && best && best.hits === 0) {
       dbg('match guard: requested codes appear on no tab',
@@ -3032,8 +3058,10 @@ $('matchResults').addEventListener('click', e => {
   const rl = e.target.closest('a.rowlink');
   if (rl) {
     e.preventDefault();
-    const m = (matched || []).find(x => x.row === +rl.dataset.srow);
-    highlightSheetRows([+rl.dataset.srow], m && (m.id || m.trackingId || ''));
+    const m = (matched || []).find(x =>
+      x.row === +rl.dataset.srow && matchTab(x) === (rl.dataset.stab || sheetTabName));
+    highlightSheetRows([+rl.dataset.srow], m && (m.id || m.trackingId || ''),
+      rl.dataset.stab || undefined);
     return;
   }
   const x = e.target.closest('[data-xi]');
@@ -3052,9 +3080,21 @@ const selectedMatches = () => (matched || []).filter(m => !m.excluded);
 // Row numbers deep-link into the tracker when a Google Sheet backs the
 // match (the range anchor selects them); offSheet rows came from an
 // earlier workbook - their numbers would highlight the wrong line.
-const sheetRowCell = m => m.row > 0 && !m.offSheet && sheetRef()
-  ? '<a href="#" class="rowlink" data-srow="' + m.row + '" title="highlight row ' + m.row + ' on the tracker">' + m.row + '</a>'
-  : m.row;
+const sheetRowCell = m => {
+  const t = matchTab(m);
+  // Deep-link needs a real target: same-tab rows always qualify (the doc
+  // opens wherever it lands), a sibling tab needs its gid anchor (or the
+  // SharePoint activeCell name), and a carried match needs its tab to
+  // still be inside this workbook's index.
+  const ref = sheetRef();
+  const linkable = m.row > 0 && ref &&
+    (m.offSheet ? !!(sheetIndex && sheetIndex.has(t))
+                : t === sheetTabName || sheetTabGid(t) !== '' || ref.kind === 'sp');
+  return linkable
+    ? '<a href="#" class="rowlink" data-srow="' + m.row + '" data-stab="' + esc(t) +
+      '" title="highlight row ' + m.row + ' on tab &quot;' + esc(t) + '&quot;">' + m.row + '</a>'
+    : m.row;
+};
 function presentMatches(quiet) {
   matchedFor = emailEl.value;
 
@@ -3074,19 +3114,21 @@ function presentMatches(quiet) {
   }
 
   // Resolve hyperlinks the cell text didn't carry (CSV can't see them),
-  // and convert Excel serial dates for display. offSheet rows came from
-  // an earlier tracker - their row numbers don't exist on this sheet, so
-  // a link lookup would pull the wrong row's URL.
+  // and convert Excel serial dates for display. The lookup runs against
+  // the match's own tab (m.tab) - a row number read against a different
+  // grid pulls that row's URL instead. Tabs outside this workbook's index
+  // (a carried match from another tracker) resolve nothing.
   matched.forEach(m => {
-    if (m.offSheet) return;
-    if (!m.link && m.row > 0 && !emailOnly() && sheet && sheet.links) {
+    const grid = !emailOnly() && m.row > 0 ? tabGrid(matchTab(m)) : null;
+    if (!m.link && grid && grid.links) {
       // Mapped link column first; any other hyperlink on the row after
       // (InMarket's tracker carries links in H/I/J - a strict column map
       // drops rows whose link lives in a neighbor).
       const rk = (m.row - 1) + ',';
-      const u = sheet.links[rk + matchCols.link] ||
-        Object.keys(sheet.links).filter(k => k.startsWith(rk))
-          .map(k => sheet.links[k]).find(u => /^https?:/i.test(u));
+      const linkCol = grid.colMap ? grid.colMap.link : matchCols.link;
+      const u = grid.links[rk + linkCol] ||
+        Object.keys(grid.links).filter(k => k.startsWith(rk))
+          .map(k => grid.links[k]).find(u => /^https?:/i.test(u));
       if (u) m.link = u;
     }
     if (m.date) m.date = serialToDate(m.date);
@@ -3225,24 +3267,170 @@ function presentMatches(quiet) {
 // request actually means. Committing runs the normal match pipeline.
 // The xlsx export holds every tab of the workbook - when cited codes miss
 // on the loaded tab, scan the rest and say exactly where they live.
-// Per-tab hit counts for a code set - the wrong-tab guard. The xlsx
-// export already holds every tab, so scoring is a local parse, not a
-// fetch. Cached per code-set since accumulation re-runs the same list.
+// ---------- Cross-tab index ----------
+// The xlsx export already holds every tab. One readXlsxAll pass per
+// workbook builds sheetIndex - per-tab rows, links, detected header row,
+// auto-guessed column map and live pending count - so tab scoring,
+// sibling-tab hints and per-match row derefs are lookups, not re-parses.
+// Built lazily on first need and warmed at load; clearSheetIndex() drops
+// it whenever a new sheet lands (a Map of full grids is heavy - it must
+// never outlive its workbook).
 let scoreCache = { key: '', scores: null };
-async function sheetTabScores(codes) {
-  if (!sheetBuf || (sheetTabs || []).length < 2) return null;
-  const needles = [...new Set(codes.map(c => normalizeName(c).replace(/[\s:_-]+/g, '')).filter(Boolean))];
-  if (!needles.length) return null;
-  if (scoreCache.key === needles.join(',') && scoreCache.scores) return scoreCache.scores;
-  const scores = [];
-  for (const name of sheetTabs) {
-    try {
-      const wb = await readXlsx(sheetBuf, name, '');
-      const hay = normalizeName(wb.rows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '');
-      scores.push({ name, hits: needles.filter(n => hay.includes(n)).length });
-    } catch (e) { /* skip unreadable tab */ }
+function clearSheetIndex() {
+  sheetIndex = null;
+  scoreCache = { key: '', scores: null };
+}
+
+// Same column resolution the dropdowns do - vocab guesses plus the
+// playbook's pin - so each tab's index entry maps like the loaded sheet.
+function guessedCols(headers, dataRows, groupRow) {
+  const c = {};
+  COLS.forEach(col => {
+    let v = col.guess(headers, dataRows, groupRow);
+    const pin = client && client.cols && client.cols[col.key];
+    if (pin) {
+      const p = headers.findIndex(h => pin.test(String(h)));
+      if (p >= 0) v = p;
+    }
+    c[col.key] = v;
+  });
+  return c;
+}
+
+function sheetIndexEntry(name, wb) {
+  const headerRow = detectHeaderRow(wb.rows);
+  const headers = wb.rows[headerRow] || [];
+  const groupRow = headerRow > 0 ? wb.rows[headerRow - 1] : null;
+  const dataRows = wb.rows.slice(headerRow + 1);
+  const liveRows = dataRows.filter(r => r.some(c => {
+    const v = String(c || '').trim();
+    return v && !/^[_\-~.]+$/.test(v);  // '___' placeholder cells aren't data
+  }));
+  const colMap = guessedCols(headers, dataRows, groupRow);
+  const fbCols = fillBackColumns(headers, groupRow);
+  let pendingIdx = fbCols.length ? pendingRowIndices(liveRows, fbCols) : [];
+  // Same ~2-week recency window loadSheetRows applies to the pending queue
+  // (using this tab's guessed date column, not the user's dropdown pick).
+  if (pendingIdx.length > 1 && colMap.date >= 0) {
+    const dated = pendingIdx.map(i => ({ i, ms: cellDateMs(liveRows[i][colMap.date]) }))
+      .filter(x => !isNaN(x.ms));
+    if (dated.length) {
+      const cutoff = Math.max.apply(null, dated.map(x => x.ms)) - 14 * 864e5;
+      pendingIdx = dated.filter(x => x.ms >= cutoff).map(x => x.i);
+    }
   }
-  scoreCache = { key: needles.join(','), scores };
+  // "Last edited": the newest date in the tab's date column. Trackers fill
+  // top-to-bottom, so the newest date marks the area where fresh request
+  // rows land - a tab whose newest row is months old is stale no matter
+  // how many rows it holds. liveEnd is that bottom edge as a row number.
+  let newestMs = NaN;
+  if (colMap.date >= 0) {
+    for (const r of liveRows) {
+      const ms = cellDateMs(r[colMap.date]);
+      if (!isNaN(ms) && (isNaN(newestMs) || ms > newestMs)) newestMs = ms;
+    }
+  }
+  let liveEnd = 0;
+  for (let i = wb.rows.length - 1; i >= 0; i--) {
+    if ((wb.rows[i] || []).some(c => String(c || '').trim())) { liveEnd = i + 1; break; }
+  }
+  return { name, rows: wb.rows, links: wb.links || {}, headers, headerRow,
+    groupRow, dataRows, liveRows, colMap, pendingCount: pendingIdx.length,
+    newestMs, liveEnd, hay: null };
+}
+
+async function ensureSheetIndex() {
+  if (sheetIndex || sheetIndexJob) return sheetIndex || sheetIndexJob;
+  if (!sheetBuf || !(sheetTabs || []).length) return null;
+  const buf = sheetBuf;
+  sheetIndexJob = (async () => {
+    const idx = new Map();
+    try {
+      const all = await readXlsxAll(buf);
+      for (const name of Object.keys(all.sheets))
+        idx.set(name, sheetIndexEntry(name, all.sheets[name]));
+    } catch (e) { dbg('sheet index build fail', String(e)); }
+    // A new workbook mid-build discards the result; an empty one retries
+    // on the next call rather than latching "no tabs" forever.
+    if (idx.size && buf === sheetBuf) sheetIndex = idx;
+    return sheetIndex;
+  })().finally(() => { sheetIndexJob = null; });
+  return sheetIndexJob;
+}
+
+// Which tab's grid produced this match? Matches are stamped with m.tab at
+// match time; anything older (or sheetless) reads as the loaded tab.
+function matchTab(m) {
+  return (m && m.tab) || sheetTabName;
+}
+// Row/link view of a tab's grid: the loaded sheet when it's the live tab,
+// the index entry for its siblings. Null when the tab isn't in this
+// workbook (a carried match from a different tracker - never deref its
+// row number against the wrong grid).
+function tabGrid(tab) {
+  if (!tab || tab === sheetTabName)
+    return sheet ? { rows: sheet.allRows, links: sheet.links || {}, colMap: null } : null;
+  const e = sheetIndex && sheetIndex.get(tab);
+  return e ? { rows: e.rows, links: e.links, colMap: e.colMap } : null;
+}
+function matchGridRow(m) {
+  const g = m && m.row > 0 ? tabGrid(matchTab(m)) : null;
+  return g ? g.rows[m.row - 1] : null;
+}
+
+// Per-tab request coverage - the wrong-tab guard. Each tab scores on
+// signals in descending strength: cited-code hits dominate (one hit
+// outweighs every vibe); cited row numbers that exist on the grid point
+// at the tab the request means, and count double when they sit at the
+// tab's live bottom edge (trackers fill top-to-bottom - new lines land
+// there); tab-name words found in the request or client brand nudge;
+// the tab's newest date says how live it is (the "last edited" area is
+// where new rows would be); and the pending queue says where un-ingested
+// work waits. Cached per (codes,rows) key since accumulation re-runs the
+// same list.
+async function sheetTabScores(codes, rowNums) {
+  const idx = await ensureSheetIndex();
+  if (!idx || idx.size < 2) return null;
+  const needles = [...new Set((codes || []).map(c => normalizeName(c).replace(/[\s:_-]+/g, '')).filter(Boolean))];
+  const rows = [...new Set((rowNums || []).filter(n => n > 0))];
+  if (!needles.length && !rows.length) return null;
+  const key = needles.join(',') + '|' + rows.join(',');
+  if (scoreCache.key === key && scoreCache.scores) return scoreCache.scores;
+  const reqHay = normalizeName(
+    [client && client.name, detectedAdvertiser, latestSegment(emailEl.value)].join(' ')
+  ).toLowerCase();
+  // Layout words in tab names carry no brand signal - 'Master Tracker'
+  // overlapping nothing is fine, overlapping the word 'tracker' is not.
+  const TAB_STOP = /^(sheet|tab|tracker|master|copy|data|list|grid|new|old|final|v\d+|\d+)$/;
+  const now = Date.now();
+  const scores = [];
+  for (const [name, e] of idx) {
+    if (e.hay == null)
+      e.hay = normalizeName(e.rows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '');
+    const hits = needles.filter(n => e.hay.includes(n)).length;
+    // Cited rows near the grid's bottom edge are where a fresh request
+    // would be appended; the same numbers mid-sheet are likelier old rows
+    // sharing the range.
+    let rowHits = 0, edgeHits = 0;
+    for (const n of rows) {
+      if (n > e.rows.length || !(e.rows[n - 1] || []).some(c => String(c || '').trim())) continue;
+      rowHits++;
+      if (e.liveEnd && n > e.liveEnd - 200) edgeHits++;
+    }
+    const nameHits = name.toLowerCase().split(/[^a-z0-9]+/)
+      .filter(w => w.length >= 3 && !TAB_STOP.test(w) && reqHay.includes(w)).length;
+    // Recency of the tab's newest dated row: ~today is the live tab,
+    // months old is an archive. Bounded so it nudges, never decides.
+    const ageDays = isNaN(e.newestMs) ? Infinity : (now - e.newestMs) / 864e5;
+    const recency = isNaN(e.newestMs) ? 0 : ageDays <= 21 ? 4 : ageDays <= 90 ? 2 : ageDays <= 365 ? 1 : 0;
+    const score = hits * 10 + rowHits * 3 + edgeHits + nameHits * 2 + recency +
+      Math.min(e.pendingCount, 20) * 0.5;
+    scores.push({ name, hits, rowHits, edgeHits, nameHits, recency,
+      pending: e.pendingCount,
+      newest: isNaN(e.newestMs) ? '' : new Date(e.newestMs).toISOString().slice(0, 10),
+      score });
+  }
+  scoreCache = { key, scores };
   return scores;
 }
 
@@ -3250,7 +3438,10 @@ async function sheetTabScores(codes) {
 // follows when the DOM gave us its gid (sheet-button-<gid> elements).
 async function switchSheetTab(name, reason) {
   if (name === sheetTabName) return;
-  const wb = await readXlsx(sheetBuf, name, '');
+  const idx = await ensureSheetIndex();
+  const e = idx && idx.get(name);
+  const wb = e ? { rows: e.rows, links: e.links, sheetName: name }
+               : await readXlsx(sheetBuf, name, '');
   sheetTabName = name;
   loadSheetRows(wb, 'tab "' + name + '"');
   if (reason) toast('Switched to tab "' + name + '" - ' + reason + '.');
@@ -3304,12 +3495,14 @@ function spViewUrl(ref) {
   } catch (e) { /* odd URL - no view */ }
   return '';
 }
-function sheetTabGid() {
-  const g = (sheetGids || {})[sheetTabName] ??
-    (lastSheetRef && lastSheetRef.tabName === sheetTabName ? lastSheetRef.gid : '');
+function sheetTabGid(tabName) {
+  const t = tabName || sheetTabName;
+  const g = (sheetGids || {})[t] ??
+    (lastSheetRef && lastSheetRef.tabName === t ? lastSheetRef.gid : '');
   return g == null ? '' : String(g);
 }
-async function highlightSheetRows(rows, search) {
+async function highlightSheetRows(rows, search, tabName) {
+  const t = tabName || sheetTabName;
   rows = (rows || []).filter(r => r > 0).sort((a, b) => a - b);
   if (!rows.length) return null;
   const lo = rows[0], hi = Math.min(rows[rows.length - 1], lo + 199);
@@ -3321,7 +3514,7 @@ async function highlightSheetRows(rows, search) {
     // and the ID lands on the clipboard for Cmd+F + Cmd+V.
     const url = ref.url.split('#')[0] +
       (ref.url.includes('?') ? '&' : '?') +
-      'activeCell=' + encodeURIComponent(sheetTabName + '!A' + lo);
+      'activeCell=' + encodeURIComponent(t + '!A' + lo);
     let opened = false;
     if (sheetSourceTab && /sharepoint\.com/i.test(sheetSourceTab.url || '')) {
       try { await chrome.tabs.update(sheetSourceTab.id, { url, active: true }); }
@@ -3334,7 +3527,7 @@ async function highlightSheetRows(rows, search) {
     if (search) try { await navigator.clipboard.writeText(search); } catch (e) {}
     return { lo, hi, opened, kind: 'sp', search: search || '' };
   }
-  const gid = sheetTabGid();
+  const gid = sheetTabGid(t);
   if (sheetSourceTab && gid !== '') {
     try {
       await chrome.tabs.update(sheetSourceTab.id, {
@@ -3345,41 +3538,45 @@ async function highlightSheetRows(rows, search) {
   }
   const url = 'https://docs.google.com/spreadsheets/d/' + ref.id + '/edit' +
     (gid !== '' ? '#gid=' + gid + '&range=' + lo + ':' + hi : '');
-  const t = await chrome.tabs.create({ url, active: false });
+  const t2 = await chrome.tabs.create({ url, active: false });
   // It becomes the live tab: later highlights navigate it in place.
-  sheetSourceTab = t;
-  if (gid !== '') sheetGids[sheetTabName] = String(gid);
+  sheetSourceTab = t2;
+  if (gid !== '') sheetGids[t] = String(gid);
   return { lo, hi, opened: true, kind: 'google', targeted: gid !== '' };
 }
 async function showOnSheet() {
   if (!(matched || []).length) return false;
   const sel = matched.filter(m => !m.excluded && !m.offSheet && m.row > 0);
   if (!sel.length) return toast('Nothing on the loaded sheet to highlight.');
-  const r = await highlightSheetRows(sel.map(m => m.row), sel[0].id || sel[0].trackingId || '');
+  // Rows are tab-absolute - a mixed-tab set can only highlight one grid,
+  // so the first selected match's tab wins and the rest are reported.
+  const t = matchTab(sel[0]);
+  const rows = sel.filter(m => matchTab(m) === t).map(m => m.row);
+  const r = await highlightSheetRows(rows, sel[0].id || sel[0].trackingId || '', t);
   if (!r) return toast('No tracker workbook behind this match.');
+  const skipped = sel.length - rows.length;
   toast(r.kind === 'sp'
     ? 'Workbook ' + (r.opened ? 'opened in a background tab' : 'focused') + ' at row ' + r.lo +
       (r.search ? ' - Cmd+F then paste jumps to "' + r.search + '"' : '')
-    : 'Highlighting rows ' + r.lo + '-' + r.hi + ' on tab "' + sheetTabName + '"' +
-      (r.opened ? (r.targeted ? ' - opened in a background tab.' : ' - opened; pick the "' + sheetTabName + '" tab there.') : '.'));
+    : 'Highlighting rows ' + r.lo + '-' + r.hi + ' on tab "' + t + '"' +
+      (skipped ? ' (' + skipped + ' row(s) on other tabs skipped)' : '') +
+      (r.opened ? (r.targeted ? ' - opened in a background tab.' : ' - opened; pick the "' + t + '" tab there.') : '.'));
   return true;
 }
 
 async function findCodeTabs(codes) {
   const hits = [];
-  if (!sheetBuf || !sheetTabs.length) return hits;
+  const idx = await ensureSheetIndex();
+  if (!idx) return hits;
   const needles = codes.map(c => normalizeName(c).replace(/[\s:_-]+/g, ''));
-  for (const name of sheetTabs) {
+  for (const [name, e] of idx) {
     if (name === sheetTabName) continue;
-    try {
-      const wb = await readXlsx(sheetBuf, name);
-      wb.rows.forEach((r, i) => {
-        const rowHay = normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '');
-        needles.forEach((n, k) => {
-          if (n && rowHay.includes(n)) hits.push({ tab: name, code: codes[k], row: i + 1 });
-        });
+    e.rows.forEach((r, i) => {
+      const rowHay = normalizeName(r.join(' ')).replace(/[\s:_-]+/g, '');
+      needles.forEach((n, k) => {
+        if (n && rowHay.includes(n)) hits.push({ tab: name, code: codes[k], row: i + 1 });
       });
-    } catch (e) { /* skip unreadable tab */ }
+    });
   }
   return hits.slice(0, 20);
 }
@@ -3389,42 +3586,28 @@ async function findCodeTabs(codes) {
 // findCodeTabs but the predicate is row existence, not a code string.
 async function findRowTabs(rowNums) {
   const hits = [];
-  if (!sheetBuf || !(sheetTabs || []).length) return hits;
+  const idx = await ensureSheetIndex();
+  if (!idx || !rowNums.length) return hits;
   const max = Math.max(...rowNums);
-  for (const name of sheetTabs) {
-    if (name === sheetSource) continue;
-    try {
-      const wb = await readXlsx(sheetBuf, name);
-      if (wb.rows.length >= max && (wb.rows[max - 1] || []).some(c => c !== '' && c != null))
-        hits.push({ tab: name, row: max, code: 'row ' + max });
-    } catch (e) { /* skip unreadable tab */ }
+  for (const [name, e] of idx) {
+    if (name === sheetTabName) continue;
+    if (e.rows.length >= max && (e.rows[max - 1] || []).some(c => c !== '' && c != null))
+      hits.push({ tab: name, row: max, code: 'row ' + max });
   }
   return hits;
 }
 
-// Pending-ingestion signal: rows whose Tracking ID is set but whose
-// ingest-complete / completed-by cells are still empty. A sibling tab
-// holding the new request is usually the tab full of pending rows.
+// Pending-ingestion signal: rows whose fill-back cells are still empty.
+// A sibling tab holding the new request is usually the tab full of
+// pending rows; the index entry carries the count loadSheetRows would
+// compute for that tab.
 async function findPendingTabs() {
   const hits = [];
-  if (!sheetBuf || !(sheetTabs || []).length) return hits;
-  for (const name of sheetTabs) {
-    if (name === sheetSource) continue;
-    try {
-      const wb = await readXlsx(sheetBuf, name);
-      const hi = wb.rows.findIndex(r => /tracking id|spot title/i.test((r || []).join(' ')));
-      if (hi < 0) continue;
-      const hdr = (wb.rows[hi] || []).map(h => String(h || '').toLowerCase());
-      const ci = hdr.findIndex(h => /ingest complete date|completed by/.test(h));
-      const idi = hdr.findIndex(h => /tracking id/.test(h));
-      if (ci < 0 || idi < 0) continue;
-      let pend = 0;
-      for (let i = hi + 1; i < wb.rows.length; i++) {
-        const r = wb.rows[i] || [];
-        if (r[idi] && !r[ci]) pend++;
-      }
-      if (pend) hits.push({ tab: name, code: pend + ' pending', row: pend });
-    } catch (e) { /* skip unreadable tab */ }
+  const idx = await ensureSheetIndex();
+  if (!idx) return hits;
+  for (const [name, e] of idx) {
+    if (name === sheetTabName) continue;
+    if (e.pendingCount) hits.push({ tab: name, code: e.pendingCount + ' pending', row: e.pendingCount });
   }
   return hits;
 }
@@ -5404,7 +5587,7 @@ function ingestPlan() {
         title: clean(m.title),
         fileName: m.fileName || '',
         brand: Number.isInteger(ing.campaignColumn)
-          ? clean(sheet && sheet.allRows[m.row - 1] && sheet.allRows[m.row - 1][ing.campaignColumn])
+          ? clean(matchGridRow(m) && matchGridRow(m)[ing.campaignColumn])
           : clean(ing.brandFixed) || clean(m.brand),
         espn: !!m.espn,
       })),

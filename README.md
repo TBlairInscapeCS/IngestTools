@@ -112,7 +112,11 @@ You can jump to any step; the suggestion is guidance, not a mandatory sequence.
    take priority, followed by the recognized sender domain and fallback clues;
    manual selection wins. Tracker loading and matching are inside this step.
    Check Document, worksheet, workbook ID, and owner before using row references.
-   Known foreign trackers are blocked. For trackerless clients, the tracker is
+   Known foreign trackers are blocked. Multi-tab workbooks are indexed once;
+   Match scores every tab on cited codes, row numbers (doubled at the live
+   bottom edge), name overlap, newest-row recency, and pending rows, then
+   switches to the one holding the request. For trackerless
+   clients, the tracker is
    hidden and **Identify email IDs** uses the email. Override Match source under
    **Advanced request options**. Sheet-first work can start from pending rows.
 2. **Files** — choose a source, **Find files**, review, then explicitly download.

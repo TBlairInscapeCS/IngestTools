@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const clients = fs.readFileSync(__dirname + '/clients.js', 'utf8');
-const names = ['trackerDocId', 'pickTrackerTab', 'docOwner', 'foreignDoc', 'trackerAllowed', 'cleanTrackerReferences', 'trackerDocumentTitle', 'loadSheetDoc', 'refreshSheet', 'rememberSheet'];
+const names = ['trackerDocId', 'pickTrackerTab', 'docOwner', 'foreignDoc', 'trackerAllowed', 'cleanTrackerReferences', 'trackerDocumentTitle', 'clearSheetIndex', 'loadSheetDoc', 'refreshSheet', 'rememberSheet'];
 const functions = names.map(name => {
   const re = new RegExp('(?:async )?function ' + name + '\\(');
   const start = source.search(re);

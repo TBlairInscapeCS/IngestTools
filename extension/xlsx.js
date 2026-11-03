@@ -16,7 +16,10 @@
 
 const XLSX_RNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
-async function readXlsx(buf, sheetName, sheetId) {
+// One zip/dir/XML pass shared by readXlsx (single tab) and readXlsxAll
+// (every tab - cross-tab indexing re-reads the workbook constantly, so
+// the inflate + shared-strings parse happens once per buffer).
+async function xlsxOpen(buf) {
   const bytes = new Uint8Array(buf);
   const view = new DataView(buf);
 
@@ -69,32 +72,12 @@ async function readXlsx(buf, sheetName, sheetId) {
   const wb = xdoc(await read('xl/workbook.xml'));
   const wbrels = relsOf(xdoc(await read('xl/_rels/workbook.xml.rels')));
   const sheetEls = Array.from(wb.getElementsByTagName('sheet'));
-  let target = null, resolvedName = sheetName;
-  // The focused tab's name is what the user is actually looking at - it
-  // wins over the URL gid, which can be absent or stale after tab flips.
-  if (sheetName) {
-    for (const s of sheetEls) {
-      if (s.getAttribute('name') === sheetName) {
-        target = wbrels[rid(s)]; resolvedName = s.getAttribute('name'); break;
-      }
-    }
-  }
-  if (!target && sheetId != null && sheetId !== '') {
-    for (const s of sheetEls) {
-      if (s.getAttribute('sheetId') === String(sheetId)) {
-        target = wbrels[rid(s)]; resolvedName = s.getAttribute('name'); break;
-      }
-    }
-  }
-  if (!target && sheetEls.length) {
-    target = wbrels[rid(sheetEls[0])];
-    resolvedName = sheetEls[0].getAttribute('name');
-  }
-  if (!target) throw new Error('No worksheets found in workbook');
-  const sheetPath = target.startsWith('xl/') ? target : 'xl/' + target.replace(/^\//, '');
-  const relsPath = sheetPath.replace(/([^/]+)$/, '_rels/$1.rels');
+  const sheetPath = el => {
+    const t = wbrels[rid(el)];
+    return t ? (t.startsWith('xl/') ? t : 'xl/' + t.replace(/^\//, '')) : null;
+  };
 
-  // --- shared strings ---
+  // --- shared strings (workbook-wide - parse once) ---
   const shared = [];
   const ssXml = await read('xl/sharedStrings.xml');
   if (ssXml) {
@@ -104,18 +87,6 @@ async function readXlsx(buf, sheetName, sheetId) {
       for (const node of si.getElementsByTagName('t')) t += node.textContent;
       shared.push(t);
     }
-  }
-
-  // --- hyperlink rels for this sheet ---
-  const relsXml = await read(relsPath);
-  const hrels = relsXml ? relsOf(xdoc(relsXml)) : {};
-
-  // --- worksheet ---
-  const sd = xdoc(await read(sheetPath));
-  const linkByRef = {};
-  for (const h of sd.getElementsByTagName('hyperlink')) {
-    const tgt = hrels[rid(h)];
-    if (tgt) linkByRef[h.getAttribute('ref')] = tgt;
   }
 
   const colIdx = ref => {
@@ -136,27 +107,86 @@ async function readXlsx(buf, sheetName, sheetId) {
     return v ? v.textContent : '';
   };
 
-  const rows = [];
-  const links = {};
-  for (const rowEl of sd.getElementsByTagName('row')) {
-    const rNum = +rowEl.getAttribute('r');
-    if (!rNum) continue;
-    while (rows.length < rNum) rows.push([]);
-    for (const c of rowEl.getElementsByTagName('c')) {
-      const ref = c.getAttribute('r');
-      if (!ref) continue;
-      const ci = colIdx(ref);
-      rows[rNum - 1][ci] = cellText(c);
-      if (linkByRef[ref]) links[(rNum - 1) + ',' + ci] = linkByRef[ref];
+  // --- one worksheet -> {rows, links} ---
+  async function parseSheet(path) {
+    const relsPath = path.replace(/([^/]+)$/, '_rels/$1.rels');
+    const relsXml = await read(relsPath);
+    const hrels = relsXml ? relsOf(xdoc(relsXml)) : {};
+    const sd = xdoc(await read(path));
+    const linkByRef = {};
+    for (const h of sd.getElementsByTagName('hyperlink')) {
+      const tgt = hrels[rid(h)];
+      if (tgt) linkByRef[h.getAttribute('ref')] = tgt;
     }
+    const rows = [];
+    const links = {};
+    for (const rowEl of sd.getElementsByTagName('row')) {
+      const rNum = +rowEl.getAttribute('r');
+      if (!rNum) continue;
+      while (rows.length < rNum) rows.push([]);
+      for (const c of rowEl.getElementsByTagName('c')) {
+        const ref = c.getAttribute('r');
+        if (!ref) continue;
+        const ci = colIdx(ref);
+        rows[rNum - 1][ci] = cellText(c);
+        if (linkByRef[ref]) links[(rNum - 1) + ',' + ci] = linkByRef[ref];
+      }
+    }
+    return { rows, links };
   }
 
   const coreXml = await read('docProps/core.xml');
   const core = coreXml && xdoc(coreXml);
   const titleNode = core && core.getElementsByTagNameNS('*', 'title')[0];
-  return { sheetName: resolvedName, rows, links,
+  return { sheetEls, sheetPath, parseSheet,
     documentTitle: titleNode ? titleNode.textContent.trim() : '',
     sheetNames: sheetEls.map(s => s.getAttribute('name')) };
+}
+
+async function readXlsx(buf, sheetName, sheetId) {
+  const z = await xlsxOpen(buf);
+  const { sheetEls, sheetPath } = z;
+  let target = null, resolvedName = sheetName;
+  // The focused tab's name is what the user is actually looking at - it
+  // wins over the URL gid, which can be absent or stale after tab flips.
+  if (sheetName) {
+    for (const s of sheetEls) {
+      if (s.getAttribute('name') === sheetName) {
+        target = sheetPath(s); resolvedName = s.getAttribute('name'); break;
+      }
+    }
+  }
+  if (!target && sheetId != null && sheetId !== '') {
+    for (const s of sheetEls) {
+      if (s.getAttribute('sheetId') === String(sheetId)) {
+        target = sheetPath(s); resolvedName = s.getAttribute('name'); break;
+      }
+    }
+  }
+  if (!target && sheetEls.length) {
+    target = sheetPath(sheetEls[0]);
+    resolvedName = sheetEls[0].getAttribute('name');
+  }
+  if (!target) throw new Error('No worksheets found in workbook');
+  const { rows, links } = await z.parseSheet(target);
+  return { sheetName: resolvedName, rows, links,
+    documentTitle: z.documentTitle, sheetNames: z.sheetNames };
+}
+
+// Every tab in one pass: { sheetNames, sheets: {name: {rows, links}},
+// documentTitle }. Cross-tab indexing/scoring consumes this - a tab that
+// fails to parse is simply absent from `sheets`.
+async function readXlsxAll(buf) {
+  const z = await xlsxOpen(buf);
+  const sheets = {};
+  for (const el of z.sheetEls) {
+    const name = el.getAttribute('name');
+    const path = z.sheetPath(el);
+    if (!name || !path) continue;
+    try { sheets[name] = await z.parseSheet(path); }
+    catch (e) { /* skip unreadable tab */ }
+  }
+  return { sheetNames: z.sheetNames, sheets, documentTitle: z.documentTitle };
 }
 
 // Excel serial date -> 'M/D/YYYY' (serial 25569 = 1970-01-01).

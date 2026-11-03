@@ -163,7 +163,10 @@ eq('refs none', extractRowRefs('please ingest these spots'), []);
 eq('InMarket mixed campaign ranges', extractRowRefs("shared tracker for TJMaxx campaign (1878-1883) and Marshalls campaign (rows\n1884-1904)"), Array.from({ length: 27 }, (_, i) => 1878 + i));
 eq('unrelated parenthesized ranges ignored', extractRowRefs('flight (2025-2026) and sizes (15-30)'), []);
 eq('unmarked old confirmation stops request', extractRowRefs(latestSegment("New Ace creatives (rows 1909-1911)\nThanks!\nAmanda\nHi Amanda,\nI’ve ingested those creatives under these IDs:\nOPE 15s\nold rows 1821-1822")), [1909, 1910, 1911]);
-const planBody = loadText(dir + '/sidepanel.js').split('function ingestPlan() {')[1].split('\n}\n')[0];
+// ingestPlan derefs a match's source row through matchGridRow (tab-aware);
+// the fixture's matches live on the loaded sheet, so stub it to that.
+const planBody = 'const matchGridRow = m => sheet && sheet.allRows[m.row - 1];\n' +
+  loadText(dir + '/sidepanel.js').split('function ingestPlan() {')[1].split('\n}\n')[0];
 const campaignPlan = new Function('client', 'matched', 'sheet', '$', planBody)(
   CLIENTS.find(c => c.id === 'inmarket'),
   [{ row: 3, id: 'Party Fits GM 15', brand: 'JCPenney' }],

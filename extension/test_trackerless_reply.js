@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const engine = fs.readFileSync(__dirname + '/engine.js', 'utf8');
-const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc'];
+const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'sheetIndexEntry', 'ensureSheetIndex', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab'];
 const functions = names.map(name => {
   const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
   assert(start >= 0, name);
@@ -26,6 +26,9 @@ function setup(id = 'comscore') {
     FI_ALIASES: {}, FI_BASE: '', FI_AUTH: '',
     client: { id, ingest: { tickerSuffix: id === 'comscore' ? '_t' : '_ticker' } },
     sheet: null, sheetTabs: [], sheetTabName: '', sheetSource: '',
+    sheetBuf: null, sheetIndex: null, sheetIndexJob: null,
+    sheetSourceTab: null, sheetGids: {},
+    scoreCache: { key: '', scores: null },
     emailEl: { value: 'New Commercials Uploaded\nFile Name\np717587534861_7145.mp4' },
     idsEl: { value: '' }, emailSpots: [], emailPairs: [], detectedAdvertiser: '',
     emailSender: 'Alex', matched: null, matchedFor: '', matchCols: {},
@@ -38,6 +41,14 @@ function setup(id = 'comscore') {
     stamp() {}, dbg() {}, toast() {}, setStage() {}, modStatDone() {}, updateReplyCheck() {},
   });
   vm.runInContext(engine + '\n' + functions, ctx);
+  // Minimal COLS for guessedCols/sheetIndexEntry - mirrors the real
+  // sidepanel COLS (vocab guess + pin), restricted to what tests index.
+  ctx.COLS = [
+    { key: 'id', guess: (h, rows, grp) => ctx.guessField(h, 'trackingId', rows, grp) },
+    { key: 'title', guess: (h, rows, grp) => ctx.guessField(h, 'spotTitle', rows, grp) },
+    { key: 'link', guess: h => ctx.guessColumn(h, /link|url|source/i) },
+    { key: 'date', guess: h => ctx.guessColumn(h, /date|flight|start/i) },
+  ];
   return { ctx, elements, element };
 }
 let passed = 0;
@@ -281,6 +292,73 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     const body = source.slice(start, source.indexOf('\n});', start));
     await vm.runInContext('(async () => {' + body + '\n})()', ctx);
     assert.equal(ctx.matched.length, 1);
+  });
+  await asyncTest('cross-tab index scores row refs, codes, name overlap and pending', async () => {
+    const { ctx } = setup('simulmedia');
+    const hdr = ['Tracking ID', 'Spot Title', 'Request Date', 'Ingest Complete Date'];
+    const fill = (n, prefix, date) => {
+      const rows = [hdr];
+      for (let i = 1; i <= n; i++) rows.push([prefix + String(i).padStart(7, '0') + 'H', 'spot ' + i, date, '']);
+      return rows;
+    };
+    const big = [hdr];
+    for (let i = 1; i <= 13600; i++) big.push(['SWLD' + String(i).padStart(7, '0') + 'H', 'SeaWorld spot ' + i, '10/20/2026', '']);
+    ctx.sheetBuf = new ArrayBuffer(8);
+    ctx.sheetTabs = ['2025 Archive', 'SeaWorld'];
+    ctx.sheetTabName = '2025 Archive';
+    ctx.readXlsxAll = async () => ({ sheetNames: ctx.sheetTabs, sheets: {
+      '2025 Archive': { rows: fill(40, 'OLD', '10/20/2024'), links: {} },
+      'SeaWorld': { rows: big, links: {} },
+    } });
+    ctx.emailEl.value = 'Please ingest the SeaWorld spots on rows 13581-13592';
+    const rowsCited = [13581, 13582, 13583, 13584, 13585, 13586, 13587, 13588, 13589, 13590, 13591, 13592];
+    const scores = await ctx.sheetTabScores([], rowsCited);
+    const ranked = [...scores].sort((a, b) => b.hits - a.hits || b.rowHits - a.rowHits || b.score - a.score);
+    assert.equal(ranked[0].name, 'SeaWorld');
+    assert.equal(ranked[0].rowHits, 12);
+    assert.equal(ranked[0].edgeHits, 12); // cited rows sit at the grid's live bottom edge
+    assert.equal(ranked[0].nameHits, 1); // 'seaworld' is in the request text
+    assert(ranked[0].recency > ranked[1].recency); // 2026 dates beat 2024
+    // A code hit outranks every weaker signal: the 40-pending tab loses
+    // to the one tab holding the cited ID.
+    const scores2 = await ctx.sheetTabScores(['OLD0000001H']);
+    const best2 = [...scores2].sort((a, b) => b.hits - a.hits || b.rowHits - a.rowHits || b.score - a.score)[0];
+    assert.equal(best2.name, '2025 Archive');
+    assert.equal(best2.hits, 1);
+  });
+  await asyncTest('index entry counts only fill-back-empty pending rows', async () => {
+    const { ctx } = setup('simulmedia');
+    const e = ctx.sheetIndexEntry('T', { rows: [
+      ['Tracking ID', 'Spot Title', 'Request Date', 'Ingest Complete Date'],
+      ['AAAA1111111H', 'a', '10/20/2026', ''],
+      ['BBBB2222222H', 'b', '10/20/2026', '10/22/2026'],
+      ['CCCC3333333H', 'c', '10/21/2026', ''],
+    ], links: {} });
+    assert.equal(e.headerRow, 0);
+    assert.equal(e.pendingCount, 2);
+    assert.equal(e.colMap.id, 0);
+  });
+  await asyncTest('match rows deref their own tab, never whatever is loaded', async () => {
+    const { ctx } = setup('simulmedia');
+    ctx.sheet = { allRows: [['wrong A'], ['wrong B']], links: {} };
+    ctx.sheetTabName = 'Loaded';
+    ctx.sheetIndex = new Map([['Sibling', { rows: [['s0'], ['s1'], ['s2'], ['s3'], ['the row']], links: {}, colMap: {} }]]);
+    assert.equal(ctx.matchGridRow({ row: 5, tab: 'Sibling' })[0], 'the row');
+    assert.equal(ctx.matchGridRow({ row: 2, tab: 'Loaded' })[0], 'wrong B');
+    assert.equal(ctx.matchGridRow({ row: 1, tab: 'OtherTracker' }), null);
+    assert.equal(ctx.matchTab({ tab: 'Sibling' }), 'Sibling');
+    assert.equal(ctx.matchTab({}), 'Loaded');
+  });
+  await asyncTest('tab switch loads rows from the index without re-parsing', async () => {
+    const { ctx } = setup('simulmedia');
+    const rows = [['x']];
+    ctx.sheetIndex = new Map([['B', { rows, links: {}, colMap: {} }]]);
+    ctx.sheetTabName = 'A';
+    ctx.readXlsx = async () => { throw new Error('must not re-parse'); };
+    ctx.loadSheetRows = wb => { ctx.loaded = wb; };
+    await ctx.switchSheetTab('B', 'test');
+    assert.equal(ctx.sheetTabName, 'B');
+    assert.equal(ctx.loaded.rows, rows);
   });
   console.log(passed + ' trackerless reply/workflow tests passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
