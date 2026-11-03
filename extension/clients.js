@@ -285,7 +285,7 @@ var CLIENTS = [
     },
     delivery: 'sharepoint',
     note: "SharePoint arrival notice - 'new files added to Documents'. Filenames may or may not appear in the subject; the tracking sheet remains the source of truth for IDs.",
-    ingest: { cidMap: 'kantar', jiraEpic: 'DD-463' },
+    ingest: { cidMap: 'kantar', jiraEpic: 'DD-463', nameTitle: true },  // same SharePoint tracker as 'kantar' - spot title + reporting ID, no brand
   },
   {
     id: 'kantar',
