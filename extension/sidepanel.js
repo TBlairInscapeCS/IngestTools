@@ -527,7 +527,7 @@ function docForBrand(text) {
 // the request's IDs - the wrong-doc check behind remembered loads.
 async function sheetCoversRequest() {
   if (!sheet) return false;
-  const codes = extractCodes(latestSegment(emailEl.value));
+  const codes = requestRefs().codes;
   if (!codes.length) return true;
   const scores = await sheetTabScores(codes);
   if (scores) return scores.some(s => s.hits > 0);
@@ -2668,36 +2668,19 @@ function loadSheetText(text, sourceLabel) {
 
 function loadSheetRows(wb, sourceLabel) {
   const fresh = !sheet;   // first load vs a refresh - only collapse on fresh
-  const hIdx = detectHeaderRow(wb.rows);
+  const model = computeSheetModel(wb);
+  const hIdx = model.headerRow;
   const nLinks = wb.links ? Object.keys(wb.links).length : 0;
-  sheet = { headers: wb.rows[hIdx] || [], allRows: wb.rows, links: wb.links || {}, dataRows: wb.rows.slice(hIdx + 1), groupRow: hIdx > 0 ? wb.rows[hIdx - 1] : null };
+  sheet = { headers: model.headers, allRows: wb.rows, links: wb.links || {}, dataRows: model.dataRows, groupRow: model.groupRow };
   $('headerRow').value = hIdx + 1;
   buildColumnDropdowns();
   // Pending queue: fill-back columns empty on a row = not yet ingested.
-  // Skip fully-empty rows (xlsx exports pad to the used range - the USN
-  // tracker ships 531k blank rows under 836 real ones). Matching itself
-  // stays on unfiltered rows so absolute ROW refs still line up.
-  const fbCols = fillBackColumns(sheet.headers, sheet.groupRow);
-  const liveRows = sheet.dataRows.filter(r => r.some(c => {
-    const v = String(c || '').trim();
-    return v && !/^[_\-~.]+$/.test(v);  // '___' placeholder cells aren't data
-  }));
-  pendingIdxArr = fbCols.length ? pendingRowIndices(liveRows, fbCols) : [];
-  // Pending is a live queue, not all-time unclaimed: trackers carry
-  // hundreds of never-filled stale rows (350 "pending" vs 118 real).
-  // Keep unclaimed rows dated within ~2 weeks of the NEWEST unclaimed
-  // request date; undated rows survive only when nothing unclaimed is
-  // dated at all.
-  const unclaimedAll = pendingIdxArr.length;
-  const dcPend = parseInt($('colDate').value, 10);
-  if (pendingIdxArr.length > 1 && dcPend >= 0) {
-    const dated = pendingIdxArr.map(i => ({ i, ms: cellDateMs(liveRows[i][dcPend]) }))
-      .filter(x => !isNaN(x.ms));
-    if (dated.length) {
-      const cutoff = Math.max.apply(null, dated.map(x => x.ms)) - 14 * 864e5;
-      pendingIdxArr = dated.filter(x => x.ms >= cutoff).map(x => x.i);
-    }
-  }
+  // Matching itself stays on unfiltered rows so absolute ROW refs still
+  // line up. The user's Date dropdown pick wins over the guessed column.
+  const liveRows = model.liveRows;
+  const allPend = model.fbCols.length ? pendingRowIndices(liveRows, model.fbCols) : [];
+  const unclaimedAll = allPend.length;
+  pendingIdxArr = pendingFor(model, parseInt($('colDate').value, 10), allPend);
   pendingRows = pendingIdxArr.map(i => liveRows[i]);
   modStatDone('stSheet', liveRows.length + ' rows · ' + pendingRows.length + ' pending');
   sheetSource = sourceLabel;
@@ -2800,6 +2783,22 @@ function currentCols() {
   return c;
 }
 
+// The request's own references - newest-segment text, cited codes, cited
+// row numbers - cached per email text. doMatch, the tab scorer, the guess
+// picker, the missed-code note and the remembered-load check all slice the
+// same string; one cache keeps them consistent and cheap.
+let reqRefCache = { src: null, seg: '', codes: [], rowRefs: [] };
+function requestRefs() {
+  const src = emailEl.value;
+  if (reqRefCache.src !== src) {
+    const seg = latestSegment(src);
+    reqRefCache = { src, seg, codes: extractCodes(seg),
+      rowRefs: [...new Set(extractRowRefs(seg)
+        .concat((emailSpots || []).map(s => s.row).filter(Boolean)))] };
+  }
+  return reqRefCache;
+}
+
 // ---------- Section 3: match & download ----------
 
 // The whole match step as a callable stage: returns true when `matched`
@@ -2832,12 +2831,11 @@ async function doMatch() {
   // Score the email's own cited codes only: idsEl is repopulated from the
   // previous match's IDs, and those stale codes can out-score the freshly
   // grabbed tab and drag the sheet back to the old request's tab.
-  const seg = latestSegment(emailEl.value);
-  const emailCodes = extractCodes(seg);
+  const refs = requestRefs();
+  const emailCodes = refs.codes;
   const reqCodes = [...new Set(emailCodes.length ? emailCodes
     : idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
-  const reqRows = [...new Set(
-    extractRowRefs(seg).concat((emailSpots || []).map(s => s.row).filter(Boolean)))];
+  const reqRows = refs.rowRefs;
   const scores = await sheetTabScores(reqCodes, reqRows);
   if (scores) {
     const cur = scores.find(s => s.name === sheetTabName) ||
@@ -2906,7 +2904,7 @@ async function doMatch() {
 
   // AMC-style spot blocks carry bare sheet row numbers - feed them as row
   // refs (guarded: only numbers inside the sheet's actual row range).
-  let matchText = latestSegment(emailEl.value);
+  let matchText = refs.seg;
   const spotRows = (emailSpots || []).map(s => s.row)
     .filter(n => n > headerRow && n <= sheet.allRows.length);
   if (spotRows.length) matchText += '\nrows ' + spotRows.join(', ');
@@ -3056,7 +3054,7 @@ function ensureMatchRows() {
 // Only merges while the email is the one those rows were matched against;
 // a new request resets via matchedFor.
 function mergeMatches(fresh) {
-  if (extractRowRefs(latestSegment(emailEl.value)).length) return fresh;
+  if (requestRefs().rowRefs.length) return fresh;
   if (!matched || !matched.length || matchedFor !== emailEl.value) return fresh;
   const key = m => normalizeName(m.id || m.trackingId || ('row' + m.row)).replace(/[\s:_-]+/g, '');
   const freshKeys = new Set(fresh.map(key));
@@ -3200,7 +3198,7 @@ function presentMatches(quiet) {
   ).join('');
   // Codes the email cited but no matched row carries: likely on another
   // tracker tab - surface them instead of silently dropping.
-  const cited = extractCodes(latestSegment(emailEl.value));
+  const cited = requestRefs().codes;
   const missed = cited.filter(c => {
     const n = normalizeName(c).replace(/[\s:_-]+/g, '');
     return !matched.some(m =>
@@ -3287,6 +3285,47 @@ function presentMatches(quiet) {
     (nExcl ? ', ' + nExcl + ' excluded' : '') +
     (nCarried ? ', ' + nCarried + ' carried from earlier sheet(s)' : '') +
     (newCount && newCount !== sel.length ? ' — note: email said ' + newCount + ' new' : '') + '.');
+  checkAlreadyIngested();
+}
+
+// Already-ingested pre-check: once a match set is committed, look the
+// requested reporting IDs up in the realm's recent records. Files that
+// were ingested before get flagged INGESTED (same chip as fill-back
+// columns) instead of silently re-running. Fire-and-forget - the key
+// guard stops refires while the set hasn't changed, and the realm list
+// comes from the playbook so it never prompts.
+let alreadyCheckedKey = '';
+async function checkAlreadyIngested() {
+  const sel = selectedMatches().filter(m => !m.ingested && (m.trackingId || m.id));
+  const realms = (client && client.ingest && client.ingest.cidMap) ? ingestRealms() : [];
+  if (!sel.length || !realms.length) return;
+  const key = workflowContext() + '|' + sel.map(m => m.trackingId || m.id).join(',');
+  if (key === alreadyCheckedKey) return;
+  alreadyCheckedKey = key;
+  const context = workflowContext();
+  try {
+    const want = new Map(sel.map(m => [normalizeName(m.trackingId || m.id).replace(/ /g, ''), m]));
+    const found = new Set();
+    for (const realm of realms) {
+      const all = await fetchRealmRecords(realm, 2);
+      if (context !== workflowContext()) return;
+      all.forEach(r => {
+        const k = normalizeName(r.reportingId || '').replace(/ /g, '');
+        if (want.has(k)) found.add(k);
+      });
+    }
+    if (context !== workflowContext() || !found.size) return;
+    let n = 0;
+    sel.forEach(m => {
+      const k = normalizeName(m.trackingId || m.id).replace(/ /g, '');
+      if (found.has(k) && !m.ingested) { m.ingested = true; n++; }
+    });
+    if (!n) return;
+    presentMatches(true);
+    toast(n + ' matched ID(s) already exist in ' + realms.join(' + ') +
+      ' records - flagged INGESTED, skip them or confirm a re-ingest.');
+    dbg('already-ingested pre-check', { found: [...found], realms });
+  } catch (e) { dbg('already-ingested check failed', String(e)); }
 }
 
 // The email named no IDs or rows - show the pending-row guesses with the
@@ -3324,7 +3363,11 @@ function guessedCols(headers, dataRows, groupRow) {
   return c;
 }
 
-function sheetIndexEntry(name, wb) {
+// The grid model every tab consumer needs - detected header row, group
+// (merged) row, live data rows, fill-back columns and the guessed column
+// map. loadSheetRows and the cross-tab index share it so their header/
+// pending logic can't drift.
+function computeSheetModel(wb) {
   const headerRow = detectHeaderRow(wb.rows);
   const headers = wb.rows[headerRow] || [];
   const groupRow = headerRow > 0 ? wb.rows[headerRow - 1] : null;
@@ -3333,27 +3376,39 @@ function sheetIndexEntry(name, wb) {
     const v = String(c || '').trim();
     return v && !/^[_\-~.]+$/.test(v);  // '___' placeholder cells aren't data
   }));
-  const colMap = guessedCols(headers, dataRows, groupRow);
-  const fbCols = fillBackColumns(headers, groupRow);
-  let pendingIdx = fbCols.length ? pendingRowIndices(liveRows, fbCols) : [];
-  // Same ~2-week recency window loadSheetRows applies to the pending queue
-  // (using this tab's guessed date column, not the user's dropdown pick).
-  if (pendingIdx.length > 1 && colMap.date >= 0) {
-    const dated = pendingIdx.map(i => ({ i, ms: cellDateMs(liveRows[i][colMap.date]) }))
+  return { headers, headerRow, groupRow, dataRows, liveRows,
+    colMap: guessedCols(headers, dataRows, groupRow),
+    fbCols: fillBackColumns(headers, groupRow) };
+}
+
+// Pending queue: fill-back columns all empty, kept to unclaimed rows
+// dated within ~2 weeks of the newest unclaimed request date (trackers
+// carry hundreds of never-filled stale rows). `base` lets the caller
+// reuse an already-computed unfiltered index list.
+function pendingFor(model, dateCol, base) {
+  let idx = base || (model.fbCols.length ? pendingRowIndices(model.liveRows, model.fbCols) : []);
+  if (idx.length > 1 && dateCol >= 0) {
+    const dated = idx.map(i => ({ i, ms: cellDateMs(model.liveRows[i][dateCol]) }))
       .filter(x => !isNaN(x.ms));
     if (dated.length) {
       const cutoff = Math.max.apply(null, dated.map(x => x.ms)) - 14 * 864e5;
-      pendingIdx = dated.filter(x => x.ms >= cutoff).map(x => x.i);
+      idx = dated.filter(x => x.ms >= cutoff).map(x => x.i);
     }
   }
+  return idx;
+}
+
+function sheetIndexEntry(name, wb) {
+  const model = computeSheetModel(wb);
+  const pendingIdx = pendingFor(model, model.colMap.date);
   // "Last edited": the newest date in the tab's date column. Trackers fill
   // top-to-bottom, so the newest date marks the area where fresh request
   // rows land - a tab whose newest row is months old is stale no matter
   // how many rows it holds. liveEnd is that bottom edge as a row number.
   let newestMs = NaN;
-  if (colMap.date >= 0) {
-    for (const r of liveRows) {
-      const ms = cellDateMs(r[colMap.date]);
+  if (model.colMap.date >= 0) {
+    for (const r of model.liveRows) {
+      const ms = cellDateMs(r[model.colMap.date]);
       if (!isNaN(ms) && (isNaN(newestMs) || ms > newestMs)) newestMs = ms;
     }
   }
@@ -3361,9 +3416,8 @@ function sheetIndexEntry(name, wb) {
   for (let i = wb.rows.length - 1; i >= 0; i--) {
     if ((wb.rows[i] || []).some(c => String(c || '').trim())) { liveEnd = i + 1; break; }
   }
-  return { name, rows: wb.rows, links: wb.links || {}, headers, headerRow,
-    groupRow, dataRows, liveRows, colMap, pendingCount: pendingIdx.length,
-    newestMs, liveEnd, hay: null };
+  return { name, rows: wb.rows, links: wb.links || {}, ...model,
+    pendingCount: pendingIdx.length, newestMs, liveEnd, hay: null };
 }
 
 async function ensureSheetIndex() {
@@ -3433,7 +3487,7 @@ async function sheetTabScores(codes, rowNums) {
   const key = needles.join(',') + '|' + rows.join(',');
   if (scoreCache.key === key && scoreCache.scores) return scoreCache.scores;
   const reqHay = normalizeName(
-    [client && client.name, detectedAdvertiser, latestSegment(emailEl.value)].join(' ')
+    [client && client.name, detectedAdvertiser, requestRefs().seg].join(' ')
   ).toLowerCase();
   // Layout words in tab names carry no brand signal - 'Master Tracker'
   // overlapping nothing is fine, overlapping the word 'tracker' is not.
@@ -3654,7 +3708,7 @@ async function findPendingTabs() {
 async function presentGuessPicker(cands) {
   // Extracted codes that matched no row mean this tab doesn't hold the
   // request - the tracker doc has multiple tabs; flag it loudly.
-  const missingCodes = extractCodes(latestSegment(emailEl.value));
+  const missingCodes = requestRefs().codes;
   const tabHits = missingCodes.length ? await findCodeTabs(missingCodes) : [];
   if (tabHits.length) dbg('code found on other tab', tabHits);
   const byTab = {};

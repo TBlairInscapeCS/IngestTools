@@ -46,11 +46,11 @@ syntax and any changed setup-check behavior before finishing.
   (14 tests; executes production selection, loader, storage cleanup, and Run all
   code against browser/network mocks, including asynchronous request changes).
 - Trackerless reply integration tests: `cd extension && node test_trackerless_reply.js`
-  (28 tests; executes Jira sign-off exclusion, Yangaroo link attachment,
+  (29 tests; executes Jira sign-off exclusion, Yangaroo link attachment,
   dual-silo reply (per-file commercial cid per realm),
   row-scoped rematching, email matching, reply generation, Comcast capture, local
-  discovery, cross-tab index scoring/deref/tab-switch, and resumed verification
-  together, including ComScore/SimulMedia logs).
+  discovery, cross-tab index scoring/deref/tab-switch, already-ingested records
+  pre-check, and resumed verification together, including ComScore/SimulMedia logs).
 - Local media discovery tests: `cd local && python3 -m unittest test_local_discovery.py`
   (9 tests; fixed-root request-ID matching, duplicates, symlinks, changed files,
   batch separation, and serving without a manifest).

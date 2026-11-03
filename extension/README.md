@@ -206,7 +206,9 @@ to the newest dated unclaimed row. Review this set before finding files.
 ## Request: review requested IDs
 
 - **Match** pairs explicit row references, IDs, filenames, and fallback clues
-  with the loaded sheet. Review IDs, titles, links, and ticker flags.
+  with the loaded sheet. Review IDs, titles, links, and ticker flags. A
+  background records check then flags matched IDs that already exist in the
+  realm (INGESTED chip) — skip them or confirm an intentional re-ingest.
 - In email-only mode the button becomes **Identify email IDs**. Email-derived
   rows feed file discovery, portal fills, Jira, and replies without a tracker.
 - Exclude rows that do not belong; downstream stages skip excluded rows.

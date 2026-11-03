@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const engine = fs.readFileSync(__dirname + '/engine.js', 'utf8');
-const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab'];
+const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'computeSheetModel', 'pendingFor', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab', 'requestRefs', 'checkAlreadyIngested'];
 const functions = names.map(name => {
   const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
   assert(start >= 0, name);
@@ -29,6 +29,8 @@ function setup(id = 'comscore') {
     sheetBuf: null, sheetIndex: null, sheetIndexJob: null,
     sheetSourceTab: null, sheetGids: {},
     scoreCache: { key: '', scores: null },
+    reqRefCache: { src: null, seg: '', codes: [], rowRefs: [] },
+    alreadyCheckedKey: '',
     emailEl: { value: 'New Commercials Uploaded\nFile Name\np717587534861_7145.mp4' },
     idsEl: { value: '' }, emailSpots: [], emailPairs: [], detectedAdvertiser: '',
     emailSender: 'Alex', matched: null, matchedFor: '', matchCols: {},
@@ -359,6 +361,19 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     await ctx.switchSheetTab('B', 'test');
     assert.equal(ctx.sheetTabName, 'B');
     assert.equal(ctx.loaded.rows, rows);
+  });
+  await asyncTest('records pre-check flags already-ingested matched IDs', async () => {
+    const { ctx } = setup('simulmedia');
+    ctx.client = { id: 'simulmedia', ingest: { cidMap: 'simulmedia' } };
+    ctx.matched = [
+      { id: 'QYPS0437000H', trackingId: 'QYPS0437000H', row: 0, matchType: 'EMAIL' },
+      { id: 'QYPS0438000H', trackingId: 'QYPS0438000H', row: 0, matchType: 'EMAIL' },
+    ];
+    ctx.emailEl.value = 'Please ingest QYPS0437000H and QYPS0438000H';
+    ctx.fetchRealmRecords = async () => [{ reportingId: 'QYPS0437000H' }];
+    await ctx.checkAlreadyIngested();
+    assert.equal(ctx.matched[0].ingested, true);
+    assert(!ctx.matched[1].ingested);
   });
   console.log(passed + ' trackerless reply/workflow tests passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
