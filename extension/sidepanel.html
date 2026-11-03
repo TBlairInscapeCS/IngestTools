@@ -27,39 +27,78 @@
             position: sticky; top: 0; z-index: 8; margin: -10px -10px 8px; padding: 9px 10px;
             background: var(--bg); border-bottom: 1px solid var(--border); }
 
-  /* --- Sections: numbered accordion cards, chevron at right --- */
-  details { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px;
-            margin-bottom: 8px; padding: 7px 10px; background: var(--surface); }
+  /* --- Sections: accordion cards; the theme color wraps the whole card
+     border (not just a left bar) and tints the surface so it reads as one
+     continuous unit. Same bevel language as the 3D buttons. --- */
+  details { border: 1px solid var(--border); border-radius: 8px;
+            margin-bottom: 8px; padding: 7px 10px; background: var(--surface);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 3px rgba(0,0,0,.28); }
   summary { font-size: 11px; font-weight: 700; letter-spacing: .02em; cursor: pointer;
             display: flex; align-items: center; gap: 6px; list-style: none; user-select: none; }
   summary::-webkit-details-marker { display: none; }
-  details > summary::after { content: '▸'; margin-left: auto; color: var(--text-faint);
-    font-size: 10px; transition: transform .12s ease; }
-  details[open] > summary::after { transform: rotate(90deg); }
-  .s1 { border-left-color: #4f9cf9; } .s1 > summary { color: #7fb7fb; }
-  .s2 { border-left-color: #3fbf7f; } .s2 > summary { color: #6ed3a2; }
-  .s3 { border-left-color: #a06cd5; } .s3 > summary { color: #c09ae8; }
-  .s4 { border-left-color: #e8a13d; } .s4 > summary { color: #f0bc6e; }
-  .s5 { border-left-color: #e06c9a; } .s5 > summary { color: #ec9fbe; }
-  .s6 { border-left-color: #5cc8c8; } .s6 > summary { color: #8fd8d8; }
+  /* Disclosure arrows sit right after the field name, extension-wide:
+     ▸ (right) = collapsed, ▾ (down) = expanded. */
+  details > summary::after { content: '▸'; margin-left: 4px; color: var(--text-faint);
+    font-size: 10px; }
+  details[open] > summary::after { content: '▾'; }
+  .s1 { border-color: color-mix(in srgb, var(--border) 55%, #4f9cf9);
+        background: color-mix(in srgb, var(--surface) 94%, #4f9cf9); }
+  .s1 > summary { color: #7fb7fb; }
+  .s2 { border-color: color-mix(in srgb, var(--border) 55%, #3fbf7f);
+        background: color-mix(in srgb, var(--surface) 94%, #3fbf7f); }
+  .s2 > summary { color: #6ed3a2; }
+  .s3 { border-color: color-mix(in srgb, var(--border) 55%, #a06cd5);
+        background: color-mix(in srgb, var(--surface) 94%, #a06cd5); }
+  .s3 > summary { color: #c09ae8; }
+  .s4 { border-color: color-mix(in srgb, var(--border) 55%, #e8a13d);
+        background: color-mix(in srgb, var(--surface) 94%, #e8a13d); }
+  .s4 > summary { color: #f0bc6e; }
+  .s5 { border-color: color-mix(in srgb, var(--border) 55%, #e06c9a);
+        background: color-mix(in srgb, var(--surface) 94%, #e06c9a); }
+  .s5 > summary { color: #ec9fbe; }
+  .s6 { border-color: color-mix(in srgb, var(--border) 55%, #5cc8c8);
+        background: color-mix(in srgb, var(--surface) 94%, #5cc8c8); }
+  .s6 > summary { color: #8fd8d8; }
   .sub { font-size: 10px; color: var(--text-dim); margin-top: 4px; line-height: 1.35; }
   .subhd { font-size: 9px; font-weight: 700; color: var(--text-faint); letter-spacing: .07em;
            text-transform: uppercase; margin-top: 10px; }
   .subhd:first-of-type { margin-top: 4px; }
 
-  /* --- Controls: one height, quiet secondary, single accent --- */
+  /* --- Controls: one height, quiet secondary, single accent ---
+     Buttons get a subtle 3D bevel: light top edge (inset highlight),
+     darker lower half (gradient), and a soft drop shadow; :active presses in. */
   .row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
   button { display: inline-flex; align-items: center; gap: 5px; height: 23px; padding: 0 9px;
            font-family: inherit; font-size: 11px; font-weight: 500; line-height: 1;
            border: 1px solid var(--border-hi); border-radius: 5px; white-space: nowrap;
-           background: var(--surface-2); color: var(--text); cursor: pointer; }
-  button:hover { background: var(--surface-3); border-color: #4a5263; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
-  button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+           color: var(--text); cursor: pointer;
+           background: linear-gradient(180deg, #2e3440 0%, #252a34 55%, #1f232c 100%);
+           box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 1px 3px rgba(0,0,0,.35); }
+  button:hover { background: linear-gradient(180deg, #363d4b 0%, #2a303b 55%, #232730 100%);
+                 border-color: #4a5263; }
+  button:active { transform: translateY(1px);
+                  box-shadow: inset 0 2px 3px rgba(0,0,0,.35), 0 0 1px rgba(0,0,0,.3); }
+  button:disabled { opacity: .55; cursor: default; transform: none; }
+  button.primary { color: #fff; border-color: #2f66c9;
+    background: linear-gradient(180deg, #6aa3ff 0%, #4f8ff7 50%, #3d78e0 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 1px 3px rgba(0,0,0,.45); }
+  button.primary:hover { border-color: #4a86ea;
+    background: linear-gradient(180deg, #7db1ff 0%, #5b9cff 50%, #4a86ea 100%); }
+  button.primary:active { transform: translateY(1px);
+    box-shadow: inset 0 2px 3px rgba(0,0,0,.3); }
+  button.ghost { background: transparent; border-color: transparent;
+                 box-shadow: none; color: var(--text-dim); }
   button.ghost:hover { background: var(--surface-2); color: var(--text); }
-  .s4 button.primary { background: #c07d1e; border-color: #c07d1e; }
-  .s4 button.primary:hover { background: #d38e2b; }
+  button.ghost:active { transform: none; }
+  .s4 button.primary { border-color: #8f5f13;
+    background: linear-gradient(180deg, #d99a36 0%, #c07d1e 55%, #a56b16 100%); }
+  .s4 button.primary:hover { background: linear-gradient(180deg, #e8ab4a 0%, #cf8c28 55%, #b37719 100%); }
+  .s5 button.primary { border-color: #9e3f6b;
+    background: linear-gradient(180deg, #e0769f 0%, #c75c88 55%, #a64a72 100%); }
+  .s5 button.primary:hover { background: linear-gradient(180deg, #ea8bb0 0%, #d56d97 55%, #b5577f 100%); }
+  .s6 button.primary { border-color: #2f7a7a;
+    background: linear-gradient(180deg, #4ec0c0 0%, #3aa8a8 55%, #2e8f8f 100%); }
+  .s6 button.primary:hover { background: linear-gradient(180deg, #63cece 0%, #47b8b8 55%, #37a0a0 100%); }
   select, input[type=text], input[type=password], input[type=date] {
     font-family: inherit; font-size: 11px; height: 23px; padding: 0 6px;
     background: #12151b; color: var(--text); border: 1px solid #333a46; border-radius: 5px; }
@@ -93,10 +132,13 @@
   details.mini > summary { display: inline-flex; align-items: center; gap: 4px;
     height: 23px; padding: 0 9px; font-family: inherit; font-size: 10px; font-weight: 500;
     letter-spacing: .02em; border: 1px solid var(--border-hi); border-radius: 5px;
-    white-space: nowrap; background: var(--surface-2); color: var(--text-dim);
-    text-transform: none; }
-  details.mini > summary::after { content: '▾'; margin-left: 0; font-size: 8px; color: var(--text-faint); }
-  details.mini[open] > summary::after { content: '▴'; }
+    white-space: nowrap; color: var(--text-dim); text-transform: none;
+    background: linear-gradient(180deg, #2e3440 0%, #252a34 55%, #1f232c 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 1px 3px rgba(0,0,0,.35); }
+  details.mini > summary:active { transform: translateY(1px);
+    box-shadow: inset 0 2px 3px rgba(0,0,0,.35); }
+  details.mini > summary::after { content: '▸'; margin-left: 0; font-size: 8px; color: var(--text-faint); }
+  details.mini[open] > summary::after { content: '▾'; }
   details.mini > summary:hover { background: var(--surface-3); color: var(--text); }
   /* An open toggle drops its content onto its own line instead of
      squeezing it into the button row. */
@@ -208,33 +250,146 @@
   button:focus-visible, summary:focus-visible, a:focus-visible,
   select:focus-visible, input:focus-visible, textarea:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 1px; }
-  #settingsGear { margin-left: auto; }
-  #settingsPanel { position: fixed; top: 44px; right: 8px; z-index: 50; width: 224px;
-    max-height: 78vh; overflow-y: auto;
-    background: var(--surface-2); border: 1px solid var(--border-hi); border-radius: 8px; padding: 10px 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,.5); font-size: 11px; }
-  #settingsPanel::-webkit-scrollbar { width: 8px; }
-  #settingsPanel::-webkit-scrollbar-thumb { background: #333a46; border-radius: 4px; }
-  #settingsPanel .opt { display: block; margin: 6px 0; color: #cfd4dc; font-weight: 400; cursor: pointer; }
-  #settingsPanel .opt input { margin-right: 6px; vertical-align: -1px; }
+  #settingsGear { margin-left: auto; font-size: 15px; height: 26px; padding: 0 10px;
+    line-height: 1; color: var(--accent-hi); }
+  #settingsGear[aria-expanded="true"] { color: #fff; border-color: var(--accent); }
+  /* Section icons cue what each block does at a glance - same dingbat
+     vocabulary as the buttons (✉ request, ▤ tracker, ⇄ match …). */
+  details > summary::before { font-size: 13px; opacity: .9; flex: none; }
+  .s1 > summary::before { content: '📧'; }
+  .s2 > summary::before { content: '▤'; }
+  .s3 > summary::before { content: '⇄'; }
+  .s4 > summary::before { content: '⬇'; }
+  .s5 > summary::before { content: '⬆'; }
+  .s6 > summary::before { content: '✔'; }
+  /* Settings sections reuse the s-color classes but get their own icons. */
+  #journeySettings .s1 > summary::before { content: '⚙'; }
+  #journeySettings .s2 > summary::before { content: '✎'; }
+  #journeySettings .s3 > summary::before { content: '☰'; }
+  #journeySettings .s4 > summary::before { content: '⇆'; }
+  /* Tab icons echo the section glyphs so the workflow reads top-down. */
+  #journeyNav button::before { margin-right: 5px; font-size: 12.5px; opacity: .95; }
+  #journeyNav .tab-request::before { content: '📧'; }
+  #journeyNav .tab-files::before { content: '⬇'; }
+  #journeyNav .tab-ingest::before { content: '⬆'; }
+  #journeyNav .tab-confirm::before { content: '✔'; }
+  #journeySettings { --page: #9aa1ae; --page-bg: #191d24; }
+  #journeySettings .opt { display: block; margin: 6px 0; color: #cfd4dc; font-weight: 400; cursor: pointer; }
+  #journeySettings .opt input { margin-right: 6px; vertical-align: -1px; }
+  #journeySettings label:not(.opt) { display: block; font-size: 10px; color: var(--text-dim); margin: 5px 0; }
+  #journeySettings label:not(.opt) input[type=text] { display: block; width: 97%; margin-top: 2px; }
+  .journey-panel[hidden], #sec2[hidden], #jobStop[hidden] { display: none !important; }
+  #jobSummary { flex-basis: 100%; min-width: 0; border-top: 1px solid var(--border); padding-top: 7px; }
+  #jobIdentity { font-weight: 600; overflow-wrap: anywhere; }
+  #jobCounts { display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--text-dim); font-size: 11px; margin: 4px 0; }
+  #jobCounts strong { color: var(--text); }
+  #jobNext { width: 100%; height: auto; min-height: 34px; text-align: left; padding: 8px 10px; white-space: normal; line-height: 1.3; }
+  #jobStop { margin-top: 4px; border-color: #b57530; color: #efba78; }
+  #jobHint, #operationNotice { color: var(--text-dim); font-size: 11px; margin-top: 4px; overflow-wrap: anywhere; }
+  #operationNotice:empty { display: none; }
+  #operationNotice.error { color: #ec9a9a; }
+  .topbar:has(#journeyNav) { padding-bottom: 0; border-bottom: 0; margin-bottom: 0; }
+  #journeyNav { display: flex; align-items: flex-end; width: 100%; margin: 8px 0 0; padding-left: 2px; }
+  .journey-panel:not([hidden]) ~ .journey-panel:not([hidden]) { margin-top: 12px; border-radius: 8px; }
+  #journeyNav button { --tab: #4f9cf9; --tab-bg: #172235; flex: 1 1 0; min-width: 0; height: auto; min-height: 30px;
+    margin-right: -7px; padding: 7px 14px 6px 10px; justify-content: center; position: relative;
+    font-size: 11px; font-weight: 700; color: var(--tab);
+    border: 1px solid color-mix(in srgb, var(--border-hi) 55%, var(--tab)); border-top: 2px solid var(--tab);
+    border-bottom: 0; border-radius: 10px 10px 0 0;
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--tab) 12%, var(--surface)) 0%,
+      var(--surface) 60%, color-mix(in srgb, var(--surface) 90%, black) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 1px 3px rgba(0,0,0,.35); }
+  #journeyNav button:last-child { margin-right: 0; }
+  #journeyNav button:hover { color: var(--tab);
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--tab) 20%, var(--tab-bg)) 0%, var(--tab-bg) 100%); }
+  #journeyNav button[aria-pressed="true"] { z-index: 3; min-height: 34px; color: #fff;
+    border-color: var(--tab);
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--tab) 28%, var(--tab-bg)) 0%, var(--tab-bg) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 -3px 8px rgba(0,0,0,.4);
+    margin-bottom: -1px; padding-bottom: 7px; }
+  #journeyNav button:not(:last-child)::after { content: '›'; position: absolute; right: 9px; top: 50%;
+    transform: translateY(-50%); color: var(--tab); opacity: .55; font-size: 12px; }
+  .tab-request { --tab: #4f9cf9 !important; --tab-bg: #16243a !important; }
+  .tab-files { --tab: #e8a13d !important; --tab-bg: #34260f !important; }
+  .tab-ingest { --tab: #e06c9a !important; --tab-bg: #351829 !important; }
+  .tab-confirm { --tab: #5cc8c8 !important; --tab-bg: #12302f !important; }
+  .journey-panel { --page: #4f9cf9; --page-bg: #16243a; position: relative; z-index: 2; margin: 0 0 8px;
+    padding: 9px 9px 2px; border: 1px solid var(--page); border-radius: 0 0 8px 8px;
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--page-bg) 88%, white) 0%, var(--page-bg) 22%, var(--page-bg) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 1px 3px rgba(0,0,0,.3); }
+  #journeyFiles { --page: #e8a13d; --page-bg: #34260f; }
+  #journeyIngest { --page: #e06c9a; --page-bg: #351829; }
+  #journeyConfirm { --page: #5cc8c8; --page-bg: #12302f; }
+  .journey-panel > h2 { font-size: 13px; font-weight: 700; color: var(--page); margin: 2px 0 7px; }
+  .journey-panel > details { border-color: color-mix(in srgb, var(--border) 50%, var(--page));
+    background: color-mix(in srgb, var(--surface) 90%, var(--page-bg)); }
+  .journey-panel > details > summary { color: var(--page); }
+  .journey-panel button.primary { border-color: color-mix(in srgb, var(--page) 70%, black);
+    color: #10141a;
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--page) 82%, white) 0%,
+      var(--page) 55%,
+      color-mix(in srgb, var(--page) 82%, black) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 1px 3px rgba(0,0,0,.4); }
+  .journey-panel button.primary:hover {
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--page) 90%, white) 0%,
+      color-mix(in srgb, var(--page) 92%, white) 55%, var(--page) 100%); }
+  .manual-paths { margin: 8px 0; }
+  .client-guidance { margin-bottom: 8px; }
   [data-opt].opt-off { display: none !important; }
   body.opt-off-hints .ib, body.opt-off-hints .bubble { display: none !important; }
+
+  /* --- Responsive: skinny side panel vs wide browser tab ---
+     Skinny: tighter padding, tab labels may shrink to fit; rows already wrap.
+     Wide: cap line length so tables/text stay scannable, center the column. */
+  @media (max-width: 340px) {
+    body { padding: 8px; }
+    .topbar { margin: -8px -8px 8px; padding: 8px 8px 0; }
+    button { padding: 0 7px; font-size: 10.5px; }
+    #journeyNav { padding-left: 0; }
+    #journeyNav button { padding: 7px 9px 6px 6px; font-size: 10px; border-radius: 8px 8px 0 0; }
+    #journeyNav button:not(:last-child)::after { right: 4px; font-size: 10px; }
+    details { padding: 6px 7px; }
+  }
+  @media (min-width: 1100px) {
+    body { max-width: 1040px; margin: 0 auto; }
+    .scrollbox { max-height: 46vh; }
+  }
 </style>
 </head>
 <body>
 
 <div class="topbar">
   <h1>Ingest Streamlined</h1>
-  <button id="runAll" class="primary" title="Steps 1-4 end to end: read the request, load its tracker, match rows, download the media">▶ Run all</button>
+  <button id="runAll" title="Read the request, identify IDs, and find files unless client rules skip discovery. Never downloads media automatically.">Run all</button>
   <span class="ib" data-bubble="bRun">?</span>
   <label class="col">Client <select id="clientSel"></select></label>
   <a href="#" id="msStatus" class="hidden" title="" style="color:#ec9a9a;font-weight:700">inbox offline - click to sign in</a>
-  <button id="clearAll" class="ghost" title="Wipe the email, tracker, match, downloads and drafts - sign-ins and settings stay">✕ Clear</button>
-  <button id="settingsGear" title="Choose which tools show" aria-expanded="false">⚙</button>
+  <button id="clearAll" class="ghost" title="Clear this request, visible errors, and notifications. Saved logs, sign-ins, and settings stay. Finish or stop downloads first.">Clear all</button>
+  <button id="settingsGear" title="Advanced settings and setup" aria-label="Advanced settings and setup" aria-expanded="false">⚙</button>
   <a href="#" id="helpLink" title="Welcome + setup guide">help</a>
-  <div id="nextStep"></div>
+  <div id="jobSummary" role="region" aria-label="Current job">
+    <div id="jobIdentity">No request loaded</div>
+    <div id="jobCounts"></div>
+    <div id="jobTrail" style="font-size:10px;color:var(--text-faint);margin-top:2px"></div>
+    <button id="jobNext" class="primary" aria-describedby="jobHint">Load a request</button>
+    <button id="jobStop" class="ghost" hidden>Stop downloads</button>
+    <div id="jobHint"></div>
+    <div id="operationNotice" role="status" aria-live="polite"></div>
+  </div>
   <div id="alertBox" class="hidden"></div>
   <div id="depWarn" class="hidden"></div>
+  <nav id="journeyNav" aria-label="Workflow steps">
+    <button id="navRequest" class="tab-request" data-step="request" aria-pressed="true">Request</button>
+    <button id="navFiles" class="tab-files" data-step="files" aria-pressed="false">Files</button>
+    <button id="navIngest" class="tab-ingest" data-step="ingest" aria-pressed="false">Ingest</button>
+    <button id="navConfirm" class="tab-confirm" data-step="confirm" aria-pressed="false">Confirm</button>
+  </nav>
 </div>
 <div id="depGate">
   <div class="gateCard">
@@ -245,64 +400,17 @@
     <div class="row" style="margin-top:10px"><a href="#" id="gateGuide">open the full setup guide</a></div>
   </div>
 </div>
-<div id="settingsPanel" class="hidden" role="dialog" aria-label="Panel settings">
-  <div style="font-weight:700;margin-bottom:4px">Setup</div>
-  <div class="opt" style="font-weight:400;cursor:default"><span class="sdot cred" id="sdWatch" style="margin:0 5px 0 0;vertical-align:0"></span>local watcher · <a href="#" id="openSetup">open setup checklist</a></div>
-  <div style="font-weight:700;margin:8px 0 4px">Show in panel</div>
-  <label class="opt"><input type="checkbox" id="opt-graph"> Inbox check (Graph) <span class="sdot cred" id="sdMs"></span></label>
-  <label class="opt"><input type="checkbox" id="opt-emailExtra"> Extra email inputs</label>
-  <label class="opt"><input type="checkbox" id="opt-excReply"> Exception reply</label>
-  <label class="opt"><input type="checkbox" id="opt-colMap"> Column mapping</label>
-  <label class="opt"><input type="checkbox" id="opt-erSweep"> ER search sweep</label>
-  <label class="opt"><input type="checkbox" id="opt-manual"> ER API (keyed fetch)</label>
-  <label class="opt"><input type="checkbox" id="opt-log"> Log panel</label>
-  <label class="opt"><input type="checkbox" id="opt-hints"> Help ? bubbles</label>
-  <div class="info hidden" id="msSetup" data-opt="graph">
-    Reads your inbox via Microsoft Graph. One-time setup:
-    Entra &rarr; App registrations &rarr; new app (org-only, no redirect URI)
-    &rarr; "Allow public client flows" = Yes &rarr; add delegated <b>Mail.Read</b>.<br>
-    <input id="msClientId" placeholder="Application (client) ID" style="width:55%">
-    <input id="msTenant" placeholder="Tenant domain or ID" style="width:33%">
-    <button id="msSignIn">Sign in</button>
-    <a href="#" id="msUsePsApp" title="Microsoft's first-party Graph PowerShell app - often pre-consented in locked-down tenants">no app access? try the built-in one</a>
-    <span id="msMsg"></span>
-    <div id="msCodeRow" class="hidden">
-      After signing in on the page that opened, paste the code shown - or
-      the full URL if it lands on a dead localhost page:
-      <input id="msCode" placeholder="code or full URL" style="width:60%">
-      <button id="msCodeGo">Exchange</button><br>
-      <a href="#" id="msAltRedirect">redirect_uri error? try the other form</a> ·
-      <a href="#" id="msDevCode">use device code instead</a>
-    </div>
-  </div>
-  <div style="font-weight:700;margin:8px 0 4px">Jira (post comment)<span class="sdot cred" id="sdJira"></span></div>
-  <label class="opt">Email <input type="text" id="jiraEmail" placeholder="you@vizio.com" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <label class="opt">API token <input type="password" id="jiraToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <div style="font-weight:700;margin:8px 0 4px">Airtable (tracker API)<span class="sdot cred" id="sdAt"></span></div>
-  <div class="opt" style="font-weight:400;color:#8b93a1">Personal access token - airtable.com/create/tokens, scopes <i>data.records:read</i> + <i>schema.bases:read</i>. Lets Grab pull the pending view of every brand tab directly - no copy-paste, real link URLs.</div>
-  <label class="opt">Token <input type="password" id="atToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <label class="opt">Base ID <input type="text" id="atBase" placeholder="app… (blank = auto-pick)" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <div style="font-weight:700;margin:8px 0 4px">Extreme Reach API<span class="sdot cred" id="sdEr"></span></div>
-  <label class="opt">API key <input type="password" id="erApiKey" autocomplete="off" style="width:97%;margin-top:2px"></label>
-  <div style="font-weight:700;margin:8px 0 4px">Databricks (impressions)<span class="sdot cred" id="sdDbx"></span></div>
-  <label class="opt">Workspace host <input type="text" id="dbxHost" placeholder="dbc-abc123-xy.cloud.databricks.com" autocomplete="off" title="From your browser bar" style="width:97%;margin-top:2px"></label>
-  <label class="opt">Warehouse id <input type="text" id="dbxWh" autocomplete="off" title="SQL warehouse ID - 'test' lists your warehouses in the log" style="width:97%;margin-top:2px"></label>
-  <label class="opt">Token <input type="password" id="dbxTok" autocomplete="off" title="User Settings -&gt; Developer -&gt; Access tokens" style="width:97%;margin-top:2px"></label>
-  <div class="row"><button id="dbxPing" title="Test the connection - lists your SQL warehouses (id + name) in the log">Test connection</button></div>
-  <div class="opt" style="font-weight:400;color:#8b93a1;font-size:10px;margin-top:4px">Without these, Count produces the SQL for a manual paste instead of running it.</div>
-  <div class="row"><a href="#" id="settingsReset">reset to defaults</a></div>
-</div>
-<div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then downloads: direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>
-<div class="info" id="clientNote"></div>
-
+<div class="bubble hidden" id="bRun">One click: reads the request email from any open Outlook tab, loads the tracker (from the email's sheet link - no tab needed - or an open tracker tab), matches rows, then finds files for review (download separately): direct links first, then the ER search sweep, then open delivery pages. Stops with a message at any stage it can't complete.</div>
+<section id="journeyRequest" class="journey-panel" aria-labelledby="navRequest">
+<h2>Request</h2>
 <details class="s1" open id="sec1">
-  <summary>1 · Read the request<span class="ib" data-bubble="b1">?</span><span class="stamp" id="tsEmail"></span><span class="sdot" id="sdEmail"></span></summary>
+  <summary>Read the request<span class="ib" data-bubble="b1">?</span><span class="stamp" id="tsEmail"></span><span class="sdot" id="sdEmail"></span></summary>
   <div class="sub">The request email - detects the client and pre-pulls its tracker.</div>
   <div class="bubble hidden" id="b1">The email saying which creatives to ingest. <b>Check inbox</b> reads unread mail via Graph sign-in (no Outlook tab needed; the icon badge counts fresh requests). <b>Grab</b> reads an open Outlook tab; paste/.eml work too. A new email resets the run.</div>
   <textarea id="email" placeholder="Paste the request email, or grab it from the open Outlook tab."></textarea>
   <div class="row">
-    <button id="grabEmail" title="Read the request email from the focused Outlook tab">✉ From Outlook</button>
-    <button id="checkInbox" data-opt="graph">✉ Check inbox</button>
+    <button id="grabEmail" title="Read the request email from the focused Outlook tab">📧 From Outlook</button>
+    <button id="checkInbox" data-opt="graph">📧 Check inbox</button>
     <details class="mini">
       <summary>more</summary>
       <div class="row">
@@ -311,17 +419,21 @@
         <button id="clearEmail">✕ Clear</button>
         <a href="#" id="testAlert" data-opt="graph" style="font-size:10px;align-self:center" title="Fire a test notification + sound (cycles request/delivery/arrived)">test alert</a>
       </div>
+      <div class="row">
+        <label class="col">Resume <select id="pastJobs" title="Reload a previous request - its saved evidence rehydrates on the next step"><option value="">past jobs…</option></select></label>
+        <label class="col">Match source <select id="trackerMode" title="Trackerless clients default to email IDs; the override forces a mode"><option value="">Client rules (auto)</option><option value="email">No tracking sheet — email IDs only</option><option value="sheet">Tracking sheet</option></select></label>
+      </div>
     </details>
   </div>
   <div class="modstat" id="stEmail"><div class="bar"><i></i></div><span class="txt"></span></div>
-  <div class="info" id="inboxList" data-opt="graph"></div>
+  <details id="inboxPanel" data-opt="graph"><summary>Request-like emails <span id="inboxCount" class="hint" style="display:inline;margin:0"></span></summary><div class="info" id="inboxList"></div></details>
   <div class="info msg" id="emailInfo"></div>
 </details>
 
 <details class="s2" id="sec2">
-  <summary>2 · Load the tracker<span class="ib" data-bubble="b2">?</span><span class="stamp" id="tsSheet"></span><span class="sdot" id="sdSheet"></span></summary>
-  <div class="sub">The client tracker - auto-loads from the email's link, or grab a tab.</div>
-  <div class="bubble hidden" id="b2">The client tracker - loaded automatically from the email's sheet link, a focused sheet tab, or any open tracker tab (an <b>Airtable tab is read via the app's own copy</b>, which covers every row, not just visible ones). <b>Paste tracker</b> is the manual fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Column mapping auto-detects; adjust under the mapping row if the sheet is unusual.</div>
+  <summary>Load the tracker<span class="ib" data-bubble="b2">?</span><span class="stamp" id="tsSheet"></span><span class="sdot" id="sdSheet"></span><span id="trackerDocTitle" style="display:block;font-size:11px;font-weight:normal;overflow-wrap:anywhere"></span></summary>
+  <div class="sub">Check the document title and owner before using tracker rows.</div>
+  <div class="bubble hidden" id="b2">Verify the <b>Document</b> title, separate worksheet name, workbook ID, and owner before matching. Selection checks exact workbook identity; sharing Google's host does not make a tab relevant. Known foreign trackers are blocked and invalid remembered references are cleaned up. <b>Match source → No tracking sheet — email IDs only</b> disables tracker controls and uses email IDs downstream. An <b>Airtable tab is read via the app's own copy</b>, covering every row, not just visible ones. <b>Paste tracker</b> is a fallback: click a grid cell, Cmd+A, Cmd+C, then the button. Check column mappings; pasted data cannot establish a document title.</div>
   <div class="row">
     <button id="grabSheet" class="primary" title="Read the tracker from the focused sheet tab - Google Sheets, Airtable or SharePoint">↓ Grab tracker</button>
     <details class="mini">
@@ -356,31 +468,39 @@
 </details>
 
 <details class="s3" id="sec3">
-  <summary>3 · Match codes to rows<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
+  <summary>Review requested IDs<span class="ib" data-bubble="b3">?</span><span class="stamp" id="tsMatch"></span><span class="sdot" id="sdMatch"></span></summary>
   <div class="sub">Match email codes to tracker rows.</div>
-  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows. Rows whose Link cell holds a <b>real URL</b> can download right here. Label-only sources (Extreme Reach, Yangaroo) go to step 4. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. <b>&#10005;</b> in the first column excludes a row - downloads, manifest, portal and replies all skip it; click again to restore. Files land in ~/Downloads/Ingest/&lt;date&gt;-&lt;client&gt;-&lt;label&gt;/ - each batch gets its own folder.</div>
+  <div class="bubble hidden" id="b3">Pairs email codes with sheet rows, or uses <b>Identify email IDs</b> in email-only mode. Review IDs, titles, links, and ticker flags; row numbers alone cannot prove the workbook is correct. Open <b>Files</b> to <b>Find files</b>, review, then <b>Download files</b>. <span class="chip warn">INGESTED</span> = already done per the sheet's fill-back columns. <b>&#10005;</b> in the first column excludes a row - downloads, manifest, portal and replies all skip it; click again to restore. Downloads and job manifests use ~/Downloads/Ingest/.</div>
   <div class="row">
     <button id="match" class="primary" title="Match the email's tracking codes to rows in the loaded tracker">⇄ Match</button>
-    <button id="download" class="hidden"></button>
     <button id="showSheet" class="hidden" title="Scroll the tracker to the matched rows - reopens the workbook in a background tab if it isn't open">Show on sheet</button>
   </div>
   <div class="modstat" id="stMatch"><div class="bar"><i></i></div><span class="txt"></span></div>
   <div class="scrollbox" id="matchResults"></div>
 </details>
 
-<details class="s4" id="sec4">
-  <summary>4 · Download the media<span class="ib" data-bubble="b4">?</span><span class="stamp" id="tsCapture"></span><span class="sdot" id="sdDl"></span></summary>
+</section>
+<section id="journeyFiles" class="journey-panel" aria-labelledby="navFiles" hidden>
+<h2>Files</h2>
+<div class="row manual-paths"><button id="alreadyHaveFiles" class="ghost">I already have the files</button></div>
+<div class="hint">Use existing local media, or find delivery links and review before downloading.</div>
+<details class="s4" open id="sec4">
+  <summary>Find and download files<span class="ib" data-bubble="b4">?</span><span class="stamp" id="tsCapture"></span><span class="sdot" id="sdDl"></span></summary>
   <div class="sub">Get the media - links, a delivery search, or whatever file page you have open.</div>
   <div class="bubble hidden" id="b4">
-    <b>Find &amp; download</b> tries every source in order: direct links from the email or tracker, a delivery search, then <b>any open page that lists files</b> - delivery lists, share folders, link pages, upload portals. If it lists your files, point at it. Only what's on screen counts - flip pages and press again to accumulate.<br>
+    <b>Find files</b> discovers candidates without downloading. Review the matches, then press <b>Download files</b>. Discovery tries every source in order: direct links from the email or tracker, a delivery search, then <b>any open page that lists files</b> - delivery lists, share folders, link pages, upload portals. If it lists your files, point at it. Only what's on screen counts - flip pages and press again to accumulate.<br>
+    <b>Search</b> chooses client rules, automatic, Comcast email, Extreme Reach, Yangaroo, Downloads/Ingest, or open pages. Yangaroo uses the delivery email's per-spot Download links or an open Yangaroo page; the links land on matched rows so Download files pulls only requested spots. Comcast discovery reads open Outlook delivery messages without replacing the request. Local discovery finds only unique, recent request-ID-matched media and never moves it; duplicates need Pick &amp; feed. Client rules can skip discovery in Run all.<br>
     <b>Re-check</b> re-runs the delivery check (inbox + delivery service) and arms a 5-min watch that chimes when files land. <b>Overrides</b> holds the manual paths: sender/day-window Extreme Reach search, open-pages-only capture, and the keyed ER API fetch.
   </div>
   <div class="row">
-    <button id="grabAndDl" class="primary" title="Find the media automatically - direct links first, then a delivery search, then any file pages you have open">↓ Find &amp; download</button>
+    <label>Search <select id="findSource"><option value="">Client rules</option><option value="auto">Automatic (all sources)</option><option value="comcast">Comcast email</option><option value="extreme-reach">Extreme Reach</option><option value="yangaroo">Yangaroo</option><option value="local">Downloads / Ingest</option><option value="pages">Open delivery pages</option></select></label>
+    <button id="grabAndDl" class="primary" title="Find matching files without downloading">Find files</button>
+    <button id="downloadMedia" title="Download the reviewed matching files">Download files</button>
     <button id="stopDl" class="hidden" title="Stop queueing and cancel this run's in-flight downloads">■ Stop</button>
-    <button id="recheck" title="Check for the delivery now - inbox and delivery service - and arm a watch that alerts when it lands">⟳ Re-check</button>
-    <details class="mini"><summary>overrides</summary>
+    <details class="mini"><summary>Advanced search options</summary>
       <div class="row">
+        <button id="recheck" title="Check for the delivery now - inbox and delivery service - and arm a watch that alerts when it lands">⟳ Re-check</button>
+        <button id="download" class="hidden"></button>
         <span class="grp" data-opt="erSweep">
           <input type="text" id="erSender" placeholder="sender (e.g. tatari)" style="width:9em">
           <label class="col">last <input type="text" id="erDays" value="14" size="2" style="width:2.2em"> days</label>
@@ -395,7 +515,7 @@
           <textarea id="ids" class="hidden"></textarea>
           <textarea id="files" class="hidden"></textarea>
           <div class="row">
-            <button id="erApi">↓ Fetch &amp; download</button>
+            <button id="erApi">Find via API</button>
             <span class="hint">API key lives in ⚙ Settings</span>
           </div>
         </details>
@@ -411,10 +531,15 @@
   <div class="scrollbox" id="results"></div>
 </details>
 
-<details class="s5" id="sec5">
-  <summary>5 · Fill the portal + report<span class="ib" data-bubble="b5">?</span><span class="stamp" id="tsIngest"></span><span class="sdot" id="sdIngest"></span></summary>
+</section>
+<section id="journeyIngest" class="journey-panel" aria-labelledby="navIngest" hidden>
+<h2>Ingest</h2>
+<div class="row manual-paths"><button id="alreadyIngested" class="ghost">I already ingested them</button></div>
+<div class="hint">Manual ingest is checked against records; this button does not mark it complete.</div>
+<details class="s5" open id="sec5">
+  <summary>Feed files and preview portal fills<span class="ib" data-bubble="b5">?</span><span class="stamp" id="tsIngest"></span><span class="sdot" id="sdIngest"></span></summary>
   <div class="sub">Fill the portal queue, then verify + draft Jira. Ingest/post stay your clicks.</div>
-  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check &amp; preview</b> verifies the customer name against the playbook, lists queued files and shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Accept fills</b> approves that preview: writes the cells and keeps watching for files dropped later. <b>Feed files</b> streams this job's downloaded files into the portal's file picker - batch one, the standard video+audio versions. The watcher builds <b>_ticker</b> versions on arrival; the status line shows the builds, and <b>Feed ticker files</b> queues them as the second, video-only ingest (separate batch per playbook) with fills applied automatically. <b>Pick &amp; feed</b> lets you choose media anywhere on disk (files land in the job folder first). Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click, once per batch.</div>
+  <div class="bubble hidden" id="b5">Fills the Vizio Inscape Portal (portal.cognet.tv) ingest queue. <b>Check &amp; preview</b> verifies the customer name against the playbook, lists queued files and shows exactly what would be written per row - Reporting ID, Title, Advertiser/Brand/Vertical, Fingerprint - before anything touches the page. <b>Accept fills</b> approves that preview: writes the cells and keeps watching for files dropped later. <b>Feed files</b> first checks Downloads/Ingest for unique recent request-ID matches (no move or manifest required), then streams available job files into the portal's file picker - batch one, the standard video+audio versions. The watcher builds <b>_ticker</b> versions on arrival; the status line shows the builds, and <b>Feed ticker files</b> queues them as the second, video-only ingest (separate batch per playbook) with fills applied automatically. <b>Pick &amp; feed</b> lets you choose media anywhere on disk (files land in the job folder first). InMarket uses each matched row's <b>InMarket Campaign Name (column D)</b> for Advertiser, Brand, and Vertical; a blank campaign leaves existing fields untouched. Check these per-row values in the preview. Fills also recognize exact tracker File Name aliases; ambiguous matches stay untouched. The status counts actual filled files, and verification checks Advertiser, Brand, and Vertical as well as ID and Title. Accepting a new plan replaces the live fill plan for later drops. Explicit request row ranges exclude earlier sheet matches and their ticker flags from the fill plan and reply. Realm, Type, and Retention are never touched - defaults stand. BEGIN INGEST stays your click, once per batch.</div>
   <div class="subhd">Fill the ingest queue</div>
   <div class="row">
     <button id="ingestCheck" title="Probe the portal queue (customer check + queued files) and show the fill plan for the matched rows">▤ Check &amp; preview</button>
@@ -438,7 +563,13 @@
   <div class="msg" id="ingestInfo"></div>
   <div class="hint" id="tickerInfo"></div>
   <div class="scrollbox" id="ingestPreviewBox"></div>
-  <div class="subhd">Verify &amp; report to Jira</div>
+</details>
+</section>
+<section id="journeyConfirm" class="journey-panel" aria-labelledby="navConfirm" hidden>
+<h2>Confirm</h2>
+<details class="s5" open id="secReport">
+  <summary>Verify records and review Jira</summary>
+  <div class="sub">Check actual records, then review the draft. Nothing posts automatically.</div>
   <div class="row">
     <button id="postJira" class="primary" title="Check this job's records in the ingest API, then draft the ticket below - nothing posts until you approve it">✓ Verify &amp; draft</button>
     <details class="mini">
@@ -485,7 +616,7 @@
       <button id="copyTicket">⧉ Copy</button>
       <details class="mini"><summary>options</summary>
         <div class="row">
-          <button id="rebuildTicket" title="Rebuild from the current email + match">↻ Rebuild</button>
+          <button id="rebuildTicket" title="Rebuild from the current email + match. Email sign-offs stay in the request copy, not as creative titles under Ingest.">↻ Rebuild</button>
           <button id="clearTicket">✕ Clear</button>
         </div>
       </details>
@@ -494,15 +625,16 @@
 </details>
 
 <details class="s6" id="sec6">
-  <summary>6 · Reply to requester<span class="ib" data-bubble="b6">?</span><span class="sdot" id="sdReply"></span></summary>
+  <summary>Review the reply<span class="ib" data-bubble="b6">?</span><span class="sdot" id="sdReply"></span></summary>
   <div class="sub">Draft the reply - auto variant from the run state, or pick one.</div>
-  <div class="bubble hidden" id="b6"><b>Auto draft</b> chooses by what happened: match found files &rarr; "I've ingested&hellip" + IDs; a sweep that found nothing &rarr; "not yet available on Extreme Reach".<br>
-    <b>Variant menu</b> is the escape hatch - e.g. the sweep missed files that are actually there (wrong delivery page) &rarr; pick <i>Ingested + IDs</i> to send the confirmation anyway.<br>
+  <div class="bubble hidden" id="b6"><b>Auto draft</b> supports trackerless customers: identifying email IDs or filenames opens an acknowledgment, not a claim of completed ingest. A sweep that found nothing drafts a not-yet-available reply. <b>Redraft</b> can use email filenames before Match.<br>
+    <b>Variant menu</b> lets you explicitly choose <i>Ingested + IDs</i> after actual ingest. Trackerless confirmations never claim a sheet was updated and use the client's ticker suffix (ComScore: lowercase <code>_t</code>).<br>
+    Later local-file and verified-record evidence overrides earlier search misses in Auto draft. Completed records confirm ingest; processing and failed records use different wording. After manual ingest, use Verify &amp; draft without rerunning earlier modules. Evidence is scoped to this request; edited text is kept until Redraft.<br>
     <b>Copy reply</b> puts it on the clipboard; <b>Draft in Outlook</b> creates a reply draft on the original thread (review and send yourself). Edits to the preview are kept until Redraft or Clear.</div>
   <div id="replyArea" class="hidden" style="margin-top:6px">
     <div class="row">
       <button id="copyReply" class="primary">⧉ Copy reply</button>
-      <button id="draftReplyOut" title="Create a reply draft on the original thread in Outlook">✉ Draft in Outlook</button>
+      <button id="draftReplyOut" title="Create a reply draft on the original thread in Outlook">📧 Draft in Outlook</button>
       <details class="mini"><summary>options</summary>
         <div class="row">
           <select id="replyKind" title="Draft variant">
@@ -523,6 +655,8 @@
   </div>
 </details>
 
+</section>
+
 <details id="dbgTools" data-opt="log">
   <summary style="font-size:10px;font-weight:400;color:#8b93a1;text-transform:none">Log</summary>
   <div class="scrollbox" id="dbgLog" style="max-height:20vh"></div>
@@ -542,6 +676,81 @@
     </div>
   </div>
 </div>
+<section id="journeySettings" class="journey-panel" hidden>
+<h2>Settings</h2>
+<details class="s1" open>
+  <summary>Setup and view<span class="ib" data-bubble="bSet1">?</span></summary>
+  <div class="opt" style="font-weight:400;cursor:default"><span class="sdot cred" id="sdWatch" style="margin:0 5px 0 0;vertical-align:0"></span>local watcher · <a href="#" id="openSetup">open setup checklist</a></div>
+  <label class="opt"><input type="checkbox" id="showAllSteps"> Show all steps (advanced)</label>
+  <details class="mini"><summary>Detailed module guidance</summary><div id="nextStep"></div></details>
+</details>
+<details class="s2" open>
+  <summary>Client guidance and rules<span class="ib" data-bubble="bSet2">?</span></summary>
+  <div class="info" id="clientNote" style="display:block"></div>
+  <details><summary>Edit selected client rules</summary>
+    <label><input type="checkbox" id="ruleSheetless"> No tracker</label>
+    <label>Sender domains (comma separated)<input id="ruleDomains" type="text"></label>
+    <label>Ingest realm<input id="ruleRealm" type="text"></label>
+    <label>Jira epic<input id="ruleEpic" type="text"></label>
+    <label>ER sender filter<input id="ruleErSender" type="text"></label>
+    <label>Delivery search <select id="ruleDelivery"><option value="auto">Automatic</option><option value="mixed">Comcast + Extreme Reach</option><option value="comcast">Comcast email</option><option value="extreme-reach">Extreme Reach</option><option value="yangaroo">Yangaroo</option><option value="links">Email/tracker links</option></select></label>
+    <label><input type="checkbox" id="ruleFindFiles" checked> Include file discovery in Run all</label>
+    <label><input type="checkbox" id="ruleTicker"> Always build ticker</label>
+    <label>Ticker suffix<input id="ruleSuffix" type="text"></label>
+    <div class="row"><button id="loadClientRules">Load selected client</button>
+    <button id="saveClientRules">Save rules locally</button></div>
+    <span id="ruleStatus"></span>
+  </details>
+</details>
+<details class="s3">
+  <summary>Show in panel<span class="ib" data-bubble="bSet3">?</span></summary>
+  <label class="opt"><input type="checkbox" id="opt-graph"> Inbox check (Graph) <span class="sdot cred" id="sdMs"></span></label>
+  <label class="opt"><input type="checkbox" id="opt-emailExtra"> Extra email inputs</label>
+  <label class="opt"><input type="checkbox" id="opt-excReply"> Exception reply</label>
+  <label class="opt"><input type="checkbox" id="opt-colMap"> Column mapping</label>
+  <label class="opt"><input type="checkbox" id="opt-erSweep"> ER search sweep</label>
+  <label class="opt"><input type="checkbox" id="opt-manual"> ER API (keyed fetch)</label>
+  <label class="opt"><input type="checkbox" id="opt-log"> Log panel</label>
+  <label class="opt"><input type="checkbox" id="opt-hints"> Help ? bubbles</label>
+</details>
+<details class="s4">
+  <summary>Connections<span class="ib" data-bubble="bSet4">?</span></summary>
+  <div class="info hidden" id="msSetup" data-opt="graph">
+    Reads your inbox via Microsoft Graph. One-time setup:
+    Entra &rarr; App registrations &rarr; new app (org-only, no redirect URI)
+    &rarr; "Allow public client flows" = Yes &rarr; add delegated <b>Mail.Read</b>.<br>
+    <input id="msClientId" placeholder="Application (client) ID" style="width:55%">
+    <input id="msTenant" placeholder="Tenant domain or ID" style="width:33%">
+    <button id="msSignIn">Sign in</button>
+    <a href="#" id="msUsePsApp" title="Microsoft's first-party Graph PowerShell app - often pre-consented in locked-down tenants">no app access? try the built-in one</a>
+    <span id="msMsg"></span>
+    <div id="msCodeRow" class="hidden">
+      After signing in on the page that opened, paste the code shown - or
+      the full URL if it lands on a dead localhost page:
+      <input id="msCode" placeholder="code or full URL" style="width:60%">
+      <button id="msCodeGo">Exchange</button><br>
+      <a href="#" id="msAltRedirect">redirect_uri error? try the other form</a> ·
+      <a href="#" id="msDevCode">use device code instead</a>
+    </div>
+  </div>
+  <div class="subhd">Jira (post comment)<span class="sdot cred" id="sdJira"></span></div>
+  <label class="opt">Email <input type="text" id="jiraEmail" placeholder="you@vizio.com" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <label class="opt">API token <input type="password" id="jiraToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <div class="subhd">Airtable (tracker API)<span class="sdot cred" id="sdAt"></span></div>
+  <div class="opt" style="font-weight:400;color:#8b93a1">Personal access token - airtable.com/create/tokens, scopes <i>data.records:read</i> + <i>schema.bases:read</i>. Lets Grab pull the pending view of every brand tab directly - no copy-paste, real link URLs.</div>
+  <label class="opt">Token <input type="password" id="atToken" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <label class="opt">Base ID <input type="text" id="atBase" placeholder="app… (blank = auto-pick)" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <div class="subhd">Extreme Reach API<span class="sdot cred" id="sdEr"></span></div>
+  <label class="opt">API key <input type="password" id="erApiKey" autocomplete="off" style="width:97%;margin-top:2px"></label>
+  <div class="subhd">Databricks (impressions)<span class="sdot cred" id="sdDbx"></span></div>
+  <label class="opt">Workspace host <input type="text" id="dbxHost" placeholder="dbc-abc123-xy.cloud.databricks.com" autocomplete="off" title="From your browser bar" style="width:97%;margin-top:2px"></label>
+  <label class="opt">Warehouse id <input type="text" id="dbxWh" autocomplete="off" title="SQL warehouse ID - 'test' lists your warehouses in the log" style="width:97%;margin-top:2px"></label>
+  <label class="opt">Token <input type="password" id="dbxTok" autocomplete="off" title="User Settings -&gt; Developer -&gt; Access tokens" style="width:97%;margin-top:2px"></label>
+  <div class="row"><button id="dbxPing" title="Test the connection - lists your SQL warehouses (id + name) in the log">Test connection</button></div>
+  <div class="opt" style="font-weight:400;color:#8b93a1;font-size:10px;margin-top:4px">Without these, Count produces the SQL for a manual paste instead of running it.</div>
+</details>
+<div class="row"><a href="#" id="settingsReset">reset to defaults</a></div>
+</section>
 <div id="toast"></div>
 <input type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx,.eml" class="hidden">
 <input type="file" id="portalPick" accept="video/*,.mp4,.mov,.mxf,.mpg,.mpeg,.ts" multiple class="hidden">

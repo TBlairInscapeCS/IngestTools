@@ -16,6 +16,15 @@ let specFails = null;      // watcher's spec rejects: null=unchecked, []=none
 let specFailsJob = '';     // job slug the specFails list belongs to
 let emailDates = new Set();
 let emailSubject = '';
+let emailFromAddress = '';
+let trackerMode = '';
+let workflowEvidence = new Map(), workflowEvidenceKey = '';
+let localDiscovery = null;
+let journeyStep = 'request', uiBusy = null, uiFillsContext = '', dlQueueActive = false;
+let trackerEpoch = 0;
+let trackerLoadPending = Promise.resolve(false);
+function trackerContext() { return trackerEpoch + ':' + (client && client.id || '') + ':' + emailEl.value; }
+function emailOnly() { return trackerMode === 'email' || (trackerMode !== 'sheet' && !!(client && client.sheetless)); }
 let emailSender = '';      // sender first name for reply greetings + job slug
 let jobStampCache = null;  // slug time when the email's sent date won't parse
 let emailDate = '';        // sent timestamp for the Jira ticket header
@@ -63,6 +72,7 @@ let dlStop = false;          // Stop button: halt queueing + cancel in-flight
 const dlRunIds = [];         // download ids started this run (cancel targets)
 const ourDlIds = new Set(); // chrome.downloads ids we started - onChanged fires for ALL browser downloads
 let lastCapTab = null;     // tab the last page capture ran against
+let manifestWritten = false; // job manifest already sent to Ingest/ this run
 
 // Freshness stamps: each section header shows when its data was last
 // pulled, so stale captures are obvious at a glance.
@@ -94,9 +104,11 @@ function showAlertBox(kind, what, why, silent) {
 }
 
 async function alertSound(kind, reason, say) {
+  const epoch = trackerEpoch;
   let focused = true;
   try { focused = (await chrome.windows.getCurrent()).focused; } catch (e) {}
   dbg('alert:' + kind, { reason: String(reason || '').slice(0, 200), focused, sounded: !focused });
+  if (epoch !== trackerEpoch) return;
   showAlertBox(kind, say || reason, reason, focused);
   if (focused) return;
   chrome.runtime.sendMessage({ type: 'ding', kind }).catch(() => {});
@@ -123,6 +135,7 @@ function modStat(id, txt, frac) {
   if (frac != null)
     el.querySelector('.bar i').style.width = Math.max(3, Math.round(frac * 100)) + '%';
   el.querySelector('.txt').textContent = txt;
+  if (uiBusy) uiBusy.progress = txt;
 }
 function modStatDone(id, txt) { modStat(id, txt, 1); }
 function modStatOff(id) { const el = $(id); if (el) el.classList.remove('on'); }
@@ -205,7 +218,7 @@ async function stageTabs() {
   const cls = { outlook: [], sheet: [], sharepoint: [], airtable: [], er: [], portal: [] };
   tabs.forEach(t => {
     const u = t.url || '';
-    if (/outlook\.(office|live)\.com/i.test(u)) cls.outlook.push(t);
+    if (/outlook\.(office|office365|live)\.com/i.test(u)) cls.outlook.push(t);
     if (/docs\.google\.com\/spreadsheets/i.test(u)) cls.sheet.push(t);
     else if (/\.sharepoint\.com|\.sharepoint-df\.com/i.test(u)) cls.sharepoint.push(t);
     else if (/airtable\.com/i.test(u)) cls.airtable.push(t);
@@ -239,13 +252,20 @@ function emailLinkHosts() {
 // Tracker-tab pick: focused tab > tab on a host the email links to > first.
 // Without the host pass, any open Google Sheet shadows the real SharePoint
 // tracker whenever the focused tab isn't a tracker.
+function trackerDocId(url) {
+  const m = String(url || '').match(/\/spreadsheets\/d\/([\w-]+)/);
+  return m ? m[1] : '';
+}
 function pickTrackerTab(cands, activeId) {
-  const focused = cands.find(t => t.id === activeId);
-  if (focused) return focused;
-  const hosts = emailLinkHosts();
-  const hit = cands.find(t =>
-    hosts.some(h => h && (t.url || '').toLowerCase().includes(h)));
-  return hit || cands[0] || null;
+  const refs = emailSheetRefs().map(r => r.id);
+  const own = sheetIdsFor(client);
+  const ranked = cands.filter(t => !foreignDoc(trackerDocId(t.url))).map(t => {
+    const id = trackerDocId(t.url);
+    const named = client && (t.title || '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(client.id.replace(/[^a-z0-9]/g, ''));
+    return { tab: t, score: id && refs.includes(id) ? 100 : id && own.includes(id) ? 90 : named ? 80 : t.id === activeId ? 50 : 0 };
+  }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+  dbg('tracker tab candidates', { client: client && client.id, candidates: cands.map(t => ({ id: t.id, title: t.title, doc: trackerDocId(t.url), blocked: foreignDoc(trackerDocId(t.url)) })), selected: ranked[0] && ranked[0].tab.id });
+  return ranked.length ? ranked[0].tab : null;
 }
 
 // Google Sheets doc refs the request email links to (SafeLinks-unwrapped).
@@ -295,19 +315,22 @@ async function loadSharePointUrl(url) {
 }
 
 async function loadSpDownload(u, sourceLabel, src) {
+  const context = trackerContext();
   try {
     const dl = u + (u.includes('?') ? '&' : '?') + 'download=1';
     const r = await fetch(dl, { credentials: 'include' });
     const ab = await r.arrayBuffer();
     const b = new Uint8Array(ab);
     if (b[0] !== 0x50 || b[1] !== 0x4b) return false; // viewer page, not a workbook
+    const wb = await readXlsx(ab, '');
+    if (context !== trackerContext()) return false;
     sheetBuf = ab;
     sheetSourceTab = null;
     sheetGids = {};
     scoreCache = { key: '', scores: null };
-    const wb = await readXlsx(ab, '');
     sheetTabs = wb.sheetNames || [];
     sheetTabName = wb.sheetName;
+    lastSheetRef = { spUrl: u, spSrc: src || u, clientId: client && client.id };
     loadSheetRows(wb, sourceLabel);
     // spSrc = the email link that produced this load (wrapper URL) - a
     // request re-citing the same link can skip the redundant re-download.
@@ -359,23 +382,60 @@ async function resolveSheetLinks() {
 // (a Horizon doc pulled mid-Kantar-job otherwise poisons every future
 // Kantar auto-load).
 function docOwner(id) {
-  return CLIENTS.find(o => sheetIdsFor(o).includes(id));
+  const registered = CLIENTS.find(o => sheetIdsFor(o).includes(id));
+  if (registered) return registered;
+  const learned = docBrandsCache[id];
+  return learned && CLIENTS.find(o => o.id === learned.client);
 }
-function foreignDoc(id) {
+function foreignDoc(id, target = client) {
   const o = id && docOwner(id);
-  return !!(o && topName(o) !== topName(client));
+  return !!(o && target && topName(o) !== topName(target));
+}
+function trackerAllowed(id, source) {
+  if (!foreignDoc(id)) return true;
+  dbg('tracker rejected', { client: client && client.id, doc: id, owner: docOwner(id).id, source });
+  toast('Blocked ' + docOwner(id).name + ' tracker for ' + client.name + '.');
+  return false;
+}
+async function cleanTrackerReferences() {
+  const data = await new Promise(resolve => chrome.storage.local.get(['sheetByClient', 'msLastSheet', 'docBrands'], resolve));
+  const map = data.sheetByClient || {};
+  let changed = false;
+  for (const key of Object.keys(map)) {
+    const target = CLIENTS.find(c => c.id === key);
+    if (!target) continue;
+    const list = Array.isArray(map[key]) ? map[key] : [map[key]];
+    const kept = list.filter(r => r && !foreignDoc(r.id || trackerDocId(r.spUrl || r.viewUrl), target));
+    if (kept.length !== list.length) {
+      dbg('tracker references purged', { client: key, removed: list.filter(r => !kept.includes(r)) });
+      if (kept.length) map[key] = kept;
+      else delete map[key];
+      changed = true;
+    }
+  }
+  if (changed) await chrome.storage.local.set({ sheetByClient: map });
+  if (data.msLastSheet && foreignDoc(data.msLastSheet.id)) await chrome.storage.local.remove('msLastSheet');
+  const brands = data.docBrands || {};
+  for (const id of Object.keys(brands)) {
+    const target = CLIENTS.find(c => c.id === brands[id].client);
+    if (target && foreignDoc(id, target)) { delete brands[id]; changed = true; }
+  }
+  if (changed) { docBrandsCache = brands; await chrome.storage.local.set({ docBrands: brands }); }
 }
 function rememberSheet() {
   if (!client || !lastSheetRef || foreignDoc(lastSheetRef.id)) return;
+  const target = client;
+  const loadedRef = { ...lastSheetRef };
   chrome.storage.local.get('sheetByClient', d => {
+    if (foreignDoc(loadedRef.id, target)) return;
     const m = d.sheetByClient || {};
-    const old = m[client.id];
+    const old = m[target.id];
     const prev = Array.isArray(old) ? old : old ? [old] : [];
-    const ref = JSON.stringify(lastSheetRef);
-    const list = [lastSheetRef]
-      .concat(prev.filter(r => JSON.stringify(r) !== ref)).slice(0, 3);
+    const ref = JSON.stringify(loadedRef);
+    const list = [loadedRef]
+      .concat(prev.filter(r => !foreignDoc(r.id, target) && JSON.stringify(r) !== ref)).slice(0, 3);
     if (JSON.stringify(prev) === JSON.stringify(list)) return;
-    m[client.id] = list;
+    m[target.id] = list;
     chrome.storage.local.set({ sheetByClient: m });
   });
   mineDocBrands();
@@ -387,7 +447,7 @@ function rememberSheet() {
 // brand selects that doc - and implies its client when detection found
 // nothing, since new brands land on the sheet before any playbook.
 let docBrandsCache = {};
-chrome.storage.local.get('docBrands', d => { docBrandsCache = d.docBrands || {}; });
+chrome.storage.local.get('docBrands', async d => { docBrandsCache = d.docBrands || {}; await cleanTrackerReferences(); });
 
 function allDocBrands() {
   const m = {};
@@ -515,7 +575,7 @@ function clearAll() {
   chrome.storage.local.remove(['emailText', 'idsText', 'filesText',
     'capturedByName', 'msLastSheet', 'pendingIds', 'pendingFiles',
     'recRealm', 'erSender', 'erDays']);
-  toast('Cleared - fresh run.');
+  dbg('Cleared - fresh run.');
 }
 
 function esc(s) {
@@ -526,6 +586,21 @@ function esc(s) {
 // (persisted ids/files/URL map restore on panel open, so stale state
 // survives reloads unless actively cleared).
 function resetRun() {
+  workflowEvidence.clear(); workflowEvidenceKey = ''; localDiscovery = null;
+  journeyStep = 'request'; uiFillsContext = '';
+  if ($('operationNotice')) { $('operationNotice').textContent = ''; $('operationNotice').classList.remove('error'); }
+  trackerEpoch++;
+  const alert = $('alertBox');
+  if (alert) { alert.innerHTML = ''; alert.classList.add('hidden'); }
+  const notification = $('toast');
+  if (notification) {
+    clearTimeout(notification._timer); notification._timer = null;
+    notification.textContent = ''; notification.style.display = 'none';
+  }
+  const logs = $('dbgTools'); if (logs) logs.open = false;
+  ['replyCheck', 'watchInfo', 'tickerInfo'].forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
+  htmlRejects = []; dlFailAlerted = false;
+  $('trackerDocTitle').textContent = '';
   matched = null; matchedFor = ''; lastResults = null; lastExtras = [];
   specFails = null; specFailsJob = '';
   disarmDeliveryWatch();
@@ -541,7 +616,9 @@ function resetRun() {
   const rk = $('replyKind'); if (rk) rk.value = 'auto';
   $('capInfo').innerHTML = '';
   ['stEmail', 'stSheet', 'stMatch', 'stDl', 'stIngest', 'stJira'].forEach(modStatOff);
-  dlTotal = 0;
+  dlTotal = 0; dlDone = 0; dlFailed = 0; dlRunIds.length = 0; dlQueueActive = false; dlStop = false;
+  manifestWritten = false;
+  $('ingestPush').classList.add('hidden');
   stopPortalLive();
   portalFailAlerted.clear();
   const pl = $('portalLive'); if (pl) pl.textContent = '';
@@ -552,7 +629,8 @@ function resetRun() {
   replyDirty = false; emailDate = ''; emailGraphId = ''; emailFromAddr = ''; emailFolderName = '';
   // Sender + slug-time are per-request: a stale greeting names the
   // previous requester, and a stale timestamp re-slugs the next job.
-  emailSender = ''; jobStampCache = null;
+  emailSender = ''; emailFromAddress = ''; jobStampCache = null;
+  trackerMode = ''; $('trackerMode').value = ''; $('findSource').value = '';
   sheetAutoLoaded = ''; // next request may auto-pull a different tracker
   pendingJira = null; draftWithoutProof = false; lastIngestRecords = [];
   $('jiraBox').classList.add('hidden'); $('jiraApprove').classList.add('hidden');
@@ -659,7 +737,8 @@ function renderClientNote() {
   const ing = ingestSummary(client);
   // The exceptions sheet is the authoritative caveat source - live text
   // wins over the static playbook note (which stays behind the ? bubble).
-  const liveRec = excByClient[client.id] || {};
+  const liveRec = { ...(excByClient[client.id] || {}) };
+  if (liveRec.tracker && foreignDoc(trackerDocId(liveRec.tracker))) delete liveRec.tracker;
   const live = liveRec.note;
   const caveat = live
     ? live.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0]
@@ -677,6 +756,7 @@ function renderClientNote() {
   // last shared link is the way back in when access needs a human (2FA,
   // re-share). Google ids already in detect are skipped.
   const lastTrackerLinks = known => noteSheets.map(mem => {
+    if (foreignDoc(mem.id || trackerDocId(mem.viewUrl || mem.spUrl))) return '';
     if (mem.id && known.includes(mem.id)) return '';
     const u = mem.id ? 'https://docs.google.com/spreadsheets/d/' + mem.id
       : (mem.viewUrl || mem.spUrl || '');
@@ -800,8 +880,10 @@ function refinable(c) {
 // for confirmed traffickers - a wrong preset would silently keep nothing.
 // User edits survive until the next client (re)detection.
 function applyErPreset(c) {
+  const sender = (c && c.er && c.er.sender) || '';
+  $('erSender').value = sender;
+  chrome.storage.local.set({ erSender: sender });
   if (!c || !c.er) return;
-  if (c.er.sender) { $('erSender').value = c.er.sender; chrome.storage.local.set({ erSender: c.er.sender }); }
   if (c.er.days) { $('erDays').value = c.er.days; chrome.storage.local.set({ erDays: String(c.er.days) }); }
 }
 
@@ -810,18 +892,18 @@ function applyClient(c, via) {
   // A sheetless detection is anchor-strength: a tracker doc's sheetIds can
   // never belong to it, so no sheet signal may override it (only a manual
   // pick or an email signal can).
-  if (client && client.sheetless && via === 'sheet' && clientSource !== 'manual')
+  if (emailOnly() && via === 'sheet' && clientSource !== 'manual')
     { renderClientNote(); return; }
   const agencyOf = x => x.name.split(' / ')[0].split(' ')[0];
   const refine = (base, cand) => {
     const agency = agencyOf(base);
-    const hit = detectClient({ emailText: emailEl.value, subject: emailSubject, folderName: emailFolderName });
+    const hit = detectClient({ emailText: emailEl.value, subject: emailSubject, folderName: emailFolderName, sender: emailFromAddress });
     if (hit && !hit.umbrella && hit.name.indexOf(agency) === 0) return hit;
     if (cand && !cand.umbrella && cand.name.indexOf(agency) === 0) return cand;
     return base;
   };
   if (client && (clientSource === 'manual' ||
-      (clientSource === 'sheet' && via !== 'sheet'))) {
+      (clientSource === 'email' && via === 'sheet'))) {
     if (refinable(client)) {
       const r = refine(client, c);
       if (r !== client) { client = r; setSelFor(r); applyErPreset(r); }
@@ -830,9 +912,18 @@ function applyClient(c, via) {
   }
   if (refinable(c)) c = refine(c, c);
   client = c;
+  if (lastSheetRef && foreignDoc(lastSheetRef.id)) {
+    dbg('foreign loaded tracker cleared', { client: c.id, doc: lastSheetRef.id });
+    trackerEpoch++;
+    sheet = null; lastSheetRef = null; sheetBuf = null; sheetTabs = []; sheetTabName = ''; sheetSourceTab = null;
+    matched = null; lastResults = null; idsEl.value = '';
+    $('matchResults').innerHTML = ''; $('sheetInfo').innerHTML = ''; $('trackerDocTitle').textContent = '';
+    cleanTrackerReferences();
+  }
   clientSource = via;
   setSelFor(c);
   applyErPreset(c);
+  renderTrackerMode();
   // Sheetless clients have no tracker stage - dim its dot to 'skip' so the
   // empty section reads as intentional, not unfinished.
   if (c.sheetless) setStage('sdSheet', 'skip', c.name + ': no tracking sheet - the email is the manifest');
@@ -956,7 +1047,8 @@ function grabEmailText() {
         date = t;
     });
   }
-  return { text: text.slice(0, 80000), subject, sender, date: date.slice(0, 90) };
+  const senderAddress = sndEl && (sndEl.getAttribute('title') || sndEl.getAttribute('aria-label') || sndEl.textContent || '');
+  return { text: text.slice(0, 80000), subject, sender: senderAddress || sender, html: containers.map(el => el.innerHTML).join('\n'), date: date.slice(0, 90) };
 }
 
 // Inside Outlook: Yangaroo "ADVERTISING DELIVERY" notifications carry a
@@ -1001,6 +1093,30 @@ function yangarooFromDoc(doc) {
   return { spots, orderName: om ? om[1].trim() : '', orderId: oi ? oi[1].trim() : '' };
 }
 function grabYangarooDelivery() { return yangarooFromDoc(document); }
+
+// A Yangaroo "Download" anchor lands on an HTML delivery page, not the
+// file itself. Fetch it once and pull the real media link + filename so
+// the manifest/portal name is right instead of a guessed '<id>.mp4'.
+async function resolveYangaroo(url, id) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const cd = (r.headers.get('content-disposition') || '').match(/filename="?([^";]+)/i);
+    if (cd) return { url, name: cd[1] };
+    const html = await r.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const links = [...doc.querySelectorAll('a[href]')]
+      .map(a => ({ href: a.href, txt: (a.innerText || a.textContent || '').trim() }))
+      .filter(x => /\.(mp4|mov|mpg|mpeg|mxf|wmv|avi|mkv|ts)(\?|#|$)/i.test(x.href) ||
+        /download/i.test(x.txt) && /\.(mp4|mov|mpg|mpeg)/i.test(x.txt + x.href));
+    const pick = links.find(x => x.href.toLowerCase().includes(String(id || '').toLowerCase())) || links[0];
+    if (pick) {
+      const name = decodeURIComponent(pick.href.split('/').pop().split(/[?#]/)[0]);
+      return { url: pick.href, name: /\.[a-z0-9]{2,5}$/i.test(name) ? name : '' };
+    }
+    return { url, name: '' };
+  } catch (e) { dbg('yangaroo page resolve fail', { url, err: String(e) }); return null; }
+}
 
 // Same delivery parse for a Graph-loaded email - no Outlook tab needed.
 function parseYangarooHtml(html) {
@@ -1203,6 +1319,8 @@ async function grabEmailFrom(tab) {
   yangaroo = (yr.spots && yr.spots.length) ? yr : null;
   setEmailText(text, (res.result && res.result.subject) || '', (res.result && res.result.sender) || '',
     (res.result && res.result.date) || '');
+  const deliverySpots = comcastDeliverySpots(emailSubject, text, (res.result || {}).html || '');
+  if (deliverySpots.length) emailSpots = deliverySpots;
   modStatDone('stEmail', extractCodes(latestSegment(text)).length + ' code(s) cited');
   return true;
 }
@@ -1210,25 +1328,27 @@ async function grabEmailFrom(tab) {
 // Email intake shared by the Outlook grab, clipboard paste, and .eml load.
 // Anything that arrives as plain text loses the delivery-page anchor
 // scrape - callers null yangaroo themselves.
-function setEmailText(text, subject, sender, date, graphId) {
-  if (text !== emailEl.value) resetRun(); // new request = fresh run state
+function setEmailText(text, subject, sender, date, graphId, folderName) {
+  if (text !== emailEl.value) resetRun();
+  emailFolderName = folderName || ''; // new request = fresh run state
   emailEl.value = text;
   emailSubject = subject || '';
   emailGraphId = graphId || '';
   // Reply greeting: explicit sender name wins (Outlook DOM / .eml From:),
   // else parse a leading From: line (Graph inbox / pasted headers).
   emailSender = senderFirstName(sender) || senderFirstName(text) || '';
+  emailFromAddress = sender || ((text.match(/^from:\s*(.+)$/im) || [])[1] || '');
   // Timestamp: explicit probe wins, else a pasted header line carries it.
   emailDate = String(date || '').trim() ||
     ((text.match(/^(?:sent|date|received):\s*(.+)$/im) || [])[1] || '').trim().slice(0, 90);
   detectedAdvertiser = extractAdvertiser(emailSubject);
-  applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
+  applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName, sender: emailFromAddress }), 'email');
   stamp('tsEmail');
   onEmailChange();
   saveInputs();
 }
 
-$('grabEmail').addEventListener('click', async () => {
+bindUiAction('grabEmail', async () => {
   const cls = await stageTabs();
   const tab = pickTab(cls.outlook, ((await activeTab()) || {}).id);
   if (!tab) return toast('Open the request email in an Outlook web tab (or paste it).');
@@ -1237,6 +1357,16 @@ $('grabEmail').addEventListener('click', async () => {
 });
 
 $('clearEmail').addEventListener('click', () => { emailEl.value = ''; emailDate = ''; onEmailChange(); saveInputs(); });
+$('pastJobs').addEventListener('change', e => {
+  const slug = e.target.value; e.target.value = '';
+  if (!slug) return;
+  chrome.storage.local.get('jobIndex', d => {
+    const j = (d.jobIndex || []).find(x => x.slug === slug);
+    if (!j || !j.email) return toast('That job has no saved request text.');
+    setEmailText(j.email, j.subject || '', '', '');
+    toast('Reloaded ' + slug + ' - saved evidence rehydrates as you verify.');
+  });
+});
 $('clearAll').addEventListener('click', clearAll);
 $('helpLink').addEventListener('click', e => {
   e.preventDefault();
@@ -1259,8 +1389,7 @@ function showMsSetup() {
   const su = $('msSetup');
   su.classList.remove('hidden');
   su.style.display = 'block'; // .info is display:none in CSS
-  $('settingsPanel').classList.remove('hidden');
-  $('settingsGear').setAttribute('aria-expanded', 'true');
+  showJourneyStep('settings', 'msSetup');
 }
 $('msStatus').addEventListener('click', e => {
   e.preventDefault();
@@ -1290,7 +1419,7 @@ emailEl.addEventListener('drop', e => {
   r.onload = () => {
     const eml = /\.eml$/i.test(f.name) ? parseEml(r.result) : { subject: '', body: r.result };
     yangaroo = null;
-    setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from), eml.date);
+    setEmailText(String(eml.body || '').trim(), eml.subject, eml.from, eml.date);
     toast('Loaded ' + f.name + '.');
   };
   r.readAsText(f);
@@ -1384,7 +1513,7 @@ $('msDevCode').addEventListener('click', async e => {
   }
 });
 
-$('checkInbox').addEventListener('click', () => checkInbox(false));
+bindUiAction('checkInbox', () => checkInbox(false));
 
 // Verify the notification + siren path without waiting for a real request.
 $('testAlert').addEventListener('click', async e => {
@@ -1490,13 +1619,11 @@ function renderInbox(msgs, quiet) {
     const yd = parseYangarooHtml(html);
     let dl = yd ? yd.spots : null;
     if (!dl) {
-      const cd = parseComcastNotice(m.subject, body), links = comcastDlLinks(html);
+      const cd = comcastDeliverySpots(m.subject, body, html);
       // spot rows and "Spot" anchors share document order - zip them, but
       // never reuse a link: unlinked rows are better skipped than
       // downloaded under a wrong ISCI name.
-      if (cd && links.length)
-        dl = cd.spots.map((s, i) => ({ id: s.isci || s.id, url: links[i] }))
-          .filter(s => s.url);
+      if (cd.length) dl = cd;
     }
     // dl present (Yangaroo/Comcast) means live download links - the
     // notice IS the request, even from a no-reply sender.
@@ -1513,7 +1640,10 @@ function renderInbox(msgs, quiet) {
     erBatchAt = Date.now();
     chrome.storage.local.set({ erBatchAt });
   }
+  const panel = el.closest('details') || el;
+  const cnt = $('inboxCount');
   if (!cands.length) {
+    panel.style.display = 'none';
     el.style.display = 'none';
     if (!quiet) toast('No unread request-like emails.');
     return;
@@ -1531,7 +1661,9 @@ function renderInbox(msgs, quiet) {
     ? ' <i>· ER spots delivered this week: ' +
       Object.entries(erByAgency).map(([a, n]) => esc(a) + ' ×' + n).join(', ') + '</i>'
     : '';
-  el.style.display = 'block';
+  panel.style.display = '';
+  el.style.display = 'block'; // .info hides by default - renderInbox owns it
+  if (cnt) cnt.textContent = '· ' + cands.length + ' unread';
   lastInboxCands = cands; // kept for loadMailById (notification deep-links)
   el.innerHTML = '<b>' + cands.length + ' unread request-like email(s):</b>' + erTally +
     cands.map((c, i) => {
@@ -1611,8 +1743,16 @@ function loadInboxCand(c) {
   emailFolderName = folderMap[c.m.parentFolderId] || '';
   setEmailText('From: ' + (from ? (from.name + ' <' + from.address + '>') : '') +
     '\nSubject: ' + (c.m.subject || '') + '\n\n' + c.body, c.m.subject || '', '',
-    String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id);
+    String(c.m.receivedDateTime || '').replace('T', ' ').slice(0, 16), c.m.id, folderMap[c.m.parentFolderId] || '');
   emailFromAddr = (from && from.address) || '';
+  if (c.dl && c.dl.length) emailSpots = c.dl.map(s => ({ id: s.id, title: s.title || '', url: s.url }));
+  else {
+    const notice = parseComcastNotice(c.m.subject, c.body);
+    if (notice) {
+      const links = comcastDlLinks((c.m.body || {}).content || '');
+      emailSpots = notice.spots.map((s, i) => ({ id: s.isci, title: s.title, url: links[i] || '' }));
+    }
+  }
   // Sheet pops in a background tab - pulls/match run from the export,
   // but the open tab stays ready for "Show on sheet" highlights.
   const sids = sheetIdsFor(client);
@@ -1734,11 +1874,12 @@ function onEmailChange() {
   // here too, or replies go out nameless. Cleared when the box empties.
   if (!text.trim()) emailSender = '';
   else if (!emailSender) emailSender = senderFirstName(text);
-  if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName }), 'email');
+  if (text.trim()) applyClient(detectClient({ emailText: text, subject: emailSubject, folderName: emailFolderName, sender: emailFromAddress }), 'email');
   // Brand->doc: an email naming a brand that lives in a known tracker
   // selects that doc; when nothing detected a client at all, the doc's
   // client is the answer (Turo/Zocdoc land on Horizon's doc first).
-  const brandHit = docForBrand((emailSubject || '') + '\n' + text);
+  const candidateBrand = docForBrand((emailSubject || '') + '\n' + text);
+  const brandHit = candidateBrand && !foreignDoc(candidateBrand.id) ? candidateBrand : null;
   if (!client && brandHit) {
     const bc = CLIENTS.find(c => c.id === brandHit.client);
     if (bc) {
@@ -1769,20 +1910,23 @@ function onEmailChange() {
   // A&E keeps its tracker in Airtable - pull the pending views via API
   // when a token is configured, same auto-load slot as doc trackers.
   const aeApi = client && client.id === 'ae-media' && hasAtToken() && !sheetIsCurrent;
-  if (client && !client.sheetless && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
+  if (client && !emailOnly() && !sheetIsCurrent && sheetAutoLoaded !== client.id) {
     sheetAutoLoaded = client.id;
+    const requestClient = client;
+    const requestContext = trackerContext();
     // Fallback when the playbook has no doc (or its pull fails): remembered
     // trackers for this client profile, most recent first - but a doc only
     // counts when it actually covers the request's IDs (theatrical vs TV
     // docs can share one family).
     const tryRemembered = async () => {
       const list = await new Promise(res => chrome.storage.local.get('sheetByClient', d => {
-        const v = (d.sheetByClient || {})[client.id];
+        const v = (d.sheetByClient || {})[requestClient.id];
         res(Array.isArray(v) ? v : v ? [v] : []);
       }));
       const label = client.name + ' tracker (remembered)';
       for (const mem of list) {
-        if (foreignDoc(mem.id)) continue;
+        if (requestContext !== trackerContext()) return false;
+        if (foreignDoc(mem.id)) { await cleanTrackerReferences(); continue; }
         const ok = mem.spUrl ? await loadSpDownload(mem.spUrl, label, mem.spSrc)
                  : mem.airtable ? await fetchAirtableTracker(label)
                  : mem.id ? await loadSheetDoc(mem.id, mem.gid, '', label) : false;
@@ -1790,15 +1934,15 @@ function onEmailChange() {
       }
       return false;
     };
-    const rest = () => sids.length
+    const rest = () => requestContext !== trackerContext() ? Promise.resolve(false) : sids.length
       ? loadSheetDoc(sids[0], 0, '', client.name + ' tracker').then(ok2 => ok2 || tryRemembered())
       : tryRemembered();
-    (aeApi ? fetchAirtableTracker(client.name + ' tracker')
+    trackerLoadPending = (aeApi ? fetchAirtableTracker(client.name + ' tracker')
            : loadRefTracker().then(ok => ok ||
              (brandHit ? loadSheetDoc(brandHit.id, 0, '', 'brand-matched tracker (' + brandHit.brand + ')')
                        : Promise.resolve(false))).then(ok => ok || rest()))
       .then(ok => {
-        if (!ok) return;
+        if (!ok || requestContext !== trackerContext()) return;
         toast('Auto-loaded the ' + client.name + ' tracker.');
         // The whole point of auto-pull: with codes in the email and a
         // fresh sheet, match can run itself - files are ready to rename
@@ -1917,7 +2061,25 @@ const COLS = [
 // Fetch a Google workbook by doc id - the export endpoint only needs the
 // id, so an email-linked tracker loads with no sheet tab open at all.
 // XLSX first (keeps hyperlinks + every tab); CSV fallback needs a gid.
+async function trackerDocumentTitle(id, wb) {
+  const tabs = await chrome.tabs.query({});
+  const tab = tabs.find(t => trackerDocId(t.url) === id);
+  if (tab && tab.title) return tab.title.replace(/\s*[-–]\s*Google Sheets\s*$/i, '').trim();
+  if (wb && wb.documentTitle) return wb.documentTitle;
+  try {
+    const response = await fetch('https://docs.google.com/spreadsheets/d/' + id + '/edit', { credentials: 'include' });
+    if (!response.ok) return '';
+    const html = await response.text();
+    const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (title && /Google Sheets/i.test(title[1]) && !/sign in|page not found/i.test(title[1])) {
+      return new DOMParser().parseFromString(title[0], 'text/html').title.replace(/\s*[-–]\s*Google Sheets\s*$/i, '').trim();
+    }
+  } catch (e) { dbg('tracker title unavailable', { id }); }
+  return '';
+}
 async function loadSheetDoc(id, gid, tabName, sourceLabel) {
+  if (!trackerAllowed(id, sourceLabel)) { await cleanTrackerReferences(); return false; }
+  const context = trackerContext();
   modStat('stSheet', 'Loading ' + (sourceLabel || 'tracker') + '…');
   sheetSourceTab = null; // cleared here; tab-grabs re-set it on success
   scoreCache = { key: '', scores: null }; // new workbook = new tab map
@@ -1926,18 +2088,23 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
       `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`,
       { credentials: 'include' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    sheetBuf = await r.arrayBuffer();
-    const wb = await readXlsx(sheetBuf, tabName || '', gid);
+    const buffer = await r.arrayBuffer();
+    const wb = await readXlsx(buffer, tabName || '', gid);
+    const documentTitle = await trackerDocumentTitle(id, wb);
+    if (context !== trackerContext() || !trackerAllowed(id, sourceLabel)) { dbg('stale tracker load discarded', { id, sourceLabel }); return false; }
+    sheetBuf = buffer;
     sheetTabs = wb.sheetNames || [];
     sheetTabName = wb.sheetName;
     if (tabName && wb.sheetName !== tabName) {
       toast('Loaded tab "' + wb.sheetName + '" (you had "' + tabName + '" focused) - check you\'re on the right tab.');
       dbg('tab mismatch', { focused: tabName, gid, loaded: wb.sheetName });
     }
+    lastSheetRef = { id, gid: gid || 0, tabName: wb.sheetName, documentTitle, clientId: client && client.id };
     loadSheetRows(wb, sourceLabel || ('tab "' + wb.sheetName + '"'));
+    dbg('tracker verified', { client: client && client.id, doc: id, owner: (docOwner(id) || {}).id || 'unregistered', documentTitle, tab: wb.sheetName, source: sourceLabel });
     // The doc id is all a refresh needs - the open tab going through
     // reloads, navigation, or being closed can't break the pull anymore.
-    lastSheetRef = { id, gid: gid || 0, tabName: wb.sheetName };
+    lastSheetRef = { id, gid: gid || 0, tabName: wb.sheetName, documentTitle, clientId: client && client.id };
     chrome.storage.local.set({ msLastSheet: lastSheetRef });
     rememberSheet();
     return true;
@@ -1949,8 +2116,14 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel) {
       `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid || '0'}`,
       { credentials: 'include' });
     if (!r2.ok) throw new Error('HTTP ' + r2.status);
+    const text = await r2.text();
+    const documentTitle = await trackerDocumentTitle(id);
+    if (context !== trackerContext() || !trackerAllowed(id, sourceLabel)) return false;
     sheetBuf = null; sheetTabs = []; sheetTabName = '';
-    loadSheetText(await r2.text(), 'Sheet tab gid=' + (gid || '0'));
+    lastSheetRef = { id, gid: gid || 0, documentTitle, clientId: client && client.id };
+    loadSheetText(text, 'Sheet tab gid=' + (gid || '0'));
+    chrome.storage.local.set({ msLastSheet: lastSheetRef });
+    rememberSheet();
     return true;
   } catch (e2) { toast('Could not export sheet: ' + e2); setStage('sdSheet', 'fail', 'sheet export failed (auth?)'); return false; }
 }
@@ -2016,11 +2189,12 @@ async function grabSheetTab(tab) {
           sheetTabName = wb.sheetName;
           sheetGids = {};
           scoreCache = { key: '', scores: null };
+          lastSheetRef = { spUrl: u, viewUrl: loc.pageUrl, documentTitle: wb.documentTitle || tab.title || '', clientId: client && client.id };
           loadSheetRows(wb, 'SharePoint workbook');
           // The winning download URL IS the refresh handle - without it the
           // stale prior ref (e.g. another client's Google doc) re-fetches
           // and clobbers this sheet on every match-time refresh.
-          lastSheetRef = { spUrl: u, viewUrl: loc.pageUrl };
+          lastSheetRef = { spUrl: u, viewUrl: loc.pageUrl, documentTitle: wb.documentTitle || tab.title || '', clientId: client && client.id };
           chrome.storage.local.set({ msLastSheet: lastSheetRef });
           rememberSheet();
           sheetSourceTab = tab;
@@ -2326,18 +2500,22 @@ async function resolveFileShare(url) {
 // Route a tracker tab to its loader: Google/SharePoint fetch the workbook
 // by URL; Airtable goes through the app's own copy handler.
 function grabTrackerTab(tab) {
+  if (!trackerAllowed(trackerDocId(tab.url), 'open tab: ' + tab.title)) return Promise.resolve(false);
   return /airtable\.com/i.test(tab.url || '') ? grabAirtableTab(tab) : grabSheetTab(tab);
 }
 
-$('grabSheet').addEventListener('click', async () => {
+bindUiAction('grabSheet', async () => {
   const cls = await stageTabs();
   const active = ((await activeTab()) || {}).id;
   const cands = cls.sheet.concat(cls.sharepoint, cls.airtable);
+  await cleanTrackerReferences();
+  const selected = pickTrackerTab(cands, active);
+  if (selected && await grabTrackerTab(selected)) return;
   // Open tracker tabs win - they ride the user's own session, no auth
   // guessing. The email-linked doc fetch is the last resort when no
   // tracker tab is open at all.
-  const focused = cands.find(t => t.id === active);
-  if (focused) { await grabTrackerTab(focused); return; }
+  const focused = selected && selected.id === active ? selected : null;
+  if (focused && await grabTrackerTab(focused)) return;
   // A&E's tracker is an Airtable base - with a token the API pulls every
   // brand tab's pending view directly (no copy-paste, real link URLs).
   if (client && client.id === 'ae-media' && hasAtToken() &&
@@ -2345,9 +2523,8 @@ $('grabSheet').addEventListener('click', async () => {
   // A tab on a host the email links to IS the email's doc in view - grab
   // it before reaching for the email ref itself.
   const hosts = emailLinkHosts();
-  const linked = cands.find(t =>
-    hosts.some(h => h && (t.url || '').toLowerCase().includes(h)));
-  if (linked) { await grabTrackerTab(linked); return; }
+  const linked = selected;
+  if (linked && await grabTrackerTab(linked)) return;
   // The email's own tracker link outranks stray tracker tabs - the doc it
   // names is the doc this request means.
   const ref = emailSheetRefs()[0];
@@ -2358,7 +2535,7 @@ $('grabSheet').addEventListener('click', async () => {
   for (const u of emailSharePointUrls()) {
     if (await loadSharePointUrl(u)) return;
   }
-  if (cands.length) { await grabTrackerTab(cands[0]); return; }
+  if (selected && await grabTrackerTab(selected)) return;
   if (await resolveSheetLinks()) return;
   setStage('sdSheet', 'fail', 'no tracker found');
   toast('No tracker found - open the sheet tab or load a file.');
@@ -2412,7 +2589,7 @@ $('fileInput').addEventListener('change', e => {
     r.onload = () => {
       const eml = /\.eml$/i.test(f.name) ? parseEml(r.result) : { subject: '', body: r.result };
       yangaroo = null;
-      setEmailText(String(eml.body || '').trim(), eml.subject, senderFirstName(eml.from), eml.date);
+      setEmailText(String(eml.body || '').trim(), eml.subject, eml.from, eml.date);
       toast('Loaded ' + f.name + '.');
     };
     r.readAsText(f);
@@ -2501,7 +2678,13 @@ function loadSheetRows(wb, sourceLabel) {
     sourceLabel + ' · ' + liveRows.length + ' rows' + (idcNow < 0 ? ' · pick the ID column' : ''));
   dbg('sheet loaded', { rows: liveRows.length, headerRow: hIdx + 1, source: sourceLabel, links: nLinks, pending: pendingRows.length });
   $('sheetInfo').style.display = 'block';
+  const documentTitle = (lastSheetRef && lastSheetRef.documentTitle) || wb.documentTitle || (/\.(?:xlsx?|csv|tsv)$/i.test(sourceLabel || '') ? sourceLabel : 'Title unavailable (pasted data or source did not provide one)');
+  $('trackerDocTitle').textContent = 'Document: ' + documentTitle;
   $('sheetInfo').innerHTML =
+    '<div><b>Document: ' + esc(documentTitle) + '</b></div>' +
+    '<div>Worksheet: ' + esc(wb.sheetName || sheetTabName || 'not available') + '</div>' +
+    '<b>Request client: ' + esc(client ? client.name : 'unclassified') + '</b>' +
+    (lastSheetRef && lastSheetRef.id ? ' · Workbook: <code>' + esc(lastSheetRef.id) + '</code> · Owner: ' + esc((docOwner(lastSheetRef.id) || {}).name || 'unregistered — verify manually') : ' · Workbook ownership unverified') + '<br>' +
     esc(liveRows.length + ' data rows, ' + sheet.headers.length + ' columns from ' + sourceLabel +
     ' (header row ' + (hIdx + 1) + (nLinks ? ', ' + nLinks + ' hyperlinks' : '') +
     '). Verify the column dropdowns, then match.') +
@@ -2594,7 +2777,16 @@ function currentCols() {
 // is committed (results shown), 'guess' when it stopped at the confirm
 // picker, false on failure (a toast already explains why).
 async function doMatch() {
+  if (emailOnly()) return doEmailMatch();
+  await trackerLoadPending;
+  if (lastSheetRef && foreignDoc(lastSheetRef.id)) {
+    await cleanTrackerReferences();
+    setStage('sdSheet', 'fail', 'Tracker belongs to another client — load the correct tracker');
+    toast('Blocked matching against another client\'s tracker.');
+    return false;
+  }
   modStat('stMatch', 'Matching…');
+  if (emailOnly()) return doEmailMatch();
   if (!sheet) {
     // Sheetless path (Comscore + tracker-less clients): the email's own
     // cited IDs become the match set - downloads, portal fill, Jira and
@@ -2800,7 +2992,7 @@ function doEmailMatch() {
 // Sheetless clients never run a sheet match - any stage that needs rows
 // (ingest push, verify, Jira) builds them from the email on demand.
 function ensureMatchRows() {
-  if ((!matched || !selectedMatches().length) && client && client.sheetless)
+  if ((!matched || !selectedMatches().length) && emailOnly())
     doEmailMatch();
 }
 
@@ -2811,6 +3003,7 @@ function ensureMatchRows() {
 // Only merges while the email is the one those rows were matched against;
 // a new request resets via matchedFor.
 function mergeMatches(fresh) {
+  if (extractRowRefs(latestSegment(emailEl.value)).length) return fresh;
   if (!matched || !matched.length || matchedFor !== emailEl.value) return fresh;
   const key = m => normalizeName(m.id || m.trackingId || ('row' + m.row)).replace(/[\s:_-]+/g, '');
   const freshKeys = new Set(fresh.map(key));
@@ -2823,7 +3016,7 @@ function mergeMatches(fresh) {
   return fresh.concat(carried);
 }
 
-$('match').addEventListener('click', async () => {
+bindUiAction('match', async () => {
   // Fresh data at match time - the sheet may have gained rows since the
   // last manual pull, and doc-loaded sheets can always re-export by id.
   await refreshSheet(true);
@@ -2886,7 +3079,7 @@ function presentMatches(quiet) {
   // a link lookup would pull the wrong row's URL.
   matched.forEach(m => {
     if (m.offSheet) return;
-    if (!m.link && sheet.links) {
+    if (!m.link && m.row > 0 && !emailOnly() && sheet && sheet.links) {
       // Mapped link column first; any other hyperlink on the row after
       // (InMarket's tracker carries links in H/I/J - a strict column map
       // drops rows whose link lives in a neighbor).
@@ -2923,7 +3116,9 @@ function presentMatches(quiet) {
     '<td><span class="chip ' + m.matchType.split(' ')[0] + '">' + m.matchType + '</span>' +
       (sheetTabs.length > 1 ? '<div class="hint">' + esc(m.tab || sheetTabName) + '</div>' : '') +
       (m.matchType === 'GUESS' && (m.guessClues || []).length
-        ? '<div class="hint">' + esc(m.guessClues.join(' · ')) + '</div>' : '') + '</td>' +
+        ? '<div class="hint">' + esc(m.guessClues.join(' · ')) + '</div>' : '') +
+      ((m.matchType === 'TITLE' || m.matchType === 'FILE')
+        ? '<div class="hint">matched by ' + m.matchType.toLowerCase() + ' name, not the ID - confirm the pairing</div>' : '') + '</td>' +
     '<td>' + (m.ingested ? '<span class="chip warn">INGESTED</span> ' : '') +
       (m.offSheet ? '<span class="chip" title="matched on an earlier sheet - still part of this request" style="background:#3a414d;color:#aab1bd">prev</span>' : '') +
       (m.espn ? '<span class="chip espn">ESPN</span>' : '') +
@@ -2959,6 +3154,26 @@ function presentMatches(quiet) {
     el.innerHTML = '<b>not on this tab:</b> ' + esc(missed.join(', ')) + ' - found on ' +
       tabLinksHTML(byTab) + ' - click to switch &amp; match there.';
     wireTabLinks(el);
+  });
+  // Out-of-range row citations mean the grid stopped short - the request's
+  // rows live on a sibling tab; point at it rather than the placeholders.
+  const oob = matched.filter(m => m.matchType === 'ROW (out of range)')
+    .map(m => +(m.id.match(/\d+/) || [0])[0]).filter(Boolean);
+  const stale = oob.length || matched.every(m => m.matchType === 'GUESS');
+  if (stale) Promise.all([findRowTabs(oob), findPendingTabs()]).then(pair => {
+    const hits = pair[0].concat(pair[1]);
+    if (!hits.length) return;
+    dbg('request likely on other tab', hits);
+    const byTab = {};
+    hits.forEach(h => (byTab[h.tab] = byTab[h.tab] || []).push(h));
+    const note = document.createElement('div');
+    note.className = 'hint';
+    note.innerHTML = '<b>' + (oob.length ? 'Rows ' + esc(oob.join(', ')) + ' are beyond this tab\'s ' +
+      (sheet ? sheet.rows.length : '?') + ' rows' : 'All guesses - this tab looks stale') +
+      '</b> - the request may live on ' + tabLinksHTML(byTab) +
+      ' - click to switch &amp; match there.';
+    $('matchResults').prepend(note);
+    wireTabLinks(note);
   });
   refreshReply();
 
@@ -3169,6 +3384,51 @@ async function findCodeTabs(codes) {
   return hits.slice(0, 20);
 }
 
+// Row-cited requests ("lines 13581-13592"): check sibling tabs for a grid
+// that actually contains the cited rows with content - same idea as
+// findCodeTabs but the predicate is row existence, not a code string.
+async function findRowTabs(rowNums) {
+  const hits = [];
+  if (!sheetBuf || !(sheetTabs || []).length) return hits;
+  const max = Math.max(...rowNums);
+  for (const name of sheetTabs) {
+    if (name === sheetSource) continue;
+    try {
+      const wb = await readXlsx(sheetBuf, name);
+      if (wb.rows.length >= max && (wb.rows[max - 1] || []).some(c => c !== '' && c != null))
+        hits.push({ tab: name, row: max, code: 'row ' + max });
+    } catch (e) { /* skip unreadable tab */ }
+  }
+  return hits;
+}
+
+// Pending-ingestion signal: rows whose Tracking ID is set but whose
+// ingest-complete / completed-by cells are still empty. A sibling tab
+// holding the new request is usually the tab full of pending rows.
+async function findPendingTabs() {
+  const hits = [];
+  if (!sheetBuf || !(sheetTabs || []).length) return hits;
+  for (const name of sheetTabs) {
+    if (name === sheetSource) continue;
+    try {
+      const wb = await readXlsx(sheetBuf, name);
+      const hi = wb.rows.findIndex(r => /tracking id|spot title/i.test((r || []).join(' ')));
+      if (hi < 0) continue;
+      const hdr = (wb.rows[hi] || []).map(h => String(h || '').toLowerCase());
+      const ci = hdr.findIndex(h => /ingest complete date|completed by/.test(h));
+      const idi = hdr.findIndex(h => /tracking id/.test(h));
+      if (ci < 0 || idi < 0) continue;
+      let pend = 0;
+      for (let i = hi + 1; i < wb.rows.length; i++) {
+        const r = wb.rows[i] || [];
+        if (r[idi] && !r[ci]) pend++;
+      }
+      if (pend) hits.push({ tab: name, code: pend + ' pending', row: pend });
+    } catch (e) { /* skip unreadable tab */ }
+  }
+  return hits;
+}
+
 async function presentGuessPicker(cands) {
   // Extracted codes that matched no row mean this tab doesn't hold the
   // request - the tracker doc has multiple tabs; flag it loudly.
@@ -3216,7 +3476,7 @@ $('showSheet').addEventListener('click', showOnSheet);
 // dirty flag to regenerate from current state.
 let replyDirty = false;
 function updateReplyCheck() {
-  const wanted = [...new Set(extractCodes(latestSegment(emailEl.value)))];
+  const wanted = replyRequestIds();
   const body = normalizeName($('replyPreview').value).replace(/ /g, '');
   const missing = wanted.filter(c => !body.includes(normalizeName(c).replace(/ /g, '')));
   $('replyCheck').innerHTML =
@@ -3226,6 +3486,7 @@ function updateReplyCheck() {
         ? '<span style="color:#ec9a9a">' + missing.length + ' requested ID(s) NOT in reply: ' + missing.map(esc).join(', ') + '</span>'
         : 'all ' + wanted.length + ' requested ID(s) in reply')
       : 'no IDs cited in email');
+  try { replySanity(); } catch (e) { dbg('replySanity', String(e)); }
 }
 
 // Where the reconcile just looked for files - for the "not available"
@@ -3288,11 +3549,51 @@ async function pollWatchEvents() {
   } catch (e) { /* watcher down - stay silent */ }
 }
 
+function workflowContext() {
+  return (client && client.id || '') + '\n' + emailEl.value;
+}
+function rememberWorkflowEvidence(entries, context = workflowContext()) {
+  if (context !== workflowContext()) return;
+  if (workflowEvidenceKey !== context) { workflowEvidence.clear(); workflowEvidenceKey = context; }
+  const rank = { located: 1, processing: 2, failed: 3, complete: 4 };
+  entries.forEach(entry => {
+    const key = normalizeName(entry.id).replace(/ /g, '');
+    const prev = workflowEvidence.get(key);
+    if (!prev || rank[entry.stage] >= rank[prev.stage]) workflowEvidence.set(key, entry);
+  });
+  persistJobEvidence(context);
+  dbg('workflow evidence', { client: client && client.id, entries: entries.map(e => ({ id: e.id, stage: e.stage, source: e.source })) });
+}
+function workflowReplyText() {
+  if (workflowEvidenceKey !== workflowContext() || !workflowEvidence.size) return null;
+  const realms = ingestRealms();
+  if ((client && client.ingest && client.ingest.dualSilo) && realms.length > 1 && lastIngestRecords.length) {
+    const silo = buildSiloReply(lastIngestRecords, realms, emailSender);
+    if (silo) return silo;
+  }
+  const ids = replyRequestIds();
+  const suffix = replyOptions().tickerSuffix || '_ticker';
+  selectedMatches().filter(m => m.espn || m.emailEspn).forEach(m => ids.push((m.trackingId || m.id) + suffix));
+  return buildWorkflowReply([...new Set(ids)].map(id => {
+    const evidence = workflowEvidence.get(normalizeName(id).replace(/ /g, ''));
+    const found = (lastResults || []).find(r => normalizeName(r.id) === normalizeName(id) && r.status === 'FOUND');
+    const rejected = (specFails || []).find(r => normalizeName(r.id) === normalizeName(id));
+    if (rejected && (!evidence || evidence.stage !== 'complete')) return { id, stage: 'failed', status: 'media spec check failed' };
+    return { id, stage: evidence ? evidence.stage : found ? 'located' : '', status: evidence && evidence.status };
+  }), emailSender);
+}
+function replyOptions() {
+  return { sheetless: emailOnly() || !sheet, tickerSuffix: ((client && client.ingest) || {}).tickerSuffix };
+}
+function replyRequestIds() {
+  if (matched && matched.length)
+    return [...new Set(selectedMatches().filter(m => m.matchType !== 'ROW (out of range)').map(m => m.trackingId || m.id).filter(Boolean))];
+  const text = latestSegment(emailEl.value);
+  return [...new Set(extractCodes(text).concat(extractFileIds(text)))];
+}
 function manualReply(kind) {
   const rows = (matched || []).filter(m => !m.excluded && m.matchType !== 'ROW (out of range)');
-  const ids = rows.length
-    ? rows.map(m => m.trackingId || m.title || m.id).filter(Boolean)
-    : [...new Set(extractCodes(latestSegment(emailEl.value)))];
+  const ids = replyRequestIds();
   if (kind === 'specfail') {
     // Refetch - the watcher may have probed more files since last check.
     checkSpecFails().then(changed => { if (changed) refreshReply(true); });
@@ -3307,17 +3608,17 @@ function manualReply(kind) {
   if (kind === 'received')
     return buildConfirmationEmail(ids.map(id => ({ id, status: 'FOUND' })), emailSender);
   // 'ingest' - matched rows carry espn/title extras; bare IDs still draft
-  return buildMatchConfirmation(rows.length ? rows : ids.map(id => ({ trackingId: id })), emailSender);
+  return buildMatchConfirmation(rows.length ? rows : ids.map(id => ({ trackingId: id, espn: tickerAlways() })), emailSender, replyOptions());
 }
 
 function refreshReply(force) {
   const area = $('replyArea');
   const kind = ($('replyKind') && $('replyKind').value) || 'auto';
-  let text = null;
+  let text = kind === 'auto' ? workflowReplyText() : null;
   if (kind !== 'auto') {
     text = manualReply(kind);
     if (!text) toast('Nothing to draft - no IDs or rows to cite.');
-  } else if (lastResults) {
+  } else if (!text && lastResults) {
     // Spec rejects trump other drafts - a bad file is the actionable news.
     // Refetch quietly; a change rebuilds the preview unless user edited.
     checkSpecFails().then(changed => { if (changed) refreshReply(true); });
@@ -3332,15 +3633,16 @@ function refreshReply(force) {
     // nothing was downloaded, the reply says so instead.
     text = buildSpecFailReply(specFails || [], okIds, emailSender) ||
       buildNotAvailableReply(lastResults, dlChannelName(), emailSender) ||
-      buildReconConfirmation(lastResults, espnIds, emailSender) ||
+      buildReconConfirmation(lastResults, espnIds, emailSender, replyOptions()) ||
       buildConfirmationEmail(lastResults, emailSender);
   }
   if (!text && matched && kind === 'auto' && selectedMatches().length)
-    text = buildMatchConfirmation(selectedMatches(), emailSender);
+    text = replyOptions().sheetless ? buildAckReply(replyRequestIds(), emailSender)
+      : buildMatchConfirmation(selectedMatches(), emailSender, replyOptions());
   // Bare request, nothing matched or downloaded yet: still draft the
   // receipt ack - a partial reply beats an empty box.
   if (!text && kind === 'auto')
-    text = buildAckReply([...new Set(extractCodes(latestSegment(emailEl.value)))], emailSender);
+    text = buildAckReply(replyRequestIds(), emailSender);
   if (!text) { area.classList.add('hidden'); setStage('sdReply'); return; }
   area.classList.remove('hidden');
   const det = area.closest('details');
@@ -3662,11 +3964,12 @@ async function downloadLinked() {
   const problems = [];
   for (const m of withLinks) {
     const base = { row: m.row, tracking_id: m.trackingId || m.id, title: m.title || '', expected_name: m.fileName || '', needs_espn: m.espn || tickerAlways() };
-    // Yangaroo delivery link: no filename in the URL, so name by ID. The
-    // real container may differ - ffmpeg probes content, not extension.
+    // Yangaroo delivery link points at an HTML page - resolve to the real
+    // file URL/name first; fall back to '<id>.mp4' when the page won't tell.
     if (m.yangarooUrl) {
-      const yname = (base.tracking_id || 'spot').replace(/[^\w.-]+/g, '_') + '.mp4';
-      jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, yname), url: m.yangarooUrl });
+      const r = await resolveYangaroo(m.yangarooUrl, base.tracking_id);
+      const yname = (r && r.name) || (base.tracking_id || 'spot').replace(/[^\w.-]+/g, '_') + '.mp4';
+      jobs.push({ ...base, file: nameForIngest(base.tracking_id, base.title, yname), url: (r && r.url) || m.yangarooUrl });
       continue;
     }
     if (/ql\.mediasilo\.com\/ql\//i.test(m.link || '')) {
@@ -3753,23 +4056,33 @@ async function downloadLinked() {
   flushLog(true);
 
   dlTotal = jobs.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
+  dlStop = false; dlRunIds.length = 0; dlQueueActive = true; $('stopDl').classList.remove('hidden');
   updateDlStatus();
   const dlUrlCache = new Map();
   for (const j of jobs) {
+    if (dlStop) break;
     try {
       j.url = await resolveDlUrl(j.url, dlUrlCache);
+      if (dlStop) break;
       const id = await chrome.downloads.download({
         url: j.url,
         filename: 'Ingest/' + j.file,
         conflictAction: 'uniquify',
       });
-      if (id != null) ourDlIds.add(id);
+      if (id != null) { ourDlIds.add(id); dlRunIds.push(id); if (dlStop) chrome.downloads.cancel(id).catch(() => {}); }
     } catch (e) { dlFailed++; updateDlStatus(); }
   }
+  dlQueueActive = false;
   const blob = new Blob([buildManifest(job, entries, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
+  manifestWritten = true;
+  if (dlStop) {
+    setStage('sdDl', 'warn', 'stopped by user');
+    modStatDone('stDl', 'Stopped — unqueued files were not downloaded');
+    return false;
+  }
   setStage('sdDl', 'ok', jobs.length + ' file(s) queued to Ingest/' +
     (manual.length ? ' · ' + manual.length + ' awaiting manual drop' : ''));
   const nEspnJobs = entries.filter(j => j.needs_espn).length;
@@ -3784,7 +4097,7 @@ async function downloadLinked() {
   return true;
 }
 
-$('download').addEventListener('click', downloadLinked);
+bindUiAction('download', downloadLinked);
 
 function updateDlStatus() {
   const d = $('dateFilterHint');
@@ -3807,6 +4120,7 @@ function updateDlStatus() {
 let htmlRejects = [];
 chrome.downloads.onChanged.addListener(async delta => {
   if (!delta.state || !ourDlIds.has(delta.id)) return;
+  const currentJob = dlRunIds.includes(delta.id);
   if (delta.state.current === 'complete') {
     const [item] = await chrome.downloads.search({ id: delta.id });
     ourDlIds.delete(delta.id);
@@ -3816,23 +4130,25 @@ chrome.downloads.onChanged.addListener(async delta => {
     if (/\.html?$/.test(fname) || /text\/html|application\/xhtml/.test(mime)) {
       try { await chrome.downloads.removeFile(delta.id); } catch (e) {}
       chrome.downloads.erase({ id: delta.id });
-      dlFailed++;
-      htmlRejects.push(fname.split('/').pop() || 'file');
-      $('missingNote').innerHTML = 'rejected HTML download(s): ' +
-        htmlRejects.map(esc).join(', ') +
-        ' — link likely leads to a viewer/auth page, not media';
+      if (currentJob) {
+        dlFailed++;
+        htmlRejects.push(fname.split('/').pop() || 'file');
+        $('missingNote').innerHTML = 'rejected HTML download(s): ' +
+          htmlRejects.map(esc).join(', ') +
+          ' — link likely leads to a viewer/auth page, not media';
+      }
       dbg('html download rejected', { file: fname.split('/').pop(), mime });
-    } else dlDone++;
+    } else if (currentJob) dlDone++;
   } else if (delta.state.current === 'interrupted') {
     ourDlIds.delete(delta.id);
     // A failed download must not stay "already downloaded" - release the
     // queued slot so a retry actually re-downloads instead of skipping.
     const key = dlKeys.get(delta.id);
     if (key) { queuedUrls.delete(key); dlKeys.delete(delta.id); }
-    dlFailed++;
+    if (currentJob) dlFailed++;
     dbg('download interrupted', { error: (delta.error && delta.error.current) || '' });
   }
-  updateDlStatus();
+  if (currentJob) updateDlStatus();
 });
 
 // ---------- Section 4: verify files on share ----------
@@ -3913,6 +4229,7 @@ async function capturePage(tab) {
 // several Spot Deliveries pages in one press just works.
 async function captureTabs() {
   const cls = await stageTabs();
+  const mailFound = await captureDeliveryEmails(cls.outlook);
   const active = await activeTab();
   const cands = [];
   if (active && /^https?:/.test(active.url || '')) cands.push(active);
@@ -3920,8 +4237,8 @@ async function captureTabs() {
   // SharePoint doc-library views are file sources (not tracker workbooks).
   cls.sharepoint.filter(t => /AllItems\.aspx|\/Forms\//i.test(t.url || ''))
     .forEach(t => { if (!cands.some(c => c.id === t.id)) cands.push(t); });
-  if (!cands.length) { toast('Focus a page that lists files - delivery list, share folder, link page.'); return false; }
-  let got = false;
+  if (!cands.length) { if (!mailFound) toast('Focus a page that lists files - delivery list, share folder, link page.'); return mailFound; }
+  let got = mailFound;
   for (const t of cands) got = (await capturePage(t)) || got;
   return got;
 }
@@ -3983,6 +4300,12 @@ function runReconcile() {
     }
   });
 
+  const located = results.filter(r => r.status === 'FOUND').map(r => ({ id: r.id, stage: 'located', source: 'delivery/file match' }));
+  if (located.length) rememberWorkflowEvidence(located);
+  if (workflowEvidenceKey === workflowContext()) results.forEach(r => {
+    const evidence = workflowEvidence.get(normalizeName(r.id).replace(/ /g, ''));
+    if (evidence) { r.status = 'FOUND'; r.notes = evidence.source + ' · ' + evidence.stage; }
+  });
   const counts = {};
   results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
   lastResults = results;
@@ -4272,32 +4595,37 @@ async function downloadFound() {
   if (!fresh.length) { setStage('sdDl', 'warn', skipped ? 'all matches already downloaded' : 'no downloadable links captured'); toast((skipped ? 'All ' + skipped + ' match(es) already downloaded this session' : 'No downloadable links captured') + (noUrl.length ? ' - ' + noUrl.length + ' matched by name only' : '') + '.'); return false; }
   const job = jobSlug();
   dlTotal = fresh.length; dlDone = 0; dlFailed = 0; dlFailAlerted = false; htmlRejects = [];
-  dlStop = false; dlRunIds.length = 0; $('stopDl').classList.remove('hidden');
+  dlStop = false; dlRunIds.length = 0; dlQueueActive = true; $('stopDl').classList.remove('hidden');
   updateDlStatus();
   const dlUrlCache2 = new Map();
   for (const j of fresh) {
     if (dlStop) break;
     try {
       j.url = await resolveDlUrl(j.url, dlUrlCache2);
+      if (dlStop) break;
       const id = await chrome.downloads.download({ url: j.url, filename: 'Ingest/' + j.file, conflictAction: 'uniquify' });
       // Mark only on a live download id - a thrown call or dead queue
       // leaves the URL free so the next attempt can actually retry.
-      if (id != null) { ourDlIds.add(id); queuedUrls.add(j.dkey || j.url); dlKeys.set(id, j.dkey || j.url); dlRunIds.push(id); }
+      if (id != null) { ourDlIds.add(id); queuedUrls.add(j.dkey || j.url); dlKeys.set(id, j.dkey || j.url); dlRunIds.push(id); if (dlStop) chrome.downloads.cancel(id).catch(() => {}); }
       else dlFailed++;
     } catch (e) { dlFailed++; updateDlStatus(); }
   }
-  $('stopDl').classList.add('hidden');
-  if (dlStop) {
+  dlQueueActive = false;
+  $('stopDl').classList.toggle('hidden', !dlRunIds.some(id => ourDlIds.has(id)));
+  const stopped = dlStop;
+  if (stopped) {
     toast('Stopped - cancelled ' + dlRunIds.length + ' in-flight download(s).');
     setStage('sdDl', 'warn', 'stopped by user');
     dlStop = false;
   }
+  manifestWritten = true;
   const blob = new Blob([buildManifest(job, fresh, clientInfo())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   await chrome.downloads.download({ url, filename: 'Ingest/' + job + '-manifest.json' });
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   specFails = null; specFailsJob = ''; checkSpecFails();
   dbg('download found queued', { files: fresh.map(j => j.file), urls: fresh.map(j => j.url) });
+  if (stopped) { modStatDone('stDl', 'Stopped — unqueued files were not downloaded'); return false; }
   setStage('sdDl', 'ok', fresh.length + ' file(s) queued to Ingest/');
   flushLog(true);
   const nEspnFresh = fresh.filter(j => j.needs_espn).length;
@@ -4431,7 +4759,6 @@ $('erApiKey').addEventListener('input', e => {
 $('erApi').addEventListener('click', async () => {
   if (!await fetchErApi()) return;
   if (!runReconcile()) return;
-  await downloadFound();
 });
 
 // ---------- ER search-endpoint sweep ----------
@@ -4578,8 +4905,80 @@ function erCodeOf(e) {
   return m ? normalizeName(m[0]).replace(/ /g, '') : '';
 }
 
+let savedClientRules = {};
+function applySavedRules(c, r) {
+  c.sheetless = r.sheetless;
+  c.ingest = { ...(c.ingest || {}), cidMap: r.realm, jiraEpic: r.epic, ticker: r.ticker ? 'always' : '', tickerSuffix: r.suffix };
+  c.er = { ...(c.er || {}), sender: r.erSender };
+  if (r.delivery) c.delivery = r.delivery;
+  c.workflow = { ...(c.workflow || {}), findFiles: r.findFiles !== false };
+  if (r.domains.length) c.detect = { ...(c.detect || {}), domains: r.domains.map(d => new RegExp('^' + d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
+}
+chrome.storage.local.get('clientRules', data => {
+  savedClientRules = data.clientRules || {};
+  CLIENTS.forEach(c => { if (savedClientRules[c.id]) applySavedRules(c, savedClientRules[c.id]); });
+  renderTrackerMode();
+});
+$('loadClientRules').addEventListener('click', () => {
+  if (!client) return toast('Select a client first.');
+  const r = savedClientRules[client.id] || {};
+  const ing = client.ingest || {};
+  $('ruleSheetless').checked = !!client.sheetless;
+  $('ruleDomains').value = (r.domains || []).join(', ');
+  $('ruleRealm').value = (Array.isArray(ing.cidMap) ? ing.cidMap.join(',') : ing.cidMap) || '';
+  $('ruleEpic').value = ing.jiraEpic || '';
+  $('ruleErSender').value = (client.er || {}).sender || '';
+  $('ruleDelivery').value = /^(auto|mixed|comcast|extreme-reach|links)$/.test(client.delivery || '') ? client.delivery : 'auto';
+  $('ruleFindFiles').checked = !client.workflow || client.workflow.findFiles !== false;
+  $('ruleTicker').checked = ing.ticker === 'always';
+  $('ruleSuffix').value = ing.tickerSuffix || '_ticker';
+  $('ruleStatus').textContent = 'Editing ' + client.name;
+  $('saveClientRules').dataset.clientId = client.id;
+});
+$('saveClientRules').addEventListener('click', async () => {
+  if (!client || $('saveClientRules').dataset.clientId !== client.id) return toast('Load the selected client rules first.');
+  const domains = $('ruleDomains').value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (domains.some(d => !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(d))) return toast('Enter domains only, such as example.com.');
+  const realms = $('ruleRealm').value.split(',').map(s => s.trim()).filter(Boolean);
+  const epic = $('ruleEpic').value.trim();
+  if (epic && !/^[A-Z][A-Z0-9]+-\d+$/.test(epic)) return toast('Enter a Jira key such as DD-597.');
+  const r = { sheetless: $('ruleSheetless').checked, domains, realm: realms.length > 1 ? realms : (realms[0] || ''), epic,
+    erSender: $('ruleErSender').value.trim(), ticker: $('ruleTicker').checked, suffix: $('ruleSuffix').value.trim(),
+    delivery: $('ruleDelivery').value, findFiles: $('ruleFindFiles').checked };
+  savedClientRules[client.id] = r;
+  await chrome.storage.local.set({ clientRules: savedClientRules });
+  applySavedRules(client, r);
+  applyErPreset(client);
+  renderTrackerMode();
+  renderClientNote();
+  $('ruleStatus').textContent = 'Saved for ' + client.name;
+});
+
+function renderTrackerMode() {
+  const only = emailOnly();
+  ['grabSheet', 'loadSheet', 'pasteSheet'].forEach(id => { $(id).disabled = only; });
+  $('colDetails').style.opacity = only ? '0.35' : '';
+  $('colDetails').querySelectorAll('input, select').forEach(el => { el.disabled = only; });
+  $('match').textContent = only ? 'Identify email IDs' : 'Match';
+  if (only) setStage('sdSheet', 'skip', 'No tracker — email IDs only');
+}
+$('trackerMode').addEventListener('change', () => {
+  trackerMode = $('trackerMode').value;
+  matched = null;
+  lastResults = null;
+  idsEl.value = '';
+  $('matchResults').innerHTML = '';
+  $('results').innerHTML = '';
+  renderTrackerMode();
+  if (emailOnly() && emailEl.value.trim()) doEmailMatch();
+});
+
 chrome.storage.local.get('fillProfile', d => { if (d.fillProfile && $('fillProfile')) $('fillProfile').value = d.fillProfile; });
-if ($('fillProfile')) $('fillProfile').addEventListener('change', e => chrome.storage.local.set({ fillProfile: e.target.value }));
+if ($('fillProfile')) $('fillProfile').addEventListener('change', e => {
+  uiFillsContext = '';
+  chrome.storage.local.set({ fillProfile: e.target.value });
+  renderIngestPreview();
+});
 
 $('erSender').addEventListener('input', e => chrome.storage.local.set({ erSender: e.target.value }));
 $('erDays').addEventListener('input', e => chrome.storage.local.set({ erDays: e.target.value }));
@@ -4598,11 +4997,12 @@ async function sweepAndDownload(windows) {
   const wanted = want.length ? want : (matched || []).filter(m => !m.excluded).map(m => m.id || m.trackingId).filter(Boolean);
   if (erApiKey && wanted.length && await fetchErApi()) {
     if (!runReconcile()) return false;
-    if (!(lastResults || []).some(r => r.status === 'MISSING')) return downloadFound();
+    if (!(lastResults || []).some(r => r.status === 'MISSING')) return true;
     toast('API missed some IDs - falling back to the delivery sweep for the rest…');
   }
   const wins = (windows || [parseInt($('erDays').value, 10) || 14])
     .map(d => Math.min(Math.max(parseInt(d, 10) || 14, 1), 90));
+  if (!wanted.length) { toast('Identify requested IDs before searching deliveries.'); return false; }
   let anyKept = null;
   for (let w = 0; w < wins.length; w++) {
     const kept = await sweepEr(wins[w]);
@@ -4618,7 +5018,7 @@ async function sweepAndDownload(windows) {
     }
     if (!runReconcile()) return false;
     const missing = (lastResults || []).filter(r => r.status === 'MISSING').length;
-    if (w === wins.length - 1 || !missing) return downloadFound();
+    if (w === wins.length - 1 || !missing) return true;
     toast(missing + ' still missing - widening the sweep to ' + wins[w + 1] + ' days…');
     modStat('stDl', missing + ' missing - widening to ' + wins[w + 1] + ' days…');
   }
@@ -4628,7 +5028,7 @@ async function sweepAndDownload(windows) {
   return false;
 }
 
-$('erSweep').addEventListener('click', sweepAndDownload);
+$('erSweep').addEventListener('click', () => sweepAndDownload());
 
 // ---------- Delivery watch ----------
 // A delivery search that comes back empty arms a 5-minute re-check: the
@@ -4707,23 +5107,103 @@ $('recheck').addEventListener('click', () => recheckDelivery(false));
 // The automatic download cascade: real sheet links go direct; else the
 // ER delivery search (auto-widening once on missing IDs); open delivery
 // pages are the last fallback. Shared by "Find & download" and Run all.
+async function discoverLocalFiles(job = jobSlug()) {
+  const context = workflowContext();
+  const ids = replyRequestIds().filter(id => /^[A-Za-z0-9][A-Za-z0-9_.-]{3,99}$/.test(id) && /\d/.test(id));
+  if (!ids.length) return false;
+  try {
+    const response = await fetch('http://127.0.0.1:8770/ingest-discover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job, ids, tickerSuffix: replyOptions().tickerSuffix || '_ticker' }), signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error('watcher discovery HTTP ' + response.status);
+    const result = await response.json();
+    if (context !== workflowContext()) return false;
+    localDiscovery = { ...result, job, context };
+    const files = result.files || [];
+    if (files.length) {
+      rememberWorkflowEvidence(files.map(f => ({ id: f.kind === 'ticker' ? f.id + (replyOptions().tickerSuffix || '_ticker') : f.id,
+        stage: 'located', source: 'local ' + f.source })), context);
+      filesEl.value = [...new Set(filesEl.value.split(/\r?\n/).filter(Boolean).concat(files.filter(f => f.kind === 'standard').map(f => f.name)))].join('\n');
+      if (!idsEl.value.trim()) idsEl.value = ids.join('\n');
+      runReconcile();
+      modStatDone('stDl', files.length + ' local file(s) found in Downloads/Ingest — use Feed files');
+    }
+    if ((result.ambiguous || []).length) toast(result.ambiguous.length + ' duplicate local matches — use the portal file picker to choose.');
+    refreshReply();
+    return files.some(f => f.kind === 'standard');
+  } catch (e) { dbg('local file discovery unavailable', { error: e.message }); return false; }
+}
+async function captureDeliveryEmails(tabs) {
+  const context = workflowContext();
+  const wanted = new Set(replyRequestIds().map(id => normalizeName(id).replace(/ /g, '')));
+  if (!wanted.size) return false;
+  let added = 0;
+  for (const tab of tabs) {
+    try {
+      const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: grabEmailText });
+      if (context !== workflowContext()) return false;
+      const mail = (res && res.result) || {};
+      const spots = comcastDeliverySpots(mail.subject || '', mail.text || '', mail.html || '');
+      spots.filter(s => wanted.has(normalizeName(s.id).replace(/ /g, ''))).forEach(s => {
+        const name = s.id + '.mp4';
+        capturedByName[name] = { name, url: s.url, id: s.id, title: s.title, page: 'comcast', source: 'Outlook delivery email' };
+        (matched || []).filter(m => normalizeName(m.trackingId || m.id) === normalizeName(s.id)).forEach(m => { m.link = s.url; });
+        filesEl.value = [...new Set(filesEl.value.split(/\r?\n/).filter(Boolean).concat(name))].join('\n');
+        added++;
+      });
+      dbg('Comcast email discovery', { tab: tab.id, deliverySpots: spots.length, matched: added });
+    } catch (e) { dbg('delivery email scan failed', { tab: tab.id, error: e.message }); }
+  }
+  if (added) { runReconcile(); modStatDone('stDl', added + ' Comcast file link(s) found — review, then Download files'); }
+  return added > 0;
+}
 async function autoDownload() {
+  ensureMatchRows();
+  await hydrateJobEvidence();
+  const source = $('findSource').value || (client && /^(mixed|comcast|extreme-reach|yangaroo)$/.test(client.delivery || '') ? client.delivery : 'auto');
+  if (source === 'local') { if (!await discoverLocalFiles()) toast('No unique recent local matches — use Pick & feed.'); return; }
+  const cls = await stageTabs();
+  if (source !== 'extreme-reach' && source !== 'pages' && source !== 'yangaroo') await captureDeliveryEmails(cls.outlook);
+  if (source === 'comcast') { if (!selectedMatches().some(m => m.link)) toast('No matching Comcast Spot/Download links in open Outlook emails.'); return; }
+  if (source === 'yangaroo') {
+    // Email Delivery links already parsed into m.yangarooUrl; a page
+    // fallback reads any open Yangaroo/download pages the user brought up.
+    if (!selectedMatches().some(m => m.yangarooUrl)) {
+      if (await captureTabs()) { runReconcile(); return; }
+      toast('No Yangaroo Download links in the request email or open pages.');
+      return;
+    }
+    modStatDone('stDl', selectedMatches().filter(m => m.yangarooUrl).length + ' Yangaroo link(s) found — review, then Download files');
+    return;
+  }
+  if (source === 'auto' || source === 'mixed' || source === 'links') {
+    if (await discoverLocalFiles()) return;
+  }
+  if (source === 'pages') { if (await captureTabs()) runReconcile(); return; }
   const nDl = selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length;
-  if (nDl) { await downloadLinked(); return; }
+  if (nDl) { modStatDone('stDl', nDl + ' linked files found — review matches, then Download'); return; }
+  if (!idsEl.value.trim() && !selectedMatches().length) return toast('Identify email IDs or match the tracker first.');
   // Narrow-first sweep: fresh deliveries usually landed within 2 days,
   // so trawl a small window before paying for the full 14-day scrape.
   const days = parseInt($('erDays').value, 10) || 14;
   const swept = await sweepAndDownload([...new Set([2, 7, days])].sort((a, b) => a - b));
   if (swept) return;
   if (await captureTabs()) {
-    if (runReconcile()) { await downloadFound(); return; }
+    if (runReconcile()) return;
   }
   toast('Matched ' + selectedMatches().length + ' row(s) but found no downloadable files - see the log.');
+  armRedeliveryWatch();
 }
 
-$('grabAndDl').addEventListener('click', autoDownload);
+bindUiAction('grabAndDl', autoDownload);
+bindUiAction('downloadMedia', async () => {
+  if (selectedMatches().some(m => m.link || m.yangarooUrl)) await downloadLinked();
+  else if (lastResults) await downloadFound();
+  else toast('Find and review files first.');
+});
 $('stopDl').addEventListener('click', () => {
-  dlStop = true;
+  dlStop = true; dlFailAlerted = true;
+  if (uiBusy) uiBusy.progress = 'Stopping — no more files will be queued';
   dlRunIds.forEach(id => chrome.downloads.cancel(id).catch(() => {}));
   toast('Stopping downloads…');
 });
@@ -4733,13 +5213,12 @@ $('stopDl').addEventListener('click', () => {
 $('dlPages').addEventListener('click', async () => {
   if (!await captureTabs()) return;
   if (!runReconcile()) return;
-  await downloadFound();
 });
 
 // ---------- One-click run ----------
 // The whole pipeline as one button: find the source tabs automatically
 // (no focusing), fall back gracefully at every stage.
-$('runAll').addEventListener('click', async () => {
+bindUiAction('runAll', async () => {
   toast('Running the full pipeline…');
   dbg('runAll: start');
   fetchExceptions(true); // live exceptions must be current at run time
@@ -4759,7 +5238,9 @@ $('runAll').addEventListener('click', async () => {
   // Sheetless clients (DataPlusMath, Comscore) skip this ENTIRE stage -
   // no tab grab, no remembered doc, nothing may re-detect them through a
   // stale open tracker. The email IS the manifest.
-  if (!(client && client.sheetless)) {
+  if (!(emailOnly())) {
+    await cleanTrackerReferences();
+    await trackerLoadPending;
     const st = pickTrackerTab(cls.sheet.concat(cls.sharepoint, cls.airtable), active);
     const ref = emailSheetRefs()[0];
     if (ref && (!sheet || !lastSheetRef || lastSheetRef.id !== ref.id)) {
@@ -4784,7 +5265,8 @@ $('runAll').addEventListener('click', async () => {
   // 4 · Download: the shared cascade - links, sweep, pages.
   dbg('runAll: matched', { rows: selectedMatches().length,
     withLinks: selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length });
-  await autoDownload();
+  if (!client || !client.workflow || client.workflow.findFiles !== false) await autoDownload();
+  else modStatDone('stDl', 'Discovery skipped by client workflow — feed local files or continue to Verify & draft');
 });
 
 // ---------- Restore state + context-menu captures ----------
@@ -4802,7 +5284,11 @@ $('clientSel').innerHTML = '<option value="">(auto-detect)</option>' +
 $('clientSel').addEventListener('change', () => {
   client = CLIENTS.find(c => c.id === $('clientSel').value) || null;
   clientSource = client ? 'manual' : '';
+  matched = null;
+  lastResults = null;
+  idsEl.value = '';
   applyErPreset(client);
+  renderTrackerMode();
   renderClientNote();
 });
 
@@ -4832,15 +5318,19 @@ function portalProbe() {
 function portalFill(plan) {
   window.__ingestFill = plan;
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const rows = plan.rows.map(r => ({ ...r, idN: norm(r.id), titleN: norm(r.title) }));
+  const rows = plan.rows.map(r => ({ ...r, idN: norm(r.id), titleN: norm(r.title),
+    fileNs: String(r.fileName || '').split(/\r?\n|;|\s+\/\s+/).map(n => norm(n.trim().replace(/\.(mp4|mov|mxf|mpg|mpeg|ts|avi|m4v)$/i, ''))).filter(Boolean) }));
   // Ticker markers: _ticker, _t, or the playbook's custom tickerSuffix.
   const sfxRe = new RegExp('(' + ['_ticker', '_t', plan.opts.tickerSuffix]
     .filter(Boolean).filter((s, i, a) => a.indexOf(s) === i)
     .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$', 'i');
   const findRow = stem => {
     const s = norm(stem);
-    return rows.find(r => r.idN && s.includes(r.idN)) ||
-           rows.find(r => r.titleN.length >= 6 && s.includes(r.titleN)) || null;
+    const exact = rows.filter(r => r.idN === s || r.titleN === s || r.fileNs.includes(s));
+    if (exact.length) return exact.length === 1 ? exact[0] : null;
+    const hits = rows.filter(r => (r.idN.length >= 6 && s.includes(r.idN)) ||
+      (r.titleN.length >= 10 && s.includes(r.titleN)));
+    return hits.length === 1 ? hits[0] : null;
   };
   const write = (tr, cls, v) => {
     const td = tr.querySelector('td.' + cls);
@@ -4861,13 +5351,16 @@ function portalFill(plan) {
     const tk = stem.match(sfxRe);
     const ticker = !!tk;
     const r = findRow(stem.replace(sfxRe, '')) || findRow(stem);
-    if (!r) { nameTd.style.outline = '1px solid #b06000'; tr.dataset.ingestFilled = 'miss'; return; }
+    if (!r) { nameTd.style.outline = '1px solid #b06000'; return; }
+    const fields = ['file_reporting', 'file_title'];
+    if (plan.opts.advertiser && r.brand) fields.push('file_comm_advertiser', 'file_comm_brand', 'file_comm_vertical');
+    if (!fields.every(cls => tr.querySelector('td.' + cls))) return;
     tr.dataset.ingestFilled = 'ok';
     // The ticker marker is preserved, the value behind it corrected:
     // CODE_t -> RealID_t, CODE_ticker -> RealID_ticker. Never stripped,
     // never doubled (marker appended only when the value lacks it).
-    const marker = ticker ? tk[0] : '';
-    const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
+    const marker = ticker ? (plan.opts.tickerSuffix || tk[0]) : '';
+    const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? String(v).slice(0, -marker.length) + marker : v + marker;
     write(tr, 'file_reporting', ticker ? withMarker(r.id) : r.id);
     // Title defaults to the reporting ID - playbooks with nameTitle get
     // their real title; everyone else ingests ISCI-as-title.
@@ -4883,13 +5376,14 @@ function portalFill(plan) {
   const sweep = () => document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').forEach(fillRow);
   // A fresh push clears fill flags so re-dropped/renamed files re-evaluate.
   document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').forEach(tr => delete tr.dataset.ingestFilled);
-  if (!window.__ingestObserver) {
-    const body = document.querySelector('#fileingest_bulk tbody') || document.getElementById('fileingest_bulk');
-    window.__ingestObserver = new MutationObserver(sweep);
-    if (body) window.__ingestObserver.observe(body, { childList: true, subtree: true });
-  }
+  if (window.__ingestObserver) window.__ingestObserver.disconnect();
+  const body = document.querySelector('#fileingest_bulk tbody') || document.getElementById('fileingest_bulk');
+  window.__ingestObserver = new MutationObserver(sweep);
+  if (body) window.__ingestObserver.observe(body, { childList: true, subtree: true, characterData: true });
   sweep();
-  return { queued: document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').length };
+  const queued = [...document.querySelectorAll('#fileingest_bulk tbody tr.upload_row')];
+  return { queued: queued.length, filled: queued.filter(tr => tr.dataset.ingestFilled === 'ok').length,
+    unmatched: queued.filter(tr => tr.dataset.ingestFilled !== 'ok').map(tr => (tr.querySelector('td.file_name') || {}).textContent || '') };
 }
 
 // Plan rows from the committed match table + the playbook's ingest block.
@@ -4908,7 +5402,10 @@ function ingestPlan() {
       .map(m => ({
         id: clean(m.trackingId || m.id),
         title: clean(m.title),
-        brand: clean(ing.brandFixed) || clean(m.brand),
+        fileName: m.fileName || '',
+        brand: Number.isInteger(ing.campaignColumn)
+          ? clean(sheet && sheet.allRows[m.row - 1] && sheet.allRows[m.row - 1][ing.campaignColumn])
+          : clean(ing.brandFixed) || clean(m.brand),
         espn: !!m.espn,
       })),
     opts: (() => {
@@ -4943,7 +5440,9 @@ function renderIngestPreview() {
     "Reporting ID ← '" + (ingestColName('id') || 'email') + "'" + (plan.opts.tickerSuffix ? " (+" + plan.opts.tickerSuffix + " on _ticker files)" : ''),
     plan.opts.nameTitle ? "Title ← '" + (ingestColName('title') || '?') + "' col" : 'Title ← reporting ID (default)',
     plan.opts.advertiser
-      ? (ing.brandFixed
+      ? (Number.isInteger(ing.campaignColumn)
+        ? 'Advertiser/Brand/Vertical ← InMarket Campaign Name (column D; blank stays untouched)'
+        : ing.brandFixed
         ? "Advertiser/Brand/Vertical ← '" + String(ing.brandFixed) + "' (playbook - not on the sheet)"
         : "Advertiser/Brand/Vertical ← '" + (ingestColName('brand') || '?') + "' col")
       : 'Advertiser/Brand/Vertical — playbook leaves default',
@@ -4951,11 +5450,19 @@ function renderIngestPreview() {
     'Realm · Type · Retention — never touched',
   ];
   let html = '<div class="hint">' + lines.map(esc).join('<br>') + '</div>';
-  html += '<table><tr><th>ID</th><th>Title</th><th>Brand→Adv/Vert</th><th></th></tr>' +
-    plan.rows.map(r =>
-      '<tr><td>' + esc(r.id) + '</td><td>' + esc(r.title).slice(0, 40) + '</td><td>' + esc(r.brand) + '</td><td>' +
-      (r.espn ? '<span class="chip espn">ESPN</span>' : '') + '</td></tr>').join('') +
-    '</table>';
+  html += '<table><tr><th>Reporting ID</th><th>Portal Title</th><th>Brand→Adv/Vert</th><th>Version</th></tr>' +
+    plan.rows.flatMap(r => {
+      const title = plan.opts.nameTitle && r.title ? r.title : r.id;
+      const row = (id, t, version) => '<tr><td>' + esc(id) + '</td><td>' + esc(t) + '</td><td>' +
+        esc(plan.opts.advertiser ? r.brand : '') + '</td><td>' + version + '</td></tr>';
+      const out = [row(r.id, title, 'Standard')];
+      if (r.espn) {
+        const suffix = plan.opts.tickerSuffix;
+        const mark = v => String(v).toLowerCase().endsWith(suffix.toLowerCase()) ? String(v).slice(0, -suffix.length) + suffix : v + suffix;
+        out.push(row(mark(r.id), mark(title), 'Ticker (video)'));
+      }
+      return out;
+    }).join('') + '</table>';
   if (plan.rows.some(r => r.espn))
     html += '<div class="hint">ESPN-flagged rows expect a <b>_ticker</b> file in the drop (fingerprint=video auto-set).</div>';
   $('ingestPreviewBox').innerHTML = html;
@@ -4972,8 +5479,12 @@ function renderIngestVerify(probe) {
     .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$', 'i');
   const findRow = stem => {
     const s = norm(stem);
-    return plan.rows.find(r => s.includes(norm(r.id))) ||
-           plan.rows.find(r => norm(r.title).length >= 6 && s.includes(norm(r.title))) || null;
+    const exact = plan.rows.filter(r => norm(r.id) === s || norm(r.title) === s ||
+      String(r.fileName || '').split(/\r?\n|;|\s+\/\s+/).some(n => norm(n.trim().replace(/\.(mp4|mov|mxf|mpg|mpeg|ts|avi|m4v)$/i, '')) === s));
+    if (exact.length) return exact.length === 1 ? exact[0] : null;
+    const hits = plan.rows.filter(r => (norm(r.id).length >= 6 && s.includes(norm(r.id))) ||
+      (norm(r.title).length >= 10 && s.includes(norm(r.title))));
+    return hits.length === 1 ? hits[0] : null;
   };
   let ok = 0, diff = 0, miss = 0;
   const html = '<table><tr><th>File</th><th>Reporting</th><th>Title</th><th>Adv</th><th>FP</th><th></th></tr>' +
@@ -4983,8 +5494,8 @@ function renderIngestVerify(probe) {
       const ticker = !!tk;
       const r = findRow(stem.replace(sfxRe, '')) || findRow(stem);
       if (!r) { miss++; return '<tr><td>' + esc(q.name) + '</td><td colspan="4"></td><td class="warn">no match</td></tr>'; }
-      const marker = ticker ? tk[0] : '';
-      const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? v : v + marker;
+      const marker = ticker ? (plan.opts.tickerSuffix || tk[0]) : '';
+      const withMarker = v => String(v).toLowerCase().endsWith(marker.toLowerCase()) ? String(v).slice(0, -marker.length) + marker : v + marker;
       const wantRep = ticker ? withMarker(r.id) : r.id;
       const wantTitle = ticker ? withMarker(plan.opts.nameTitle && r.title ? r.title : r.id)
                                : (plan.opts.nameTitle && r.title ? r.title : r.id);
@@ -4993,6 +5504,11 @@ function renderIngestVerify(probe) {
       if (q.reporting !== wantRep) bad.push('rep');
       if (q.title !== wantTitle) bad.push('title');
       if (q.fingerprint !== wantFp) bad.push('fp');
+      if (plan.opts.advertiser && r.brand) {
+        if (q.advertiser !== r.brand) bad.push('advertiser');
+        if (q.brand !== r.brand) bad.push('brand');
+        if (q.vertical !== r.brand) bad.push('vertical');
+      }
       bad.length ? diff++ : ok++;
       return '<tr><td>' + esc(q.name) + '</td><td>' + esc(q.reporting) + '</td><td>' + esc(q.title).slice(0, 30) + '</td><td>' +
         esc(q.advertiser) + '</td><td>' + esc(q.fingerprint) + '</td><td>' +
@@ -5008,7 +5524,7 @@ async function portalTab() {
   return pickTab(cls.portal, active && active.id);
 }
 
-$('ingestCheck').addEventListener('click', async () => {
+bindUiAction('ingestCheck', async () => {
   const tab = await portalTab();
   if (!tab) { toast('No portal.cognet.tv tab open'); setStage('sdIngest', 'warn', 'no portal tab open'); return; }
   const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalProbe });
@@ -5032,7 +5548,8 @@ $('ingestCheck').addEventListener('click', async () => {
   refreshTickerStatus();
 });
 
-$('ingestPush').addEventListener('click', async () => {
+bindUiAction('ingestPush', async () => {
+  const context = workflowContext();
   ensureMatchRows();
   const plan = ingestPlan();
   if (!plan.rows.length) { toast('No committed matches - run Match first'); return; }
@@ -5041,12 +5558,16 @@ $('ingestPush').addEventListener('click', async () => {
   modStat('stIngest', 'Writing ' + plan.rows.length + ' fills into the portal…');
   const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalFill, args: [plan] });
   const n = (res && res.result && res.result.queued) || 0;
-  modStatDone('stIngest', 'Queued ' + n + '/' + plan.rows.length + ' fill(s)');
+  if (context !== workflowContext()) return;
+  const fillResult = (res && res.result) || {};
+  modStatDone('stIngest', (fillResult.filled || 0) + '/' + n + ' queued file(s) filled · ' +
+    (fillResult.unmatched || []).length + ' need review');
   const [pr] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: portalProbe });
   const p = pr && pr.result;
   stamp('tsIngest');
   if (p && p.rows.length) {
     const v = renderIngestVerify(p);
+    if (v.ok && !v.diff && !v.miss) uiFillsContext = context;
     setStage('sdIngest', v.diff || v.miss ? 'warn' : 'ok',
       v.ok + ' row(s) verified · ' + v.diff + ' differ · ' + v.miss + ' unmatched — watching for new drops');
     $('ingestInfo').textContent = 'fills pushed — new files dropped into the queue auto-fill; ' +
@@ -5056,7 +5577,8 @@ $('ingestPush').addEventListener('click', async () => {
     setStage('sdIngest', 'warn', 'plan armed (' + plan.rows.length + ' rows) — queue still empty, will fill on drop');
     $('ingestInfo').textContent = 'plan armed for ' + plan.rows.length + ' row(s) — drop the videos, fills apply automatically';
   }
-  dbg('ingest push', { rows: plan.rows.length, queued: n });
+  dbg('ingest push', { rows: plan.rows.length, queued: n, filled: fillResult.filled || 0,
+    unmatched: fillResult.unmatched || [] });
   refreshTickerStatus();
 });
 
@@ -5093,14 +5615,42 @@ async function feedJobFiles(job, base, kind) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise(r => setTimeout(r, 2500));
     const after = document.querySelectorAll('#fileingest_bulk tbody tr.upload_row').length;
-    return { fed: dt.files.length, skipped, rowsAdded: after - before, rowsTotal: after };
+    return { fed: dt.files.length, names: [...dt.files].map(f => f.name), skipped, rowsAdded: after - before, rowsTotal: after };
   } catch (e) { return { error: String(e) }; }
+}
+
+// Files can reach the portal without a download run (manual drops, Pick &
+// feed, local discovery). The watcher only builds ticker versions from the
+// job manifest's needs_espn rows, so feeding must guarantee one exists.
+// overwrite keeps it idempotent - a second write can't splinter the job
+// across a "-manifest (1).json" sibling.
+async function ensureJobManifest() {
+  if (manifestWritten) return;
+  const sel = selectedMatches().filter(m => m.trackingId || m.id);
+  if (!sel.length) return;
+  const entries = sel.map(m => {
+    const tid = m.trackingId || m.id;
+    const df = /\.[a-z0-9]{2,5}$/i.test(m.fileName || '') ? m.fileName : String(m.fileName || tid || 'file') + '.mp4';
+    return { row: m.row, tracking_id: tid, title: m.title || '', expected_name: m.fileName || '',
+      needs_espn: m.espn || tickerAlways(), url: null, file: nameForIngest(tid, m.title || '', df) };
+  });
+  const blob = new Blob([buildManifest(jobSlug(), entries, clientInfo())], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  await chrome.downloads.download({ url, filename: 'Ingest/' + jobSlug() + '-manifest.json', conflictAction: 'overwrite' });
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  manifestWritten = true;
+  dbg('job manifest written for feed path', { entries: entries.length, espn: entries.filter(e => e.needs_espn).length });
 }
 
 // Feeds whatever the watcher has for this job into the portal picker.
 // Shared by "Feed files" (job-dir downloads) and "Pick & feed" (after
 // the picked files have been uploaded into the job dir).
 async function feedPortalNow(tab, job, kind) {
+  ensureMatchRows();
+  await ensureJobManifest();
+  const context = workflowContext();
+  await discoverLocalFiles(job);
+  if (context !== workflowContext()) return { error: 'Request changed before feeding files.' };
   const [res] = await chrome.scripting.executeScript({
     target: { tabId: tab.id }, func: feedJobFiles,
     args: [job, 'http://127.0.0.1:8770', kind || 'standard'] });
@@ -5113,10 +5663,38 @@ async function feedPortalNow(tab, job, kind) {
     ' - no new rows appeared; the page may need a manual drop') +
     (r.skipped && r.skipped.length ? ' · skipped: ' + r.skipped.join(', ') : '');
   dbg('feed portal', r);
+  if (context === workflowContext()) {
+    const ids = replyRequestIds();
+    const entries = (r.names || []).flatMap(name => {
+      const hits = ids.filter(id => new RegExp('(^|[^a-z0-9])' + id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=$|[^a-z0-9])', 'i').test(name));
+      return hits.length === 1 ? [{ id: kind === 'ticker' ? hits[0] + (replyOptions().tickerSuffix || '_ticker') : hits[0], stage: 'located', source: 'portal file feed' }] : [];
+    });
+    if (entries.length) rememberWorkflowEvidence(entries, context);
+    refreshReply();
+    armAutoVerify();
+  }
   return r;
 }
 
-$('feedPortal').addEventListener('click', async () => {
+// Delivery auto-recheck: when Find files reports "not yet delivered",
+// arm a low-frequency retry (15 min) that re-runs Find files while the
+// panel is open - surfaces late deliveries without manual babysitting.
+let redeliveryTimer = null;
+function armRedeliveryWatch() {
+  if (redeliveryTimer) return;
+  redeliveryTimer = setInterval(async () => {
+    try {
+      if (dlQueueActive || dlTotal > 0) return;
+      if ((lastResults || []).some(r => r.status === 'FOUND') ||
+          selectedMatches().some(m => m.link || m.yangarooUrl)) {
+        clearInterval(redeliveryTimer); redeliveryTimer = null; return;
+      }
+      await autoDownload();
+    } catch (e) { /* retry next tick */ }
+  }, 900000);
+}
+
+bindUiAction('feedPortal', async () => {
   const tab = await portalTab();
   if (!tab) { toast('No portal.cognet.tv tab open - open the ingest page first'); return; }
   $('ingestInfo').textContent = 'Streaming job files from Ingest/ into the portal picker…';
@@ -5128,7 +5706,7 @@ $('feedPortal').addEventListener('click', async () => {
 // outputs, then re-run the fill so their rows get id+suffix and
 // fingerprint=video. The armed observer would fill them anyway - the
 // explicit re-push covers a reloaded portal tab that lost __ingestFill.
-$('feedTicker').addEventListener('click', async () => {
+bindUiAction('feedTicker', async () => {
   const tab = await portalTab();
   if (!tab) { toast('No portal.cognet.tv tab open - open the ingest page first'); return; }
   $('ingestInfo').textContent = 'Streaming ticker versions into the portal picker…';
@@ -5185,11 +5763,12 @@ setInterval(() => { if ($('sec5').open) refreshTickerStatus(); }, 15000);
 // pick media anywhere -> upload into the job folder (watcher pairs each
 // to its manifest row by stem) -> feed the portal picker as usual.
 $('pickPortal').addEventListener('click', () => $('portalPick').click());
-$('portalPick').addEventListener('change', async e => {
+bindFilePick('portalPick', async e => {
   const files = [...e.target.files];
   e.target.value = '';
   if (!files.length) return;
   const job = jobSlug();
+  await ensureJobManifest();
   $('ingestInfo').textContent = 'Uploading ' + files.length + ' file(s) into ' + job + '…';
   const paired = [], unpaired = [], failed = [];
   for (const f of files) {
@@ -5218,6 +5797,7 @@ const PORTAL_STAGE = { INGEST_STARTED: 'uploading', INGEST_COMPLETED: 'queued fo
   DETECTION_STARTED: 'detecting', PROCESSING: 'processing' };
 
 async function portalLiveTick() {
+  const context = workflowContext();
   const box = $('portalLive');
   if (!box) return;
   const realm = ingestRealm();
@@ -5225,7 +5805,14 @@ async function portalLiveTick() {
   if (!realm || !wanted.length) { box.textContent = ''; return; }
   try {
     const all = await fetchRealmRecords(realm, 1);
-    const idx = new Map(all.map(r => [normalizeName(r.reportingId || '').replace(/ /g, ''), r]));
+    if (context !== workflowContext()) return;
+    const idx = new Map();
+    all.forEach(r => { const key = normalizeName(r.reportingId || '').replace(/ /g, ''); if (!idx.has(key)) idx.set(key, r); });
+    rememberWorkflowEvidence(wanted.flatMap(w => {
+      const rec = idx.get(normalizeName(w.reporting).replace(/ /g, ''));
+      return rec ? [{ id: w.reporting, stage: recordEvidenceStage(rec), status: rec.status, source: 'live portal records' }] : [];
+    }), context);
+    refreshReply();
     const info = wanted.map(w => {
       const rec = idx.get(normalizeName(w.reporting).replace(/ /g, ''));
       const st = rec ? (rec.status || '?') : 'no record';
@@ -5272,7 +5859,8 @@ chrome.storage.local.get(['pendingIds', 'pendingFiles', 'erApiKey', 'erSender', 
   if (data.pendingIds) { idsEl.value = data.pendingIds; chrome.storage.local.remove('pendingIds'); }
   if (data.pendingFiles) { filesEl.value = data.pendingFiles; chrome.storage.local.remove('pendingFiles'); }
   if (data.erApiKey) { erApiKey = data.erApiKey; $('erApiKey').value = erApiKey; }
-  if (data.erSender) $('erSender').value = data.erSender;
+  if (client) applyErPreset(client);
+  else $('erSender').value = '';
   if (data.erDays) $('erDays').value = data.erDays;
 });
 
@@ -5437,6 +6025,182 @@ applyPendingAction();
 
 // Next-step guidance: the stage dots already know where the run stands -
 // read the first non-ok one and name its action. Clicking jumps there.
+function currentDownloadCount() {
+  return dlRunIds.filter(id => ourDlIds.has(id)).length;
+}
+function journeySnapshot() {
+  const rows = selectedMatches().filter(m => m.matchType !== 'ROW (out of range)');
+  const ids = [...new Set(rows.map(m => m.trackingId || m.id).filter(Boolean))];
+  const reports = [...new Set(ingestReportIds().map(r => r.reporting))];
+  const current = workflowEvidenceKey === workflowContext();
+  const evidence = id => current && workflowEvidence.get(normalizeName(id).replace(/ /g, ''));
+  const entries = reports.map(evidence).filter(Boolean);
+  const located = ids.filter(id => evidence(id) || (lastResults || []).some(r => normalizeName(r.id) === normalizeName(id) && r.status === 'FOUND')).length;
+  const local = localDiscovery && localDiscovery.context === workflowContext() ? (localDiscovery.files || []).filter(f => f.kind === 'standard').length : 0;
+  return { request: !!emailEl.value.trim(), customer: !!client, ids: ids.length, expected: reports.length,
+    emailOnly: emailOnly(), tracker: !!sheet, located, local, downloaded: dlDone,
+    completed: entries.filter(e => e.stage === 'complete').length,
+    failed: entries.filter(e => e.stage === 'failed').length,
+    records: entries.filter(e => e.stage !== 'located').length,
+    fed: entries.filter(e => e.source === 'portal file feed').length,
+    fillsApplied: uiFillsContext === workflowContext(),
+    previewReady: !$('ingestPush').classList.contains('hidden'),
+    skipDiscovery: !!(client && client.workflow && client.workflow.findFiles === false) };
+}
+function showJourneyStep(step, target) {
+  if (!['request', 'files', 'ingest', 'confirm', 'settings'].includes(step)) return;
+  journeyStep = step;
+  renderJourneyUI();
+  if (target) {
+    const el = $(target);
+    if (el) {
+      let parent = el.parentElement;
+      while (parent && parent !== document.body) { if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement; }
+      if (el.tagName === 'DETAILS') el.open = true;
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+}
+function renderJourneyUI() {
+  if (!$('jobSummary')) return;
+  const snapshot = journeySnapshot();
+  const next = jobJourneyState(snapshot);
+  ['request', 'files', 'ingest', 'confirm'].forEach(step => {
+    const name = step[0].toUpperCase() + step.slice(1);
+    $('journey' + name).hidden = journeyStep === 'settings' || (!$('showAllSteps').checked && step !== journeyStep);
+    $('nav' + name).setAttribute('aria-pressed', String(step === journeyStep));
+  });
+  const sp = $('journeySettings');
+  if (sp) sp.hidden = journeyStep !== 'settings';
+  $('settingsGear').setAttribute('aria-expanded', String(journeyStep === 'settings'));
+  $('sec2').hidden = snapshot.emailOnly;
+  $('jobIdentity').textContent = (client ? client.name : 'Choose a customer') + ' · ' + (snapshot.emailOnly ? 'No tracker' : sheet ? 'Tracker loaded' : 'Tracker required');
+  const counts = '<span>Identified: <strong>' + snapshot.ids + '</strong></span>' +
+    '<span>Located: <strong>' + snapshot.located + '</strong></span>' +
+    '<span>Downloaded this run: <strong>' + snapshot.downloaded + '</strong></span>' +
+    '<span>Verified: <strong>' + snapshot.completed + '/' + snapshot.expected + '</strong></span>' +
+    (snapshot.failed ? '<span>Failed: <strong>' + snapshot.failed + '</strong></span>' : '');
+  if ($('jobCounts').innerHTML !== counts) $('jobCounts').innerHTML = counts;
+  // "What happened" trail: one glance answers is-it-done. ✓ = stage has
+  // real evidence; – = not applicable (sheetless); · = pending.
+  const trail = [
+    'email ' + (snapshot.request ? '✓' : '·'),
+    snapshot.emailOnly ? 'tracker –' : 'tracker ' + (snapshot.tracker ? '✓' : '·'),
+    'matched ' + (snapshot.ids || '·'),
+    'files ' + (snapshot.located || snapshot.local || snapshot.downloaded ? '✓' : '·'),
+    'fed ' + (snapshot.fed ? '✓' : '·'),
+    'fills ' + (snapshot.fillsApplied ? '✓' : '·'),
+    'verified ' + snapshot.completed + '/' + (snapshot.expected || '·'),
+    'reply ' + (($('replyPreview').value || '').trim() ? 'drafted' : '·'),
+  ].join(' · ');
+  const trailEl = $('jobTrail');
+  if (trailEl && trailEl.textContent !== trail) trailEl.textContent = trail;
+  $('jobNext').textContent = uiBusy ? 'Working…' : currentDownloadCount() ? 'Downloads in progress…' : next.label;
+  $('jobNext').dataset.action = next.action;
+  $('jobNext').disabled = !!uiBusy || !!currentDownloadCount();
+  $('clearAll').disabled = !!uiBusy || !!currentDownloadCount();
+  $('clientSel').disabled = !!uiBusy || !!currentDownloadCount();
+  $('jobNext').setAttribute('aria-busy', String(!!uiBusy || !!currentDownloadCount()));
+  $('jobHint').textContent = next.hint;
+  const active = currentDownloadCount();
+  $('jobStop').hidden = !dlQueueActive && !active;
+  $('jobStop').disabled = dlQueueActive && dlStop;
+  $('stopDl').classList.toggle('hidden', !dlQueueActive && !active);
+  const notice = $('operationNotice');
+  if (!uiBusy && !notice.classList.contains('error')) {
+    if (active) { notice.dataset.kind = 'downloads'; notice.textContent = active + ' download(s) still active. Stop remains available from any step.'; }
+    else if (notice.dataset.kind === 'downloads') { notice.textContent = dlDone + ' completed · ' + dlFailed + ' failed or canceled. Review the files before continuing.'; delete notice.dataset.kind; }
+  }
+  const downloadable = selectedMatches().filter(m => /^https?:/i.test(m.link || '') || m.yangarooUrl).length ||
+    (lastResults || []).filter(r => r.status === 'FOUND' && /^https?:/i.test((capturedByName[r.matched] || {}).url || '')).length;
+  $('downloadMedia').textContent = downloadable ? 'Download ' + downloadable + ' linked match' + (downloadable === 1 ? '' : 'es') : 'Download files';
+  $('downloadMedia').disabled = !!uiBusy || !!currentDownloadCount() || !downloadable;
+  $('download').disabled = !!uiBusy || !!currentDownloadCount();
+  if (uiBusy) {
+    $('operationNotice').textContent = uiBusy.label + (uiBusy.progress ? ' — ' + uiBusy.progress : '…');
+  }
+}
+async function runUiAction(id, action, event) {
+  if (uiBusy || (currentDownloadCount() && (id === 'download' || id === 'downloadMedia'))) return;
+  const button = $(id);
+  const locked = [];
+  const context = workflowContext();
+  uiBusy = { id, context, label: button ? button.textContent.trim() : 'Working' };
+  ['runAll', 'clearAll', 'clientSel', 'findSource', 'trackerMode', 'fillProfile', 'saveClientRules', 'grabEmail', 'checkInbox', 'grabSheet', 'match', 'grabAndDl', 'download', 'downloadMedia', 'feedPortal', 'feedTicker', 'pickPortal', 'ingestCheck', 'ingestPush', 'verifyIngest', 'postJira', 'alreadyHaveFiles', 'alreadyIngested'].forEach(key => {
+    const el = $(key); if (el && !el.disabled) { el.disabled = true; locked.push(el); }
+  });
+  $('operationNotice').classList.remove('error');
+  if (button) button.setAttribute('aria-busy', 'true');
+  renderJourneyUI();
+  try { return await action(event); }
+  catch (error) {
+    if (context === workflowContext()) {
+      $('operationNotice').classList.add('error');
+      $('operationNotice').textContent = 'Could not finish: ' + error.message + '. Review this step or try a manual path.';
+    }
+    dbg('UI action failed', { action: id, error: error.message });
+  } finally {
+    uiBusy = null;
+    if (id === 'download' || id === 'downloadMedia') dlQueueActive = false;
+    locked.forEach(el => { el.disabled = false; });
+    if (button) button.setAttribute('aria-busy', 'false');
+    if (!$('operationNotice').classList.contains('error')) $('operationNotice').textContent = id !== 'clearAll' && context === workflowContext() ? 'Operation finished — review the result before continuing.' : '';
+    renderJourneyUI();
+  }
+}
+function bindUiAction(id, action) {
+  $(id).addEventListener('click', event => runUiAction(id, action, event));
+}
+function bindFilePick(id, action) {
+  $(id).addEventListener('change', event => runUiAction('pickPortal', action, event));
+}
+$('journeyNav').addEventListener('click', event => {
+  const button = event.target.closest('button[data-step]');
+  if (button) showJourneyStep(button.dataset.step);
+});
+$('showAllSteps').addEventListener('change', renderJourneyUI);
+$('jobStop').addEventListener('click', () => { $('stopDl').click(); });
+$('jobNext').addEventListener('click', () => {
+  if (uiBusy || currentDownloadCount()) return;
+  const next = jobJourneyState(journeySnapshot());
+  if ($('jobNext').dataset.action !== next.action) { renderJourneyUI(); return; }
+  const targets = { request: 'sec1', customer: 'sec1', tracker: 'sec2', match: 'sec3', find: 'sec4', local: 'sec4', reviewFiles: 'sec4', feed: 'sec5', preview: 'sec5', fills: 'ingestPreviewBox', verify: 'secReport', progress: 'secReport', issues: 'verifyInfo', confirm: 'secReport' };
+  showJourneyStep(next.step, targets[next.action]);
+  const actions = { match: 'match', find: 'grabAndDl', local: 'grabAndDl', feed: 'feedPortal', preview: 'ingestCheck', verify: 'verifyIngest' };
+  if (next.action === 'local') $('findSource').value = 'local';
+  if (actions[next.action]) $(actions[next.action]).click();
+  else if (next.action === 'request') emailEl.focus();
+  else if (next.action === 'customer') $('clientSel').focus();
+  else if (next.action === 'fills') $('ingestPush').focus();
+  else if (next.action === 'confirm') $('sec6').open = true;
+});
+bindUiAction('alreadyHaveFiles', async () => {
+  showJourneyStep('files', 'sec4');
+  ensureMatchRows();
+  $('findSource').value = 'local';
+  const found = await discoverLocalFiles();
+  if (!found) {
+    $('capInfo').textContent = 'No unique local matches yet. Wait for downloads to finish, or use the portal file picker for duplicates or different filenames. Then return to preview fills or verify a manual ingest.';
+    $('operationNotice').textContent = 'No unique local matches. Use the portal file picker, then return to continue.';
+  }
+});
+function portalPickerGuide() {
+  const input = document.getElementById('multifile') || document.querySelector('#bulkdrop input[type=file], input.bulk-btn-upload');
+  if (!input) return { error: 'Open the File Ingest view in the portal first.' };
+  const dropzone = document.getElementById('bulkdrop') || input;
+  dropzone.scrollIntoView({ block: 'center' });
+  input.focus();
+  return { ready: true };
+}
+// The portal-picker shortcut was removed: users select files in the portal
+// page itself; the in-panel "I already have the files" path covers the rest.
+$('alreadyIngested').addEventListener('click', () => {
+  showJourneyStep('confirm', 'secReport');
+  $('verifyIngest').click();
+});
+const journeyStageSeen = new Map();
+queueMicrotask(renderJourneyUI);
+setInterval(renderJourneyUI, 750);
 const NEXT_STEPS = [
   ['sdEmail', 'sec1', 'load the request email - Run all, Check inbox, or Grab from Outlook'],
   ['sdSheet', 'sec2', 'load the tracker - auto-pulls from the email link, or Grab sheet tab'],
@@ -5457,11 +6221,12 @@ setInterval(() => {
   if (!el) return;
   SEC_CHAIN.forEach(([sec, sd]) => {
     const s = $(sd), d = $(sec);
-    if (s && d && /(^| )(ok|warn)( |$)/.test(s.className)) d.open = true;
+    if (s && d && journeyStageSeen.get(sd) !== s.className && /(^| )(ok|warn|skip)( |$)/.test(s.className)) d.open = true;
+    if (s) journeyStageSeen.set(sd, s.className);
   });
-  const step = NEXT_STEPS.find(([sd]) => !/(^| )ok( |$)/.test(($(sd) || {}).className || ''));
+  const step = NEXT_STEPS.find(([sd]) => !/(^| )(ok|skip)( |$)/.test(($(sd) || {}).className || ''));
   const tip = step && $(step[0]) && $(step[0]).title;
-  el.innerHTML = !step ? '&#10003; all steps done - ready for the next request'
+  el.innerHTML = !step ? 'All modules have results — review drafts and proof before starting a new request'
     : '&rarr; next: <a href="#" data-sec="' + step[1] + '">' + esc(step[2]) + '</a>' +
       (tip ? ' <i>(' + esc(tip) + ')</i>' : '');
 }, 2500);
@@ -5470,7 +6235,11 @@ $('nextStep').addEventListener('click', e => {
   if (!sec) return;
   e.preventDefault();
   const d = $(sec);
-  if (d) { d.open = true; d.scrollIntoView({ block: 'nearest' }); }
+  if (d) {
+    const panel = d.closest('.journey-panel');
+    if (panel) showJourneyStep(panel.id.replace('journey', '').toLowerCase(), sec);
+    else { d.open = true; d.scrollIntoView({ block: 'nearest' }); }
+  }
 });
 
 // ---------- Panel settings (which optional modules show) ----------
@@ -5478,12 +6247,12 @@ $('nextStep').addEventListener('click', e => {
 const UI_OPTS = [
   ['graph', 'opt-graph'], ['emailExtra', 'opt-emailExtra'], ['excReply', 'opt-excReply'],
   ['colMap', 'opt-colMap'], ['erSweep', 'opt-erSweep'], ['manual', 'opt-manual'],
-  ['log', 'opt-log'], ['hints', 'opt-hints'],
+  ['log', 'opt-log'], ['hints', 'opt-hints'], ['allSteps', 'showAllSteps'],
 ];
 
 function applyUiOpts(o) {
   UI_OPTS.forEach(([k, cbId]) => {
-    const on = o[k] !== false;
+    const on = k === 'allSteps' ? o[k] === true : o[k] !== false;
     document.querySelectorAll('[data-opt="' + k + '"]')
       .forEach(el => el.classList.toggle('opt-off', !on));
     const cb = $(cbId);
@@ -5494,23 +6263,15 @@ function applyUiOpts(o) {
 
 chrome.storage.local.get('uiOpts', d => applyUiOpts(d.uiOpts || {}));
 
+// ⚙ is a page, not a dropdown: it swaps the journey content for the
+// settings sections; any folder tab returns to the workflow.
 $('settingsGear').addEventListener('click', e => {
   e.stopPropagation();
-  const p = $('settingsPanel');
-  p.classList.toggle('hidden');
-  $('settingsGear').setAttribute('aria-expanded', String(!p.classList.contains('hidden')));
-  if (!p.classList.contains('hidden')) checkConns();
-});
-$('settingsPanel').addEventListener('click', e => e.stopPropagation());
-document.addEventListener('click', () => {
-  $('settingsPanel').classList.add('hidden');
-  $('settingsGear').setAttribute('aria-expanded', 'false');
+  showJourneyStep(journeyStep === 'settings' ? 'request' : 'settings');
+  if (journeyStep === 'settings') checkConns();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    $('settingsPanel').classList.add('hidden');
-    $('settingsGear').setAttribute('aria-expanded', 'false');
-  }
+  if (e.key === 'Escape' && journeyStep === 'settings') showJourneyStep('request');
 });
 UI_OPTS.forEach(([k, cbId]) => {
   $(cbId).addEventListener('change', () => {
@@ -5542,6 +6303,15 @@ function ingestRealm() {
   const first = Array.isArray(cid) ? cid[0] : cid;
   const n = String(first).toLowerCase().replace(/ /g, '');
   return FI_ALIASES[n] || n;
+}
+// Every realm this playbook ingests into (dual-silo = both silos get the
+// same file + each needs its own record/commercial cid).
+function ingestRealms() {
+  const aliases = (typeof FI_ALIASES !== 'undefined' && FI_ALIASES) || {};
+  const cid = (client && client.ingest && client.ingest.cidMap) || '';
+  const list = (Array.isArray(cid) ? cid : [cid]).filter(Boolean)
+    .map(n => aliases[String(n).toLowerCase().replace(/ /g, '')] || String(n).toLowerCase().replace(/ /g, ''));
+  return list.length ? list : [ingestRealm()].filter(Boolean);
 }
 
 // Rare blocking ask: a stage missing exactly one datum prompts for it
@@ -5857,24 +6627,109 @@ let lastIngestRecords = [];
 // Query the realm's records for the wanted reporting IDs, paint the result,
 // and leave lastIngestRecords set for the Jira proof. Returns the filtered
 // records (empty on API failure - caller treats it as "no records proof").
+// Job-evidence persistence: snapshots of workflowEvidence survive panel
+// reloads so a job picked up mid-flight (or after a crash) resumes with
+// its locate/ingest proof instead of "not found" defaults.
+function persistJobEvidence(context) {
+  try {
+    chrome.storage.local.set({
+      ['jobEv:' + context]: { savedAt: Date.now(), entries: [...workflowEvidence.entries()] }
+    });
+    // Past-jobs index: enough to re-load a request later - the email text
+    // reproduces the evidence context key, so Verify/Find rehydrate it.
+    const slug = jobSlug();
+    chrome.storage.local.get('jobIndex', d => {
+      const idx = (d.jobIndex || []).filter(j => j.slug !== slug);
+      idx.unshift({ slug, clientId: client && client.id, name: client && client.name,
+        at: Date.now(), subject: emailSubject || '', email: emailEl.value });
+      chrome.storage.local.set({ jobIndex: idx.slice(0, 20) });
+      renderPastJobs(idx.slice(0, 20));
+    });
+  } catch (e) { /* evidence persistence is advisory */ }
+}
+function renderPastJobs(idx) {
+  const sel = $('pastJobs');
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">past jobs…</option>' + (idx || []).map(j =>
+    '<option value="' + esc(j.slug) + '">' + esc(j.slug.replace(/^\d{8}-\d{6}-?/, '')) +
+    (j.name ? ' · ' + esc(j.name) : '') + '</option>').join('');
+  sel.value = keep;
+}
+chrome.storage.local.get('jobIndex', d => renderPastJobs(d.jobIndex));
+async function hydrateJobEvidence() {
+  const ctx = workflowContext();
+  if (workflowEvidenceKey === ctx && workflowEvidence.size) return;
+  try {
+    const key = 'jobEv:' + ctx;
+    const d = await chrome.storage.local.get(key);
+    const saved = d[key];
+    if (saved && Array.isArray(saved.entries) && ctx === workflowContext()) {
+      workflowEvidenceKey = ctx;
+      for (const [k, e] of saved.entries)
+        if (!workflowEvidence.has(k)) workflowEvidence.set(k, e);
+    }
+  } catch (e) { /* best-effort resume */ }
+}
+
 async function runVerify(wanted) {
-  const realm = resolveRealm();
-  if (!realm) throw new Error('no ingest realm (cidMap) on this playbook');
-  $('verifyInfo').textContent = 'Querying ' + realm + ' records…';
+  const context = workflowContext();
+  await hydrateJobEvidence();
+  const realms = (client && client.ingest && client.ingest.dualSilo) ? ingestRealms() : [resolveRealm()].filter(Boolean);
+  if (!realms.length) throw new Error('no ingest realm (cidMap) on this playbook');
+  $('verifyInfo').textContent = 'Querying ' + realms.join(' + ') + ' records…';
   try {
     // Pages scale with batch size: records return newest-first, and a big
     // Tatari push can bury older IDs under today's other ingests.
-    const all = await fetchRealmRecords(realm, Math.max(2, Math.ceil(wanted.length / 500) + 1));
     const want = new Map(wanted.map(w => [normalizeName(w.reporting).replace(/ /g, ''), w.reporting]));
-    lastIngestRecords = all.filter(r => want.has(normalizeName(r.reportingId || '').replace(/ /g, '')));
-    const hitIds = new Set(lastIngestRecords.map(r => normalizeName(r.reportingId).replace(/ /g, '')));
-    const missed = wanted.filter(w => !hitIds.has(normalizeName(w.reporting).replace(/ /g, '')));
+    lastIngestRecords = [];
+    const byRealm = {};
+    for (const realm of realms) {
+      const all = await fetchRealmRecords(realm, Math.max(2, Math.ceil(wanted.length / 500) + 1));
+      if (context !== workflowContext()) return [];
+      const hits = all.filter(r => want.has(normalizeName(r.reportingId || '').replace(/ /g, '')));
+      hits.forEach(r => { r.realm = realm; });
+      byRealm[realm] = hits;
+      lastIngestRecords.push(...hits);
+    }
+    const missed = wanted.filter(w => !realms.every(realm =>
+      (byRealm[realm] || []).some(r => normalizeName(r.reportingId) === normalizeName(w.reporting))));
     $('verifyInfo').innerHTML =
-      '<b>' + lastIngestRecords.length + '/' + wanted.length + '</b> reporting ID(s) in ' + esc(realm) + ' records' +
-      (missed.length ? ' - <span style="color:#ec9a9a">not found: ' + missed.slice(0, 8).map(m => esc(m.reporting)).join(', ') + (missed.length > 8 ? ' +' + (missed.length - 8) : '') + '</span>' : '') +
+      realms.map(realm => '<b>' + byRealm[realm].length + '/' + wanted.length + '</b> reporting ID(s) in ' + esc(realm)).join(' · ') +
+      (missed.length ? ' - <span style="color:#ec9a9a">not in all realms: ' + missed.slice(0, 8).map(m => esc(m.reporting)).join(', ') + (missed.length > 8 ? ' +' + (missed.length - 8) : '') + '</span>' : '') +
       (lastIngestRecords.length ? '<br>' + lastIngestRecords.slice(0, 10).map(r =>
-        esc(r.reportingId) + ' · ' + esc(r.status || '?') + ' · ' + esc(String(r.datetime || '').slice(0, 19).replace('T', ' '))).join('<br>') : '');
+        esc(r.reportingId) + ' · ' + esc(r.realm || realms[0]) + ' · ' + esc(r.status || '?') + ' · ' + esc(String(r.datetime || '').slice(0, 19).replace('T', ' '))).join('<br>') : '');
     $('saveRecords').classList.toggle('hidden', !lastIngestRecords.length);
+    // Evidence only counts when the ID reached that stage in EVERY realm
+    // the playbook ingests into - a geniusdigital hit alone can't claim
+    // the dual-silo job done.
+    const rank = { '': 0, located: 1, processing: 2, failed: 3, complete: 4 };
+    const perId = {};
+    lastIngestRecords.forEach(r => {
+      const k = normalizeName(r.reportingId).replace(/ /g, '');
+      (perId[k] = perId[k] || {})[r.realm] = r;
+    });
+    rememberWorkflowEvidence(Object.values(perId).map(realmMap => {
+      const stages = realms.map(realm => realmMap[realm] ? recordEvidenceStage(realmMap[realm]) : '');
+      const weakest = stages.reduce((a, b) => (rank[a] <= rank[b] ? a : b), 'complete');
+      const first = Object.values(realmMap)[0];
+      return { id: first.reportingId, stage: weakest,
+        status: stages.join('/') || first.status, source: 'verified records' };
+    }), context);
+    persistJobEvidence(context);
+    if (lastResults && filesEl.value.trim()) runReconcile();
+    refreshReply();
+    // Frame grabs: requesters (Vizio) want a still from each ingested file -
+    // the watcher writes <stem>-screenshot.jpg into the job folder.
+    fetch('http://127.0.0.1:8770/screenshots?job=' + encodeURIComponent(jobSlug()))
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        const shots = (j && j.screenshots) || [];
+        if (shots.length && context === workflowContext())
+          $('verifyInfo').innerHTML += '<br><span class="hint">screenshots for the reply: ' +
+            shots.map(esc).join(', ') + ' (job folder)</span>';
+      })
+      .catch(() => {});
     return lastIngestRecords;
   } catch (e) {
     lastIngestRecords = [];
@@ -5884,7 +6739,51 @@ async function runVerify(wanted) {
   }
 }
 
-$('verifyIngest').addEventListener('click', async () => {
+// Auto-verify: once files are fed, poll records until every wanted ID is
+// terminal (done or failed), then announce the reply is ready for review.
+let autoVerifyTimer = null;
+function armAutoVerify() {
+  if (autoVerifyTimer) return;
+  autoVerifyTimer = setInterval(async () => {
+    const wanted = ingestReportIds();
+    if (!wanted.length) { clearInterval(autoVerifyTimer); autoVerifyTimer = null; return; }
+    const context = workflowContext();
+    try {
+      await runVerify(wanted);
+      if (context !== workflowContext()) return;
+      const all = [...workflowEvidence.values()];
+      const settled = all.length && all.every(e => e.stage === 'complete' || e.stage === 'failed');
+      if (settled) {
+        clearInterval(autoVerifyTimer); autoVerifyTimer = null;
+        toast('Ingest finished - review the drafted reply.');
+        refreshReply();
+      }
+    } catch (e) { /* keep polling */ }
+  }, 60000);
+}
+
+// Sanity gate on the reply draft: hard-warn (but don't rewrite) when the
+// confirmation would claim things the records can't prove - fuzzy-matched
+// files, still-processing IDs, or flagged tickers with no record.
+function replySanity() {
+  const box = $('replyCheck');
+  if (!box) return;
+  const warn = [];
+  (lastResults || []).forEach(r => {
+    if (r.status === 'POSSIBLE MATCH' || r.status === 'AMBIGUOUS')
+      warn.push(r.id + ': ' + r.status.toLowerCase() + ' (' + (r.matched || '').split(' | ').slice(0, 2).join(', ') + ')');
+  });
+  const ev = workflowEvidence;
+  (selectedMatches() || []).forEach(m => {
+    const e = ev.get(normalizeName(m.trackingId || m.id).replace(/ /g, ''));
+    if (e && e.stage !== 'complete') warn.push((m.trackingId || m.id) + ': ' + e.stage);
+    if ((m.espn || m.emailEspn) && e && !ev.get(normalizeName((m.trackingId || m.id) + (replyOptions().tickerSuffix || '_ticker')).replace(/ /g, '')))
+      warn.push((m.trackingId || m.id) + ': ticker version not in records yet');
+  });
+  if (warn.length) box.innerHTML = '<b style="color:#e8a13d">Before sending:</b> ' + warn.slice(0, 5).map(esc).join(' · ') + (warn.length > 5 ? ' +' + (warn.length - 5) : '');
+}
+
+bindUiAction('verifyIngest', async () => {
   const realm = resolveRealm();
   if (!realm) return toast('No ingest realm (cidMap) on this playbook.');
   ensureMatchRows();
@@ -5895,6 +6794,7 @@ $('verifyIngest').addEventListener('click', async () => {
     await runVerify(wanted);
     modStatDone('stJira', lastIngestRecords.length + '/' + wanted.length + ' record(s) found');
     startPortalLive();
+    armAutoVerify();
   } catch (e) { toast(e.message); }
 });
 
@@ -6117,7 +7017,7 @@ async function postJiraComment(issue, wanted, st, proof) {
 // the weekly ticket and prints the exact comment - nothing writes to Jira
 // until "Post to Jira" approves the staged run.
 let pendingJira = null, draftWithoutProof = false;
-$('postJira').addEventListener('click', async () => {
+bindUiAction('postJira', async () => {
   let epic = jiraEpicFor();
   if (!epic) {
     const v = askFor('a Jira epic for ' + (client ? client.name : 'this client'),

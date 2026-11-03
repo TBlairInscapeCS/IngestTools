@@ -27,6 +27,33 @@ function eq(name, actual, expected) {
   else { fail++; failures.push(name + '\n    want ' + e + '\n    got  ' + a); }
 }
 
+eq('sender domain beats Horizon body', detectClient({ sender: 'Buyer <buyer@comscore.com>', emailText: 'Horizon Media request' }).id, 'comscore');
+eq('folder beats sheet and subject', detectClient({ folderName: 'Comscore', subject: 'Horizon Media', emailText: 'Horizon' }).id, 'comscore');
+eq('SimulMedia sender', detectClient({ sender: 'buyer@simulmedia.com', emailText: 'Horizon forwarded this' }).id, 'simulmedia');
+eq('Vizio internal request detects as dual-silo', detectClient({ sender: 'Sarah Henschel <sarah.henschel@vizio.com>', subject: 'Sony Clip for Ingestion', emailText: 'ingest as Commercial Video + Audio' }).id, 'vizio-request');
+eq('Vizio own-address excluded from requests', (detectClient({ sender: 'Tim Blair <tim.blair@vizio.com>', subject: 'RE: clip for ingestion', emailText: 'ingest' }) || {}).id !== 'vizio-request', true);
+eq('Vizio partner excluded from requests', (detectClient({ sender: 'Chris Roomian <chris.roomian@vizio.com>', subject: 'RE: clip for ingestion', emailText: 'ingest' }) || {}).id !== 'vizio-request', true);
+eq('SimulMedia has no tracker', CLIENTS.find(c => c.id === 'simulmedia').sheetless, true);
+eq('Comscore ticker suffix', CLIENTS.find(c => c.id === 'comscore').ingest.tickerSuffix, '_t');
+eq('Comcast styled spot links', comcastDlLinks("<a href='https://example.com/asset'><span>Spot</span></a>"), ['https://example.com/asset']);
+eq('Comcast download links', comcastDlLinks('<a href="https://example.com/asset">Download Spot</a>'), ['https://example.com/asset']);
+['Thanks!', 'Thank you.', 'Best,', 'Kind regards,', 'Cheers', 'Regards,'].forEach(signoff => {
+  eq('spot title excludes farewell ' + signoff, extractSpotBlocks('Please ingest:\nABC12345H\n\n' + signoff + '\nAlex')[0].title, '');
+});
+eq('real title before signature is kept', extractSpotBlocks('Please ingest:\nABC12345H\nHoliday Sale 30\nThanks!\nAlex')[0].title, 'Holiday Sale 30');
+eq('creative title beginning Thanks is not a signature', extractSpotBlocks('Please ingest:\nABC12345H\nThanks for the Memories 30\nBest,\nAlex')[0].title, 'Thanks for the Memories 30');
+const previewSource = loadText(dir + '/sidepanel.js').split('function renderIngestPreview() {')[1].split('\n}\n')[0];
+const previewFor = nameTitle => {
+  const box = { innerHTML: '', classList: { toggle() {} } };
+  const render = new Function('ingestPlan', 'client', 'ingestColName', 'esc', '$', previewSource);
+  render(() => ({ rows: [{ id: 'ABC12345', title: 'Summer Sale 30', brand: '', espn: true }],
+    opts: { nameTitle, tickerSuffix: '_t' } }), { ingest: {} }, () => '', s => String(s), () => box);
+  return box.innerHTML;
+};
+eq('ID-title preview uses ID', previewFor(false).includes('<td>ABC12345</td><td>ABC12345</td>'), true);
+eq('real-title preview keeps title distinct', previewFor(true).includes('<td>ABC12345</td><td>Summer Sale 30</td>'), true);
+eq('ticker preview shows lowercase suffix on both fields', previewFor(true).includes('<td>ABC12345_t</td><td>Summer Sale 30_t</td>'), true);
+
 // ---------- Sheet fixtures ----------
 // Fields verified against each real tracker: id/title resolution through
 // dual-'Tracking ID' layouts, fill-back detection via names + merged group
@@ -99,6 +126,8 @@ eq('wb spots', extractSpotBlocks('Clayface\nWRCA75B3000H\nMonster Rev 30\nWRCA47
      ['NTUR3392000H', 'FOOD - HOLIDAY BAKING CHAMPIONSHIP :15', true]]);
 }
 // Replies are follow-ups, never new requests - even carrying codes.
+eq('inscape report email not a request candidate', isRequestCandidate("Inscape Weekly Report - Creative Summary",
+  'Ingest creatives ABC12345H in this report digest', 'reports@inscape.tv', {}, 'me@x.com'), false);
 eq('reply not candidate', isRequestCandidate("[EXTERNAL] Re: Kohl's Inscape POD 10/14/2026",
   'adding NTUR3331000H too', 'jhernandez@horizon-next.com', [], 'tim@vizio.com'), false);
 eq('fresh still candidate', isRequestCandidate("Kohl's Inscape POD 10/14/2026",
@@ -131,6 +160,24 @@ eq('refs rows range', extractRowRefs('(rows 13294 - 13297)'), [13294, 13295, 132
 eq('refs lines', extractRowRefs('(lines 13290 - 13293)'), [13290, 13291, 13292, 13293]);
 eq('refs list', extractRowRefs('rows 1857, 1860'), [1857, 1860]);
 eq('refs none', extractRowRefs('please ingest these spots'), []);
+eq('InMarket mixed campaign ranges', extractRowRefs("shared tracker for TJMaxx campaign (1878-1883) and Marshalls campaign (rows\n1884-1904)"), Array.from({ length: 27 }, (_, i) => 1878 + i));
+eq('unrelated parenthesized ranges ignored', extractRowRefs('flight (2025-2026) and sizes (15-30)'), []);
+eq('unmarked old confirmation stops request', extractRowRefs(latestSegment("New Ace creatives (rows 1909-1911)\nThanks!\nAmanda\nHi Amanda,\nI’ve ingested those creatives under these IDs:\nOPE 15s\nold rows 1821-1822")), [1909, 1910, 1911]);
+const planBody = loadText(dir + '/sidepanel.js').split('function ingestPlan() {')[1].split('\n}\n')[0];
+const campaignPlan = new Function('client', 'matched', 'sheet', '$', planBody)(
+  CLIENTS.find(c => c.id === 'inmarket'),
+  [{ row: 3, id: 'Party Fits GM 15', brand: 'JCPenney' }],
+  { allRows: [[], [], ['', '', 'JCPenney', 'Modern Media JCPenney Linear Q4 2026']] }, () => ({ value: '' }));
+eq('InMarket metadata uses campaign D', campaignPlan.rows[0].brand, 'Modern Media JCPenney Linear Q4 2026');
+const metadataFor = (ingest, row) => new Function('client', 'matched', 'sheet', '$', planBody)(
+  { ingest }, [{ row: 1, id: 'TEST1234', brand: 'Retailer' }], { allRows: [row] }, () => ({ value: '' })).rows[0].brand;
+eq('blank InMarket campaign never falls back to client brand', metadataFor({ campaignColumn: 3 }, ['', '', 'Retailer', '']), '');
+eq('other clients retain brand mapping', metadataFor({}, ['', '', 'Retailer', 'Campaign']), 'Retailer');
+const mixedRows = Array.from({ length: 27 }, (_, i) => ['Creative ' + (1878 + i)]);
+const mixedCols = { id: 0, title: -1, file: -1, brand: -1, link: -1, access: -1, espn: -1, date: -1 };
+eq('all 27 mixed-range tracker rows reach matching', matchEmailToSheet(
+  "shared tracker for TJMaxx campaign (1878-1883) and Marshalls campaign (rows\n1884-1904)",
+  mixedRows, mixedCols, { headerRow: 1877 }).map(m => m.row), Array.from({ length: 27 }, (_, i) => 1878 + i));
 
 // matchEmailToSheet: broadcast slot labels in the File Name column ("NEXT",
 // "DDT", "LINK") must not substring-match everyday email words like
@@ -267,6 +314,8 @@ eq('date mon-day-yyyy', extractDates('due Oct-19-2026'), ['2026-10-19']);
     rows, cols, { headerRow: 1 });
   eq('cited line locks the match', m.map(x => x.row), [2]);
   eq('line-lock drops implicit', m.every(x => x.matchType === 'ROW'), true);
+  const codeRows = [['WANT12345H', '', '', '', ''], ['OTHER12345H', '', '', '', '']];
+  eq('cited rows exclude unrelated email code hits', matchEmailToSheet('rows 2; older OTHER12345H', codeRows, cols, { headerRow: 1 }).map(x => x.id), ['WANT12345H']);
 }
 
 // GUESS date proximity: vague email, no word clues - the pending row

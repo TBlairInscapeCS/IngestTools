@@ -39,6 +39,25 @@ Logs: watch errors in `logs/watch.log`, stdout/stderr in
 **Restart after every edit to `ingest_watch.py`** — Python runs the code
 loaded at launch, so a running watcher never picks up file changes.
 
+## Feeding manually downloaded media
+
+The panel's **Search → Downloads / Ingest** and **Feed files** can locate recent
+stable media directly in `~/Downloads/` or `~/Downloads/Ingest/`, even without a
+manifest. Discovery matches code-shaped request IDs with token boundaries and
+registers only unique matches for that job. It does not move or rename files.
+Files must be at least two seconds old and no more than 14 days old. Symlinks,
+partials, unrelated media, and ambiguous duplicates are excluded; use **Pick &
+feed** when a manual choice is required. Unzip downloaded archives first.
+
+The loopback `POST /ingest-discover` accepts a job and explicit requested IDs.
+The feed endpoints may serve only registered matching media or manifest entries;
+local discovery registrations expire after one hour and are rechecked for file
+changes before serving. Discovery does not itself create a manifest, probe
+media, or generate missing ticker versions. Keep the manifest workflow for
+those tasks.
+
+Verify with `cd local && python3 -m unittest test_local_discovery.py`.
+
 ## What it does per manifest entry
 
 1. Finds the downloaded file (tolerates Chrome's ` (1)` rename suffix and

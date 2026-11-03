@@ -134,7 +134,9 @@ def start_log_server():
             u = urllib.parse.urlparse(self.path)
             q = urllib.parse.parse_qs(u.query)
             if u.path == "/ingest-files":
-                files = job_media_files((q.get("job") or [""])[0], (q.get("kind") or ["standard"])[0])
+                slug = (q.get("job") or [""])[0]
+                kind = (q.get("kind") or ["standard"])[0]
+                files = sorted(set(job_media_files(slug, kind) + local_media_files(slug, kind)))
                 self._send(200, json.dumps({"files": files}).encode(), "application/json")
             elif u.path == "/spec-failures":
                 self._send(200, json.dumps({"failures": spec_failures((q.get("job") or [""])[0])}).encode(),
@@ -150,6 +152,11 @@ def start_log_server():
                     "ticker_img": TICKER_IMAGE.exists(),
                     "watch_dir": str(WATCH_DIR),
                 }).encode(), "application/json")
+            elif u.path == "/screenshots":
+                slug = (q.get("job") or [""])[0]
+                found = find_manifest_for_job(slug)
+                names = job_screenshots(found[0].parent) if found else []
+                self._send(200, json.dumps({"screenshots": names}).encode(), "application/json")
             elif u.path == "/ticker-status":
                 self._send(200, json.dumps(ticker_status((q.get("job") or [""])[0])).encode(),
                            "application/json")
@@ -163,7 +170,8 @@ def start_log_server():
                 ev = [e for e in ALERT_EVENTS if e["t"] > since]
                 self._send(200, json.dumps({"events": ev}).encode(), "application/json")
             elif u.path == "/ingest-file":
-                p = resolve_job_file((q.get("job") or [""])[0], (q.get("name") or [""])[0])
+                slug, name = (q.get("job") or [""])[0], (q.get("name") or [""])[0]
+                p = resolve_job_file(slug, name) or resolve_local_file(slug, name)
                 if not p:
                     self._cors(404)
                     return
@@ -180,6 +188,17 @@ def start_log_server():
 
         def do_POST(self):
             u = urllib.parse.urlparse(self.path)
+            if u.path == "/ingest-discover":
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if not 0 < size <= 262144:
+                        raise ValueError("invalid request size")
+                    data = json.loads(self.rfile.read(size))
+                    result = discover_local_media(data.get("job", ""), data.get("ids", []), data.get("tickerSuffix", "_ticker"))
+                    self._send(200, json.dumps(result).encode(), "application/json")
+                except (ValueError, TypeError, AttributeError):
+                    self._send(400, b'{"error":"invalid discovery request"}', "application/json")
+                return
             if u.path == "/ingest-log":
                 try:
                     body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -561,6 +580,38 @@ def convert(job_dir: Path, file_path: Path, suffix: str = "_ticker") -> tuple[bo
         return True, str(out.name)
     tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
     return False, "espn_ticker.sh failed: " + " | ".join(tail)
+
+
+def make_screenshot(local: Path) -> str:
+    """Frame grab mid-clip: <stem>-screenshot.jpg beside the media, for
+    requesters who want visual proof of the ingested file (Vizio requests).
+    Returns the output name or ''."""
+    out = local.with_name(local.stem + "-screenshot.jpg")
+    if out.exists():
+        return out.name
+    try:
+        info = (probe_spec(local) or {}).get("info") or {}
+        dur = float(info.get("duration") or 0)
+    except Exception:
+        dur = 0
+    ss = max(0.5, round(dur / 2, 2)) if dur else 2
+    env = dict(os.environ)
+    if FFMPEG_DIR:
+        env["PATH"] = FFMPEG_DIR + os.pathsep + env.get("PATH", "")
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-ss", str(ss), "-i", str(local),
+             "-frames:v", "1", "-q:v", "3", str(out)],
+            capture_output=True, timeout=60, env=env)
+        if proc.returncode == 0 and out.exists():
+            return out.name
+    except Exception as e:
+        log(f"screenshot failed {local.name}: {e}")
+    return ""
+
+
+def job_screenshots(job_dir: Path) -> list[str]:
+    return sorted(p.name for p in job_dir.glob("*-screenshot.jpg")) if job_dir.exists() else []
 
 
 def client_folder(client_name: str):
@@ -1007,6 +1058,10 @@ def process_job(manifest_path: Path):
         if dur_fails and not dur_exempt:
             status["note"] = "under 10s - flagged"
 
+        shot = make_screenshot(local)
+        if shot:
+            status["screenshot"] = shot
+
         if not entry.get("needs_espn"):
             status["status"] = "downloaded"
             report["files"].append(status)
@@ -1057,6 +1112,7 @@ def process_job(manifest_path: Path):
                     report["archive"] = "archive declined - files stay in Ingest/ (re-asks in ~30m)"
         changed = True  # portal_gate timestamps live in state
 
+    report["screenshots"] = job_screenshots(job_dir)
     write_report(manifest_path, report)
     if changed:
         save_state(manifest_path, state)
@@ -1095,6 +1151,76 @@ MANIFEST_RE = re.compile(r"^(?:manifest(?: \(\d+\))?|.+-manifest)\.json$")
 # its name - or a zip's media members - matches a pending manifest row;
 # everything else stays put and silent. Recency + seen-set bound the scan.
 DOWNLOADS_DIR = WATCH_DIR.parent
+LOCAL_MEDIA = {}
+
+
+def discover_local_media(slug, ids, suffix="_ticker"):
+    if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,159}", slug):
+        raise ValueError("invalid job")
+    if not isinstance(ids, list) or not 0 < len(ids) <= 2000 or not isinstance(suffix, str) or not re.fullmatch(r"[_-][A-Za-z0-9_-]{1,30}", suffix):
+        raise ValueError("invalid IDs")
+    wanted = []
+    for value in ids:
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{3,99}", value) or not re.search(r"\d", value):
+            raise ValueError("invalid ID")
+        if value not in wanted:
+            wanted.append(value)
+    patterns = {value: re.compile(r"(?<![A-Za-z0-9])" + re.escape(value) + r"(?![A-Za-z0-9])", re.I) for value in wanted}
+    now = time.time()
+    groups = {}
+    mp, manifest = find_manifest_for_job(slug)
+    rejected = set(load_state(mp).get("rejected") or []) if manifest else set()
+    for root in (DOWNLOADS_DIR, WATCH_DIR):
+        if not root.is_dir() or root.is_symlink():
+            continue
+        for path in root.iterdir():
+            if path.is_symlink() or not path.is_file() or path.suffix.lower() not in MEDIA_EXTS or path.name in rejected:
+                continue
+            try:
+                stat = path.stat()
+                if stat.st_size <= 0 or not 2 <= now - stat.st_mtime <= 14 * 86400:
+                    continue
+            except OSError:
+                continue
+            hits = [value for value, pattern in patterns.items() if pattern.search(path.stem)]
+            if len(hits) != 1:
+                continue
+            kind = "ticker" if is_ticker_name(re.sub(r" \(\d+\)(?=\.[^.]+$)", "", path.name), suffix) else "standard"
+            groups.setdefault((hits[0], kind), []).append((path, stat))
+    authorized, files, ambiguous = {}, [], []
+    for (value, kind), candidates in groups.items():
+        if len(candidates) != 1:
+            ambiguous.append({"id": value, "kind": kind, "names": [p.name for p, _ in candidates]})
+            continue
+        path, stat = candidates[0]
+        if path.name in authorized:
+            continue
+        authorized[path.name] = {"path": path, "size": stat.st_size, "mtime": stat.st_mtime, "expires": now + 3600, "kind": kind}
+        files.append({"name": path.name, "id": value, "kind": kind, "source": "Ingest" if path.parent == WATCH_DIR else "Downloads"})
+    LOCAL_MEDIA[slug] = authorized
+    for job in list(LOCAL_MEDIA):
+        if not any(entry["expires"] > now for entry in LOCAL_MEDIA[job].values()):
+            del LOCAL_MEDIA[job]
+    return {"files": files, "ambiguous": ambiguous, "searched": ["Downloads", "Ingest"]}
+
+
+def resolve_local_file(slug, name):
+    entry = LOCAL_MEDIA.get(slug, {}).get(name)
+    if not entry or name != Path(name).name or entry["expires"] <= time.time():
+        return None
+    path = entry["path"]
+    try:
+        if path.is_symlink() or path.parent.is_symlink() or path.parent not in (DOWNLOADS_DIR, WATCH_DIR) or path.suffix.lower() not in MEDIA_EXTS:
+            return None
+        stat = path.stat()
+        return path if stat.st_size == entry["size"] and stat.st_mtime == entry["mtime"] else None
+    except OSError:
+        return None
+
+
+def local_media_files(slug, kind="standard"):
+    return [name for name, entry in LOCAL_MEDIA.get(slug, {}).items()
+            if (kind == "all" or entry["kind"] == kind) and resolve_local_file(slug, name)]
 SCOOP_WINDOW = 6 * 3600
 _seen_dl = set()
 

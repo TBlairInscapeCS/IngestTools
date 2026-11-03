@@ -129,10 +129,11 @@
 
   <section class="pitch">
     <p class="hook">Remember when ingest requests used to eat your afternoon?</p>
-    <p>This panel is why they don't anymore. Point it at a request email and
-      it reads the ask, finds the tracking sheet, matches the rows, downloads
-      the media, fills the portal queue, drafts the Jira ticket, and writes
-      the reply. Your click is still the only thing that ships anything.</p>
+    <p>Start with a request email: identify its client, load the correct tracker
+      or use email-only IDs, review matches, and find files before downloading.
+      Then preview portal fills, verify records, and review the Jira and reply
+      drafts. Downloading, accepting fills, beginning ingest, posting to Jira,
+      and sending a reply remain separate decisions.</p>
   </section>
 
   <div id="warnBanner">Checking your setup&hellip;</div>
@@ -153,42 +154,128 @@
     <h2>How a job flows</h2>
     <div class="flow">
       <div class="fstep"><span class="fchip c1">Request</span>
-        <div>Open the request email in Outlook on the web; the panel grabs it,
-          detects the client, and pulls the codes it asks for.</div></div>
+        <div>Load the email, confirm the client, and review requested IDs here.
+          Outlook folder rules and recognized sender domains guide detection;
+          manual selection wins. Trackerless clients hide the tracker and use
+          <b>Identify email IDs</b>. Otherwise verify <b>Document</b>, worksheet,
+          ID, and owner before matching. Override Match source under
+          <b>Advanced request options</b>. Keep original delivery HTML for links.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip c2">Tracker</span>
-        <div>The tracking sheet loads from the email's link, an open sheet
-          tab, or a manual pick. Matched rows show their line numbers - click
-          one to highlight it in the sheet.</div></div>
+      <div class="fstep"><span class="fchip c4">Files</span>
+        <div><b>Find files</b> discovers direct links, ER deliveries, or open-page
+          candidates without downloading. Review, then press <b>Download files</b>.
+          ER auto-search expands 2 → 7 → configured days (default 14) as needed.
+          <b>Yangaroo</b> search uses the delivery email's per-spot Download
+          links or an open Yangaroo page - review matches before downloading.
+          <b>Stop</b> halts queueing and cancels tracked in-flight downloads;
+          completed files remain.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip c3">Match</span>
-        <div>Email codes &harr; sheet rows. Exclude any row that doesn't
-          belong; nothing downstream sees it.</div></div>
+      <div class="fstep"><span class="fchip c5">Ingest</span>
+        <div><b>Feed files</b> handles the standard batch; <b>Feed ticker files</b>
+          handles the separate video-only batch. Feeding or picking files also
+          writes the job manifest when needed so sheet-flagged tickers still
+          auto-build. <b>Check &amp; preview</b> shows
+          Reporting ID and Portal Title separately, including ticker suffixes.
+          Title defaults to ID unless rules say otherwise. Review the fill
+          profile under <b>more → fill</b> before <b>Accept fills</b>.
+          Tracker filenames can identify files whose ID/title differs. Ambiguous
+          matches stay unfilled. Check filled/queued counts and review metadata
+          differences, including Advertiser, Brand, and Vertical.
+          BEGIN INGEST stays your click.</div></div>
       <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip c4">Download</span>
-        <div><b>Find &amp; download</b> tries direct links, then a delivery
-          search, then any open page that lists files.</div></div>
-      <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip c5">Portal</span>
-        <div>Feeds files into portal.cognet.tv's ingest queue and fills
-          Reporting ID / Title / Advertiser / Fingerprint. Standard batch
-          first; <b>_ticker</b> versions build automatically and feed as a
-          separate video-only batch.</div></div>
-      <div class="farrow">↓</div>
-      <div class="fstep"><span class="fchip c6">Report</span>
-        <div>Verify the records, review the drafted ticket, post to Jira when
-          you're happy, copy the reply back to the requester.</div></div>
+      <div class="fstep"><span class="fchip c6">Confirm</span>
+        <div><b>Verify &amp; draft</b> prepares Jira content; review gaps and proof
+          before approving a post. Email sign-offs stay in the request copy,
+          not as creative titles in the Ingest list.
+          Copy and send the reply yourself. Both
+          editable draft fields have <b>Clear</b>. Trackerless email matches
+          automatically draft an acknowledgment from IDs or filenames; no sheet
+          is needed. <b>Redraft</b> also works before Match. Choose <b>Ingested +
+          IDs</b> only after actual ingest; trackerless confirmations omit sheet
+          updates and use client ticker suffixes. An acknowledgment is not
+          proof that files have been ingested.</div></div>
     </div>
   </section>
 
   <section>
     <h2>First run</h2>
-    <p>Open a request email in Outlook on the web, open this panel from the
-      toolbar icon, and press <b>&#9654; Run all</b>. The panel walks the rest;
-      every stage shows a status dot, and anything destructive (BEGIN INGEST,
-      Post to Jira) is always your click.</p>
+    <p>The panel shows four color-coded folder tabs, left to right:
+      Request, Files, Ingest, and Confirm. Each page uses its tab's color. The sticky job summary separates
+      identified IDs, located files, downloads completed this run, and verified
+      reporting IDs (including tickers). Follow the suggested next-action button,
+      or jump to any step. It never approves fills, posts Jira, sends replies,
+      or begins ingest for you.</p>
+    <p><b>I already have the files</b> searches local media. <b>Use portal file
+      picker</b> takes you to the portal to select/drop files yourself, without
+      needing a manifest. <b>I already ingested them</b> checks actual records.
+      <b>Stop downloads</b> stays in the header during queueing and active
+      downloads, even while viewing another step.</p>
+    <p class="fine">Client guidance/rules and advanced controls stay collapsed.
+      Advanced settings → <b>Show all steps (advanced)</b> restores the expanded
+      view and remembers your preference. <b>Clear all</b> clears the request,
+      evidence, counters, previews, visible errors, and notifications after
+      downloads finish or are stopped. Selecting a different request also
+      dismisses old alerts and collapses <b>Log</b>. Saved diagnostic logs,
+      sign-ins, and settings are kept; media and portal records are not deleted.</p>
+    <ol class="steps">
+      <li>Load the request and confirm the selected client.</li>
+      <li>Check the tracker's <b>Document</b> title, or select <b>No tracking
+        sheet — email IDs only</b>. ComScore and SimulMedia are trackerless.</li>
+      <li>Press <b>Run all</b> to prepare matches and discover files, or work
+        module by module. Run all does not automatically download media.</li>
+      <li>Review the candidates, then press <b>Download files</b>. Watch the
+        module status lines and progress bars instead of repeatedly clicking.</li>
+      <li>Preview and accept portal fills, begin ingest yourself, then verify
+        and review Jira/reply drafts.</li>
+    </ol>
+    <p class="fine">Before an email arrives, a tracker-backed request can start
+      from <b>N pending row(s) — use as requested IDs</b>. Review the pending set
+      and recent-date filter before discovery.</p>
     <p class="fine">Optional connections sit collapsed above - the panel also
       names the one it needs, in place, when you use a feature that's missing it.</p>
+  </section>
+
+  <section>
+    <h2>Continue after manual work</h2>
+    <p>Every module can be used independently. SimulMedia defaults to no tracker
+      and mixed Comcast/Extreme Reach delivery. Choose <b>Search → Comcast
+      email</b> to read matching Spot/Download links from open Outlook messages,
+      or <b>Downloads / Ingest</b> to find recent media by request ID.</p>
+    <p><b>Feed files</b> can find unique matches in Downloads or Ingest without
+      a manifest and without moving the files. Ambiguous duplicates need
+      <b>Use portal file picker</b>. Discovery alone does not build missing tickers.</p>
+    <p>After a manual upload/ingest, go straight to <b>Verify &amp; draft</b>.
+      Later file/record evidence overrides earlier misses for the active request.
+      The auto-reply distinguishes completed, processing, failed, and still
+      missing IDs. Edited drafts are kept; use <b>Auto draft → Redraft</b> to
+      replace them. Client rules can exclude discovery from <b>Run all</b>.</p>
+  </section>
+
+  <section>
+    <h2>Client rules and naming</h2>
+    <p>Under <b>Edit selected client rules</b>, press <b>Load selected client</b>,
+      edit tracker requirement, sender domains, ingest realm, Jira epic, ER
+      sender filter, or ticker settings, then <b>Save rules locally</b>.
+      These overrides stay in this Chrome profile; they do not edit the shared
+      customer reference sheet.</p>
+    <p>The portal's <b>fill</b> dropdown offers <b>auto (playbook)</b>,
+      <b>ID as title</b>, <b>ID + title</b>, and <b>ID + title + advertiser</b>.
+      A profile change refreshes the preview. ComScore ticker Reporting IDs
+      and Titles use lowercase <code>_t</code>. SimulMedia has no special suffix
+      and uses Jira epic <code>DD-597</code>. Internal <b>Vizio</b> requests
+      ingest each file into both <code>geniusdigital</code> and
+      <code>vizio</code> silos; verification checks both realms and the reply
+      lists each file's commercial ID per realm (with pending IDs called out).</p>
+    <p>InMarket fills <b>Advertiser, Brand, and Vertical</b> from each tracker's
+      <b>InMarket Campaign Name (column D)</b>, not the client name. Blank
+      campaigns leave existing fields untouched. Review each campaign in
+      <b>Check &amp; preview</b> before accepting fills. Tracker-context ranges
+      such as <code>campaign (1878-1883)</code> are recognized; filename typos
+      remain possible matches for your review.</p>
+    <p class="fine">If the wrong tracker appears, check the client and document
+      identity before matching. Unknown ownership or missing document titles
+      require your review. Reload the extension after an update to activate
+      the latest UI and reference-cleanup protections.</p>
   </section>
 
   <div class="cta">
@@ -212,7 +299,7 @@ const DEPS = [
     for:'downloads, _ticker builds, portal feed, job archive',
     fix:'Double-click <b>watcher/install.command</b> in the full package. It installs to ~/Library/Application Support/IngestTools and starts itself at login - that is the whole setup.',
     help:'<ol>' +
-      '<li>Unzip the <b>full package</b> (IngestTools-full-*.zip). Inside is a <b>watcher/</b> folder.</li>' +
+      '<li>Unzip the <b>full package</b> (ingest-streamlined-v*-full.zip). Inside is a <b>watcher/</b> folder.</li>' +
       '<li>Double-click <b>watcher/install.command</b>.</li>' +
       '<li>If macOS says it can\'t be opened: right-click it → <b>Open</b> → Open anyway (or System Settings → Privacy &amp; Security → Open Anyway).</li>' +
       '<li>It copies the watcher to <code>~/Library/Application Support/IngestTools/</code> and registers it to start at every login - no other setup, no terminal needed.</li>' +
@@ -227,15 +314,15 @@ const DEPS = [
       '<li>Run: <code>brew install ffmpeg</code>. Takes a couple of minutes.</li>' +
       '<li>That installs both <code>ffmpeg</code> and <code>ffprobe</code> - this row goes green on its own. Nothing else to configure.</li>' +
       '</ol>' },
-  { id:'outlook', name:'Outlook on the web', req:true, grp:'tabs',
-    for:'reading request emails (or paste them manually)',
-    fix:'Open the request email in an Outlook web tab.' },
-  { id:'sheets', name:'Google / tracker tab', req:true, grp:'tabs',
-    for:'loading tracking sheets (link-shared export or open tab)',
-    fix:'Sign into Google in Chrome, or keep the tracker tab open while you work.' },
+  { id:'outlook', name:'Outlook on the web', req:false, grp:'tabs',
+    for:'From Outlook; optional when using Check inbox, paste, or .eml',
+    fix:'Open an Outlook web request for From Outlook, or use another email intake method.' },
+  { id:'sheets', name:'Google / tracker tab', req:false, grp:'tabs',
+    for:'tracker-backed requests only; email-only mode needs no tracker',
+    fix:'For a tracker-backed client, sign into its sheet or load a file. Otherwise select No tracking sheet — email IDs only.' },
   { id:'portal', name:'portal.cognet.tv', req:true, grp:'tabs',
     for:'feeding files + filling the ingest queue',
-    fix:'Log into portal.cognet.tv in a tab when you reach step 5.' },
+    fix:'Log into portal.cognet.tv in a tab when you reach Ingest.' },
   { id:'er', name:'Extreme Reach', req:false, grp:'tabs',
     for:'the delivery search - most clients deliver here',
     fix:'Log into app.extremereach.com in a tab.' },
@@ -287,12 +374,14 @@ async function depStatus(id) {
     }
     case 'outlook':
       return { state: (await hasTab([/outlook\.(office|office365|live)\.com/i])) ? 'ok' : 'miss' };
-    case 'sheets':
-      return { state: (await hasTab([/docs\.google\.com/i])) ? 'ok' : 'warn',
-               note: 'no sheet tab open - link-shared sheets still load by URL' };
+    case 'sheets': {
+      const open = await hasTab([/docs\.google\.com\/spreadsheets|\.sharepoint(?:-df)?\.com|airtable\.com/i]);
+      return open ? { state: 'ok', note: 'tracker tab available — verify its document title and owner in the panel' }
+        : { state: 'warn', note: 'no tracker tab open — use an email-linked workbook, load a file, or choose email-only mode' };
+    }
     case 'portal':
       return { state: (await hasTab([/portal\.cognet\.tv/i])) ? 'ok' : 'warn',
-               note: 'open it when you reach step 5' };
+               note: 'open it when you reach Ingest' };
     case 'er':
       return { state: (await hasTab([/extremereach\.com/i])) ? 'ok' : 'warn',
                note: 'only needed for ER-delivered clients' };

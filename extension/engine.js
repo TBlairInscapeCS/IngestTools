@@ -97,7 +97,10 @@ function reconcile(ids, fileNames) {
         exact.push(f);
       } else {
         const score = similarity(norm, f.norm);
-        if (score >= 0.55) candidates.push({ f, score });
+        // 0.55 let barely-related files pile into POSSIBLE MATCH. A real
+        // near-duplicate shares most tokens (0.7+); anything weaker is
+        // noise the user shouldn't have to review.
+        if (score >= 0.7) candidates.push({ f, score });
       }
     }
     // Get less specific: strip trailing chars of the code (min 6 left) -
@@ -126,7 +129,9 @@ function reconcile(ids, fileNames) {
       exact.forEach(f => (f.used = true));
     } else if (candidates.length) {
       candidates.sort((a, b) => b.score - a.score);
-      const top = candidates.slice(0, 3);
+      // Keep only candidates near the best score - a distant third guess
+      // isn't a "possible match", it's clutter.
+      const top = candidates.filter(c => c.score >= candidates[0].score - 0.12).slice(0, 3);
       res.status = 'POSSIBLE MATCH';
       res.matched = top.map(c => c.f.name).join(' | ');
       res.notes = 'No exact match - verify filename manually';
@@ -431,21 +436,21 @@ function countPhrase(i, r) {
 }
 const CONF_COUNT = [
   (i, r) => "I've ingested " + countPhrase(i, r),
-  (i, r) => capFirst(countPhrase(i, r)) + (i === 1 ? ' is ingested' : ' are ingested'),
-  (i, r) => 'Ingested ' + countPhrase(i, r),
+  (i, r) => capFirst(countPhrase(i, r)) + (i === 1 ? ' has been ingested' : ' have been ingested'),
+  (i, r) => "I've gone ahead and ingested " + countPhrase(i, r),
 ];
 // A lone file doesn't need counting at all - "1 of the 1" reads like a robot.
 const CONF_COUNT_ONE = [
-  "I've ingested the file you sent over",
-  "The file's ingested",
-  "Your file's ingested",
+  "I've ingested the creative you sent over",
+  "The creative you sent is ingested",
+  "I've gone ahead and ingested your creative",
 ];
 
 // Confirmation built from matched sheet rows, in the format actually used:
 // "I've ingested those creatives ... under the following IDs:" + titles.
 // Phrasing rotates per request (seeded by the ID list) so replies don't
 // read like copy-paste.
-function buildMatchConfirmation(matched, sender) {
+function buildMatchConfirmation(matched, sender, opts = {}) {
   const items = [];
   let nBase = 0, nEspn = 0;
   matched
@@ -454,7 +459,7 @@ function buildMatchConfirmation(matched, sender) {
       const base = m.trackingId || m.title || m.id;
       if (!base) return;
       items.push(base); nBase++;
-      if (m.espn || m.emailEspn) { items.push(base + '_ticker'); nEspn++; }
+      if (m.espn || m.emailEspn) { items.push(base + (opts.tickerSuffix || '_ticker')); nEspn++; }
     });
   if (!items.length) return null;
   const seed = hashStr(items.join('|'));
@@ -463,7 +468,8 @@ function buildMatchConfirmation(matched, sender) {
                 : (nEspn === 0 ? 'none' : nEspn === 1 ? 'one' : 'many')], seed);
   const lines = [greet(sender), '', intro];
   items.forEach(t => lines.push(t));
-  lines.push('', pick(CONF_SHEET, seed >> 3), '', 'Thanks,');
+  if (!opts.sheetless) lines.push('', pick(CONF_SHEET, seed >> 3));
+  lines.push('', 'Thanks,');
   return lines.join('\n');
 }
 
@@ -472,14 +478,14 @@ function buildMatchConfirmation(matched, sender) {
 // especially) carry other clients' files, so naming them in a reply leaks
 // unrelated work and confuses the sender. They still show in the UI.
 // espnIds: Set of normalized IDs that need a <id>_ticker entry.
-function buildReconConfirmation(results, espnIds, sender) {
+function buildReconConfirmation(results, espnIds, sender, opts = {}) {
   const found = results.filter(r => r.status === 'FOUND').map(r => r.id);
   const missing = results.filter(r => r.status === 'MISSING').map(r => r.id);
   const requested = results.filter(r => r.status !== 'BLANK' && r.status !== 'DUPLICATE').length;
   if (!found.length) return null;
   const tickers = found
     .filter(id => espnIds && espnIds.has(normalizeName(id).replace(/ /g, '')))
-    .map(id => id + '_ticker');
+    .map(id => id + (opts.tickerSuffix || '_ticker'));
   const seed = hashStr(found.join('|') + '::' + missing.join('|'));
   const countLine = (found.length === 1 && requested === 1
     ? pick(CONF_COUNT_ONE, seed)
@@ -491,7 +497,41 @@ function buildReconConfirmation(results, espnIds, sender) {
     lines.push('', pick(CONF_MISSING[missing.length === 1 ? 'one' : 'many'], seed >> 4));
     missing.forEach(id => lines.push(id));
   }
-  lines.push('', pick(CONF_SHEET, seed >> 6), '', 'Thanks,');
+  if (!opts.sheetless) lines.push('', pick(CONF_SHEET, seed >> 6));
+  lines.push('', 'Thanks,');
+  return lines.join('\n');
+}
+
+// Dual-silo confirmation (internal Vizio requests): every file lands in
+// BOTH realms, and the requester needs the commercial cid per realm -
+// mirroring the real "clips for Vizio, Genius Digital feeds" replies.
+// records: [{reportingId, realm, admin_visible.cid}] - realm-tagged already.
+function buildSiloReply(records, realms, sender) {
+  const byFile = new Map();
+  (records || []).forEach(r => {
+    if (!r.reportingId) return;
+    if (!byFile.has(r.reportingId)) byFile.set(r.reportingId, {});
+    byFile.get(r.reportingId)[r.realm] = (r.admin_visible && r.admin_visible.cid) || '';
+  });
+  const files = [...byFile.keys()];
+  if (!files.length) return null;
+  const pending = new Set();
+  const lines = [greet(sender), '',
+    'I\'ve ingested ' + (files.length === 1 ? 'that clip' : 'those ' + files.length + ' clips') +
+    ' for ' + realms.join(' and ') + ' Commercial feeds with Audio and Video. Here are the relevant IDs:', ''];
+  files.forEach((f, i) => {
+    if (i) lines.push('');
+    lines.push(f, '');
+    realms.forEach((realm, ri) => {
+      if (ri) lines.push('');
+      const cid = byFile.get(f)[realm];
+      if (cid) lines.push(cid);
+      else { pending.add(realm); lines.push('(' + realm + ' commercial ID still pending)'); }
+    });
+  });
+  if (pending.size)
+    lines.push('', 'I\'ll send the ' + [...pending].join(' and ') + ' ID(s) as soon as the portal assigns them.');
+  lines.push('', 'Let me know if I can further assist.', '', 'Thanks,');
   return lines.join('\n');
 }
 
@@ -559,6 +599,43 @@ function buildConfirmationEmail(results, sender) {
 
 // Last-resort draft for runs with no match or downloads yet: acknowledge
 // the request and echo the cited IDs - never claims files are in hand.
+function jobJourneyState(s) {
+  if (!s.request && !s.ids) return { step: 'request', action: 'request', label: 'Load a request', hint: 'Read an Outlook email, paste the request, or start from a tracker.' };
+  if (s.customer === false) return { step: 'request', action: 'customer', label: 'Confirm the customer', hint: 'Choose the correct customer before looking for trackers or files.' };
+  if (!s.ids && !s.emailOnly && !s.tracker) return { step: 'request', action: 'tracker', label: 'Load the correct tracker', hint: 'Check its document title and owner before matching.' };
+  if (!s.ids) return { step: 'request', action: 'match', label: s.emailOnly ? 'Identify email IDs' : 'Match requested IDs', hint: 'Review which IDs belong to this request.' };
+  if (s.failed) return { step: 'confirm', action: 'issues', label: 'Review ingest issues', hint: 'A failed record is not a completed ingest.' };
+  if (s.completed >= s.expected && s.expected) return { step: 'confirm', action: 'confirm', label: 'Review confirmation', hint: 'Ingest is verified. Review the reply and prepare a Jira draft if needed. Posting and sending remain separate actions.' };
+  if (s.records) return { step: 'confirm', action: 'progress', label: 'Review ingest progress', hint: 'Only some IDs are complete. Review processing and still-missing IDs separately.' };
+  if (s.fillsApplied) return { step: 'confirm', action: 'verify', label: 'Check ingest records', hint: 'Begin ingest in the portal yourself, then check its records here.' };
+  if (s.previewReady) return { step: 'ingest', action: 'fills', label: 'Review portal fills', hint: 'Accept fills only after checking the customer, IDs, and titles.' };
+  if (s.fed) return { step: 'ingest', action: 'preview', label: 'Preview portal fills', hint: 'Feeding files does not fill metadata or begin ingest.' };
+  if (s.local || s.downloaded) return { step: 'ingest', action: 'feed', label: 'Feed available files', hint: 'Use the available local media; review the queue before beginning ingest.' };
+  if (s.located) return { step: 'files', action: 'reviewFiles', label: 'Review located files', hint: 'A delivery link is not a completed download. Download only the correct matches.' };
+  if (s.skipDiscovery) return { step: 'files', action: 'local', label: 'Find existing local files', hint: 'This client skips automatic discovery. You can also verify a manual ingest.' };
+  return { step: 'files', action: 'find', label: 'Find requested files', hint: 'Search the selected source without downloading media.' };
+}
+function recordEvidenceStage(record) {
+  if (/FAILED/i.test(record.status || '') || (record.detection_result && record.detection_result !== 'pass')) return 'failed';
+  return record.status === 'DETECTION_COMPLETED' ? 'complete' : 'processing';
+}
+function buildWorkflowReply(rows, sender) {
+  if (!rows.some(r => r.stage)) return null;
+  const groups = [
+    ['complete', 'Confirmed ingest for:'],
+    ['processing', 'Records found; processing is not yet confirmed complete for:'],
+    ['located', 'Files located; ingest is not yet confirmed for:'],
+    ['failed', 'Ingest reported a failure for:'],
+    ['', 'Still waiting to locate or verify:'],
+  ];
+  const lines = [greet(sender)];
+  groups.forEach(([stage, label]) => {
+    const selected = rows.filter(r => (r.stage || '') === stage);
+    if (selected.length) lines.push('', label, ...selected.map(r => '  - ' + r.id + (stage === 'failed' && r.status ? ' (' + r.status + ')' : '')));
+  });
+  lines.push('', 'Thanks!');
+  return lines.join('\n');
+}
 function buildAckReply(ids, sender) {
   if (!ids || !ids.length) return null;
   return [greet(sender), '',
@@ -662,9 +739,32 @@ function parseErNotice(subject, body, fromAddr) {
 // "Spot" anchors in a Comcast notice -> cad-api asset URLs (mimecast-wrapped).
 // Document order matches the spot rows parsed by parseComcastNotice.
 function comcastDlLinks(html) {
-  const re = /<a[^>]+href="([^"]+)"[^>]*>\s*Spot\s*<\/a>/gi, out = [];
-  let m; while ((m = re.exec(html)) && out.length < 40) out.push(m[1]);
+  const re = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, out = [];
+  let m;
+  while ((m = re.exec(html)) && out.length < 1000) {
+    const label = m[2].replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim();
+    const url = m[1].replace(/&amp;/gi, '&');
+    if (/^(?:Spot|Download(?:\s+(?:Spot|File|Media|Video))?)$/i.test(label) && /^https?:\/\//i.test(url)) out.push(url);
+  }
   return out;
+}
+function comcastDeliverySpots(subject, body, html) {
+  const notice = parseComcastNotice(subject, body + '\n' + html);
+  if (!notice) return [];
+  const out = new Map();
+  const rows = String(html || '').match(/<tr\b[\s\S]*?<\/tr>/gi) || [];
+  rows.forEach(row => {
+    const links = comcastDlLinks(row);
+    const codes = [...new Set(detectCodes(stripHtml(row)))];
+    if (links.length === 1 && codes.length === 1) {
+      const spot = notice.spots.find(s => s.isci === codes[0]);
+      out.set(codes[0], { id: codes[0], title: spot ? spot.title : '', url: links[0] });
+    }
+  });
+  const links = comcastDlLinks(html);
+  if (notice.spots.length === links.length && new Set(notice.codes).size === notice.codes.length)
+    notice.spots.forEach((s, i) => { if (!out.has(s.isci)) out.set(s.isci, { id: s.isci, title: s.title, url: links[i] }); });
+  return [...out.values()];
 }
 
 // Comcast AdDelivery "Delivery Notification" mails are structured
@@ -673,8 +773,7 @@ function comcastDlLinks(html) {
 // registry shape as parseErNotice - the agency's request email lands
 // separately and cross-references these deliveries.
 function parseComcastNotice(subject, body) {
-  if (!/delivery notification/i.test(String(subject || '')) ||
-      !/comcast addelivery/i.test(String(body || '').slice(0, 4000))) return null;
+  if (!/comcast\s*ad\s*delivery|comcastaddelivery\.com|cad-api/i.test(String(subject || '') + '\n' + String(body || ''))) return null;
   const t = String(body || '');
   const field = (re) => { const m = t.match(re); return m ? m[1].trim() : ''; };
   const spots = [];
@@ -752,6 +851,10 @@ function isRequestCandidate(subject, body, fromAddr, senders, selfAddr) {
   // requests - even when they cite codes, the user grabs them manually.
   // Delivery notices bypass this function (erNotice/dl force-inclusion).
   if (/^\s*(?:\[[^\]]*\]\s*)*re\s*:/i.test(s)) return false;
+  // "Inscape report" mail is informational (usage/QA/weekly digests) -
+  // observed senders never carry ingest asks, so the subject's 'report'
+  // word alone is enough to drop it from the request list.
+  if (/\breports?\b/i.test(s)) return false;
   const b = firstSegment(body);
   const weak = detectCodes(b).length >= 1 ||
     /ingest|creative|spot|deliver|traffick|ad-?id|isci|tracking|\.mp4|file/i
@@ -925,6 +1028,14 @@ function extractRowRefs(text) {
       }
     });
   }
+  if (/\btracker\b/i.test(text)) {
+    const ranges = /\(\s*(\d{3,6})\s*[-–]\s*(\d{3,6})\s*\)/g;
+    while ((m = ranges.exec(String(text)))) {
+      const a = +m[1], b = +m[2];
+      if (b >= a && b - a <= 500 && !(a >= 2000 && b <= 2100))
+        for (let i = a; i <= b; i++) rows.add(i);
+    }
+  }
   return [...rows].sort((a, b) => a - b);
 }
 
@@ -942,6 +1053,8 @@ function latestSegment(text) {
   for (let i = first; i < lines.length; i++) {
     const l = lines[i].trim();
     if (!l) continue;
+    if (/^I[’']ve ingested\b/i.test(l) && extractRowRefs(lines.slice(0, i).join('\n')).length)
+      return lines.slice(0, i).join('\n');
     if (/^on .{0,140}wrote:/i.test(l) ||
         /^-{2,}\s*(original|forwarded) message/i.test(l) ||
         /^begin forwarded message/i.test(l) ||
@@ -1045,6 +1158,8 @@ function extractCodeTitlePairs(text) {
 // the title (sheet row ref); url/len = the link + ':\d+' following the code.
 function extractSpotBlocks(text) {
   const lines = String(text || '').split(/\r?\n/).map(l => l.trim());
+  const signature = lines.findIndex(l => /^(?:thank you|thanks|best regards|warm regards|kind regards|best wishes|respectfully|sincerely|best|regards|cheers|talk soon|see you|thx|ty)[,.!]*\s*$/i.test(l));
+  if (signature >= 0) lines.length = signature;
   const out = [];
   const isNum = l => /^\d{3,6}$/.test(l);
   const isUrl = l => /https?:\/\//.test(l);
@@ -1414,6 +1529,7 @@ function matchEmailToSheet(emailText, rows, cols, opts) {
       matched.push({ row: n, id: '', title: '', trackingId: '', fileName: '', brand: '', matchType: 'ROW (out of range)', linkText: '', link: '', access: null, espn: false, date: '' });
     }
   });
+  if (rowRefs.size) return matched.filter(m => rowRefs.has(m.row));
   // Selection discipline: a sender who names sheet lines ("line 12",
   // "rows 40-42") has already said which rows they mean - unrelated
   // title/file substring hits elsewhere on the tracker are coincidence

@@ -79,7 +79,8 @@ var CLIENTS = [
       fingerprint: 'both',
       advertiser: true,
       nameTitle: true,
-      metadata: 'Advertiser / Vertical / Brand; Title = Reporting ID',
+      metadata: 'Advertiser / Vertical / Brand = InMarket Campaign Name (column D); Title = Reporting ID',
+      campaignColumn: 3,
       cidMap: 'inmarket',
       note: 'Their dictated spot title is the ingest anchor, not an ISCI-style ID - title == reporting ID, so the filename is the title alone. Rightmost columns are our fill-back (final tracking ID/title, ingest date, ingester name).',
     },
@@ -358,6 +359,15 @@ var CLIENTS = [
     },
   },
   {
+    id: 'simulmedia',
+    name: 'SimulMedia',
+    detect: { domains: [/simulmedia\.com/i], keywords: [/simul\s*media|simo\s*media/i] },
+    sheetless: true,
+    delivery: 'mixed',
+    note: 'No tracker. Match IDs from the request email; delivery can be Comcast AdDelivery or Extreme Reach. Manually saved media can be found in Downloads/Ingest by request ID.',
+    ingest: { cidMap: 'simulmedia', jiraEpic: 'DD-597', fingerprint: 'both' },
+  },
+  {
     id: 'cuebiq',
     name: 'Cuebiq',
     detect: {
@@ -514,8 +524,35 @@ var CLIENTS = [
     delivery: 'extreme-reach',
     ingest: {
       fingerprint: 'both', advertiser: true, nameTitle: true,
+      jiraEpic: 'DD-832',
       metadata: 'Advertiser/Brand/Vertical + Title from their spreadsheet',
       note: 'Commercial_Ingestion_Vizio_LWD workbook, one tab per brand (NDR = National Debt Relief). Merged "LWDirect to Complete / Inscape to Complete" groups - the FIRST Tracking ID col is theirs (source), the second is ours (fill-back). Link to File holds direct ER download URLs.',
+    },
+  },
+  {
+    id: 'vizio-request',
+    name: 'Vizio (internal request)',
+    detect: {
+      // Vizio-internal requests follow a pattern: vizio.com sender + a
+      // clip/share link + "ingest"/"ingestion" ask. All three must hit -
+      // a bare @vizio.com sender alone can't claim the request (Icon
+      // Media, LWD and other client requests get forwarded from Vizio).
+      subjects: [/\b(ingest|ingestion)\b/i],
+      keywords: [/\b(ingest|ingestion|clip|spot)\b/i],
+      domains: [/vizio\.com/i],
+      // Tim/Chris send the ingest CONFIRMATIONS - their own vizio.com mail
+      // is a response, never a request to process.
+      excludeSenders: [/chris\.roomian@vizio\.com|tim\.blair@vizio\.com/i],
+    },
+    sheetless: true,
+    delivery: 'links',
+    note: 'Internal Vizio requests (Sarah/Chris) - usually share-page clip links; every file ingests into BOTH silos.',
+    ingest: {
+      cidMap: ['geniusdigital', 'vizio'],
+      fingerprint: 'both',
+      nameTitle: true,
+      dualSilo: true,
+      note: 'Reporting ID = the clip filename; each file gets a record in geniusdigital AND vizio; the reply lists each file\'s commercial cid per realm.',
     },
   },
   {
@@ -797,6 +834,8 @@ var CLIENT_FOLDERS = {
   'Tatari': 'tatari',
   'Chief Media': 'chief-media',
   'Comscore': 'comscore',
+  'SimulMedia': 'simulmedia',
+  'Simulmedia': 'simulmedia',
   'Kantar': 'kantar',
   'Millenia3': 'millenia3',
   'ITN Networks': 'itn',
@@ -837,15 +876,28 @@ var CLIENT_FOLDERS = {
 function detectClient(sig) {
   sig = sig || {};
   const d = c => c.detect || {};
+  const from = String(sig.sender || ((sig.emailText || '').match(/^from:\s*(.+)$/im) || [])[1] || '');
+  // Sender exclusions: a client's own confirmation mail must not detect as
+  // a request for that client, whatever the body/subject/domain say.
+  const POOL = CLIENTS.filter(c => !(d(c).excludeSenders || []).some(re => re.test(from)));
+  const refineEmail = c => POOL.find(x => x.name.split(' / ')[0] === c.name.split(' / ')[0] &&
+    (d(x).keywords || []).some(re => re.test((sig.subject || '') + '\n' + (sig.emailText || '')))) || c;
+  const folder = POOL.find(c => c.id === CLIENT_FOLDERS[sig.folderName]);
+  if (folder) return refineEmail(folder);
+  const domain = (from.match(/@([a-z0-9.-]+)/i) || [])[1];
+  if (domain) {
+    const owner = POOL.find(c => (d(c).domains || []).some(re => re.test(domain)));
+    if (owner) return refineEmail(owner);
+  }
   // 1. sheet document id - strongest signal
   if (sig.sheetId) {
-    for (const c of CLIENTS) {
+    for (const c of POOL) {
       if ((d(c).sheetIds || []).includes(sig.sheetId)) return c;
     }
   }
   // 2. subject-line patterns - precise per client
   if (sig.subject) {
-    for (const c of CLIENTS) {
+    for (const c of POOL) {
       if ((d(c).subjects || []).some(re => re.test(sig.subject))) return c;
     }
   }
@@ -856,23 +908,23 @@ function detectClient(sig) {
   const text = (sig.subject || '') + '\n' + (sig.emailText || '');
   const topOf = x => x.name.split(' / ')[0].replace(/ *\(.*/, '').trim();
   if (sig.folderName && CLIENT_FOLDERS[sig.folderName]) {
-    const c = CLIENTS.find(x => x.id === CLIENT_FOLDERS[sig.folderName]);
+    const c = POOL.find(x => x.id === CLIENT_FOLDERS[sig.folderName]);
     if (c) {
       const top = topOf(c);
-      const br = text.trim() && CLIENTS.find(x =>
+      const br = text.trim() && POOL.find(x =>
         topOf(x) === top && (d(x).keywords || []).some(re => re.test(text)));
       return br || c;
     }
   }
   // 4. keywords over subject+body - brand-level signal, beats domains
   if (text.trim()) {
-    for (const c of CLIENTS) {
+    for (const c of POOL) {
       if ((d(c).keywords || []).some(re => re.test(text))) return c;
     }
   }
   // 5. sender/cc domains - weakest signal, shared across advertisers
   if (text.trim()) {
-    for (const c of CLIENTS) {
+    for (const c of POOL) {
       if ((d(c).domains || []).some(re => re.test(text))) return c;
     }
   }

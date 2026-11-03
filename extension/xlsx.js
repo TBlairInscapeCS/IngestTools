@@ -151,7 +151,11 @@ async function readXlsx(buf, sheetName, sheetId) {
     }
   }
 
+  const coreXml = await read('docProps/core.xml');
+  const core = coreXml && xdoc(coreXml);
+  const titleNode = core && core.getElementsByTagNameNS('*', 'title')[0];
   return { sheetName: resolvedName, rows, links,
+    documentTitle: titleNode ? titleNode.textContent.trim() : '',
     sheetNames: sheetEls.map(s => s.getAttribute('name')) };
 }
 
