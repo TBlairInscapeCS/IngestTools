@@ -246,6 +246,8 @@
   /* 'skip' = step intentionally not applicable (sheetless clients: no
      tracker exists) - a checked-off hollow, dimmer than idle ring. */
   .sdot.skip { background: transparent; border-color: #3fbf7f; opacity: .5; }
+  .sdot.busy { background: #4d9de0 !important; border-color: #4d9de0 !important; animation: sdotpulse 1s ease-in-out infinite; }
+  @keyframes sdotpulse { 0%,100% { opacity: 1; box-shadow: 0 0 6px rgba(77,157,224,.8); } 50% { opacity: .3; box-shadow: none; } }
 
   button:focus-visible, summary:focus-visible, a:focus-visible,
   select:focus-visible, input:focus-visible, textarea:focus-visible {

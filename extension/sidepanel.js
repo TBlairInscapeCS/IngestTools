@@ -6378,6 +6378,22 @@ function renderJourneyUI() {
   if ($('jobCounts').innerHTML !== counts) $('jobCounts').innerHTML = counts;
   // "What happened" trail: one glance answers is-it-done. ✓ = stage has
   // real evidence; – = not applicable (sheetless); · = pending.
+  // Action -> stage dot: while a runUiAction is in flight its stage dot
+  // pulses and the trail names it, so the background step is legible.
+  const ACTION_STAGE = {
+    grabEmail: 'sdEmail', checkInbox: 'sdEmail', findSource: 'sdEmail',
+    grabSheet: 'sdSheet',
+    match: 'sdMatch',
+    grabAndDl: 'sdDl', download: 'sdDl', downloadMedia: 'sdDl',
+    alreadyHaveFiles: 'sdDl', pickPortal: 'sdDl',
+    feedPortal: 'sdIngest', feedTicker: 'sdIngest', ingestCheck: 'sdIngest',
+    ingestPush: 'sdIngest', verifyIngest: 'sdIngest', alreadyIngested: 'sdIngest',
+    postJira: 'sdReply',
+  };
+  const busyStage = uiBusy && ACTION_STAGE[uiBusy.id];
+  ['sdEmail', 'sdSheet', 'sdMatch', 'sdDl', 'sdIngest', 'sdReply'].forEach(id => {
+    const d = $(id); if (d && d.classList) d.classList.toggle('busy', id === busyStage);
+  });
   const trail = [
     'email ' + (snapshot.request ? '✓' : '·'),
     snapshot.emailOnly ? 'tracker –' : 'tracker ' + (snapshot.tracker ? '✓' : '·'),
@@ -6389,7 +6405,8 @@ function renderJourneyUI() {
     'reply ' + (($('replyPreview').value || '').trim() ? 'drafted' : '·'),
   ].join(' · ');
   const trailEl = $('jobTrail');
-  if (trailEl && trailEl.textContent !== trail) trailEl.textContent = trail;
+  const trailTxt = trail + (uiBusy ? ' · ' + uiBusy.label.toLowerCase() + (uiBusy.progress ? ' ' + uiBusy.progress : '') + '…' : '');
+  if (trailEl && trailEl.textContent !== trailTxt) trailEl.textContent = trailTxt;
   $('jobNext').textContent = uiBusy ? 'Working…' : currentDownloadCount() ? 'Downloads in progress…' : next.label;
   $('jobNext').dataset.action = next.action;
   $('jobNext').disabled = !!uiBusy || !!currentDownloadCount();
