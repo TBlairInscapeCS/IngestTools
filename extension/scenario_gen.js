@@ -51,7 +51,7 @@ const IDMAKERS = {
   comscore: r => 'p' + rint(r, 100000000000, 999999999999) + '_' + rint(r, 1000, 9999),
   qyps: r => 'QY' + pick(r, 'PSKLM'.split('')) + '0' + String(rint(r, 100000, 999999)) + 'H',
   spx: r => 'SP' + pick(r, 'XBQZ'.split('')) + '4' + String(rint(r, 100000, 999999)) + 'H',
-  colon: r => pick(r, ['ITO', 'KTO', 'ZTR']) + String(rint(r, 10, 999)) + ':',
+  colon: r => pick(r, ['ITO', 'KTO', 'ZTR']) + String(rint(r, 10, 999999)) + ':',
   mp4ish: r => pick(r, ['TO', 'ZN', 'KR']) + String(rint(r, 100, 999)) + pick(r, ['ST', 'HD', 'BN']) + 'H',
 };
 const HEADER_SETS = [
@@ -80,6 +80,8 @@ function genScenario(seed) {
   const tabs = {};
   const totalRows = rint(r, 200, 4000);
   const banner = rint(r, 0, 3); // banner rows above the header
+  const usedIds = new Set();
+  const mkid = () => { let id; do { id = IDMAKERS[client.idfmt](r); } while (usedIds.has(id)); usedIds.add(id); return id; };
   tabNames.forEach(name => {
     const n = name === reqTab ? totalRows : rint(r, 50, 300);
     const rows = [];
@@ -88,12 +90,12 @@ function genScenario(seed) {
     const links = {};
     const old = name !== reqTab;
     for (let i = 1; i <= n; i++) {
-      const id = IDMAKERS[client.idfmt](r);
+      const id = mkid();
       const date = old ? '3/' + rint(r, 1, 28) + '/2024' : rint(r, 9, 10) + '/' + rint(r, 1, 30) + '/2026';
       const done = old || r() < 0.7 ? date : '';       // ~30% of live-tab rows pending
       const by = done ? 'ops' : '';
-      rows.push([id, pick(r, TITLES) + ' ' + i, date, id.toLowerCase() + '.mp4', '', client.brand, done, by]);
-      if (!old && r() < 0.3) links[rows.length - 1 + ',4'] = 'https://files.example.com/dl/' + id.toLowerCase() + '.mp4';
+      rows.push([id, pick(r, TITLES) + ' ' + i, date, id.toLowerCase().replace(/[:;]/g, '') + '.mp4', '', client.brand, done, by]);
+      if (!old && r() < 0.3) links[rows.length - 1 + ',4'] = 'https://files.example.com/dl/' + id.toLowerCase().replace(/[:;]/g, '') + '.mp4';
     }
     tabs[name] = { rows, links };
   });
@@ -114,8 +116,8 @@ function genScenario(seed) {
     r_[2] = '10/' + rint(r, 28, 31) + '/2026';
     r_[6] = ''; r_[7] = '';
   });
-  const stray = IDMAKERS[client.idfmt](r);      // cited but on no tab
-  const ghost = IDMAKERS[client.idfmt](r);      // cited, on tab but outside block
+  const stray = mkid();      // cited but on no tab
+  const ghost = mkid();      // cited, on tab but outside block
   const ghostRow = rint(r, headerRow + 2, Math.max(headerRow + 3, startRow - 10));
   if (ghostRow < startRow) t.rows[ghostRow - 1][0] = ghost;
 
@@ -128,8 +130,8 @@ function genScenario(seed) {
                     : 'rows ' + startRow + '-' + (startRow + nReq - 1),
     codes: reqIds.slice(0, Math.min(nReq, 6)).join(', '),
     files: r() < 0.5
-      ? reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase() + '.mp4').join('\n')
-      : 'File Name\n' + reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase() + '.mp4').join('\n'),
+      ? reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase().replace(/[:;]/g, '') + '.mp4').join('\n')
+      : 'File Name\n' + reqIds.slice(0, Math.min(nReq, 5)).map(id => id.toLowerCase().replace(/[:;]/g, '') + '.mp4').join('\n'),
     mixed: 'rows ' + startRow + '-' + (startRow + Math.floor(nReq / 2) - 1) + ', plus ' + ghost + ' and ' + stray,
     vague: '',
   }[idType];
