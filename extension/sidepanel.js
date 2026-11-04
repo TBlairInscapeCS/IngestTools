@@ -3629,28 +3629,84 @@ function spViewUrl(ref) {
 // be. Reads Sheets' name box for the selected range ('D12', 'A3:C7'),
 // feeds the row numbers through the normal match path so fills, the
 // manifest, Jira and the reply all behave exactly like a cited request.
-function sheetSelectionRows() {
+function sheetSelectionRange() {
   const nb = document.getElementById('t-name-box') ||
     document.querySelector('input[aria-label*="name box" i], .t-name-box');
-  const v = nb && (nb.value || nb.textContent || '');
-  const m = String(v).match(/([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?/);
-  if (!m) return '';
+  const v = String(nb && (nb.value || nb.textContent || '')).replace(/^'?[^']+'?!/, '').trim();
+  const m = v.match(/([A-Z]*)(\d+)(?::([A-Z]*)(\d+))?/);
+  if (!m) return null;
   const a = parseInt(m[2], 10), b = m[4] ? parseInt(m[4], 10) : a;
-  const rows = [];
-  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) rows.push(i);
-  return rows;
+  return { lo: Math.min(a, b), hi: Math.max(a, b) };
 }
 bindUiAction('matchSelRows', async () => {
   const tabs = await chrome.tabs.query({ url: 'https://docs.google.com/spreadsheets/*' });
   const tab = (lastSheetRef && tabs.find(t => (t.url || '').includes(lastSheetRef.id))) || tabs[0];
   if (!tab) { toast('No Sheets tab open - select the request rows on the tracker first.'); setStage('sdMatch', 'warn', 'no Sheets tab to read a selection from'); return; }
-  const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: sheetSelectionRows });
-  const rows = (res && res.result) || [];
-  if (!rows.length) { toast('Could not read a selection - click a row or range on the tracker first.'); return; }
-  manualRows = rows;
-  const r = await doMatch();
-  manualRows = null;
-  if (r && r !== 'guess') toast('Matched ' + rows.length + ' selected row(s).');
+  const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: sheetSelectionRange });
+  const sel = res && res.result;
+  if (!sel || !sel.lo) { toast('Could not read a selection - click a row or range on the tracker first.'); return; }
+  // Pull just the selection + the header band via range exports - no
+  // full-sheet download, no copy/paste. Selections carry no headers, so
+  // the first rows are fetched separately for the column map.
+  const docId = ((tab.url || '').match(/\/d\/([a-zA-Z0-9-_]+)/) || [])[1] ||
+    (lastSheetRef && lastSheetRef.id);
+  const gid = ((tab.url || '').match(/gid=(\d+)/) || [])[1] ||
+    (lastSheetRef && String(lastSheetRef.gid)) || '0';
+  const bandHi = Math.min(8, sel.lo - 1);
+  try {
+    if (!docId) throw new Error('no doc id');
+    const csv = async range => {
+      const r = await fetch('https://docs.google.com/spreadsheets/d/' + docId +
+        '/export?format=csv&gid=' + gid + '&range=' + encodeURIComponent(range),
+        { credentials: 'include' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return parseInput(await r.text()).rows;
+    };
+    const band = bandHi >= 1 ? await csv('A1:ZZ' + bandHi) : [];
+    const selRows = await csv('A' + sel.lo + ':ZZ' + sel.hi);
+    const src = band.length ? band : selRows;
+    const hdr = detectHeaderRow(src);
+    const headers = src[hdr] || [], grp = hdr > 0 ? src[hdr - 1] : null;
+    const dataRows = band.length ? band.slice(hdr + 1) : selRows.slice(hdr + 1);
+    matchCols = {
+      id: guessField(headers, 'trackingId', dataRows, grp),
+      title: guessField(headers, 'spotTitle', dataRows, grp),
+      file: guessColumn(headers, /file.?name|media/i),
+      link: guessColumn(headers, /link|url|drive|download|source|share/i),
+      brand: guessColumn(headers, /^brand$|brand|advertiser|client|product|network/i),
+      espn: guessColumn(headers, /espn|ticker|version/i),
+      date: guessColumn(headers, /date|flight|start/i), access: -1,
+    };
+    matched = selRows
+      .filter(r => r.some(c => String(c || '').trim()))
+      .map((r, i) => ({
+        row: sel.lo + i,
+        id: String(r[matchCols.id] || '').trim() || 'row ' + (sel.lo + i),
+        trackingId: matchCols.id >= 0 ? String(r[matchCols.id] || '').trim() : '',
+        title: matchCols.title >= 0 ? String(r[matchCols.title] || '').trim() : '',
+        fileName: matchCols.file >= 0 ? String(r[matchCols.file] || '').trim() : '',
+        brand: matchCols.brand >= 0 ? String(r[matchCols.brand] || '').trim() : '',
+        espn: matchCols.espn >= 0 && String(r[matchCols.espn] || '').trim() !== '',
+        link: matchCols.link >= 0 && /^https?:/i.test(r[matchCols.link] || '') ? r[matchCols.link].trim() : '',
+        matchType: 'ROW (selected)', tab: sheetTabName || null,
+      }));
+    matchedFor = workflowContext() + ' sel A' + sel.lo + ':ZZ' + sel.hi;
+    presentMatches();
+    setStage('sdMatch', 'ok', matched.length + ' selected row(s) matched');
+    toast('Matched ' + matched.length + ' selected row(s)' +
+      (band.length ? '' : ' - no headers fetched; pick columns if the mapping looks wrong') + '.');
+    return;
+  } catch (e) {
+    // Export unreachable (private doc/auth) - fall back to row cites on
+    // whatever sheet is already loaded.
+    dbg('selection export failed, falling back to row cites', String(e && e.message || e));
+    if (!sheet) { toast('Could not export the selected range (' + (e.message || e) + ') and no sheet is loaded.'); return; }
+    manualRows = [];
+    for (let i = sel.lo; i <= sel.hi; i++) manualRows.push(i);
+    const r = await doMatch();
+    manualRows = null;
+    if (r && r !== 'guess') toast('Matched ' + (sel.hi - sel.lo + 1) + ' selected row(s).');
+  }
 });
 function sheetTabGid(tabName) {
   const t = tabName || sheetTabName;
