@@ -4396,6 +4396,13 @@ async function downloadLinked() {
     if (fid) {
       const listing = listings[fid];
       if (listing.error) { problems.push('row ' + m.row + ': folder listing failed - ' + listing.error); continue; }
+      // Empty listing ≠ empty folder: private/expired link or a Drive
+      // markup change both scrape as zero files - say so instead of
+      // claiming the file is missing.
+      if (!listing.length) {
+        problems.push('row ' + m.row + ' (' + (m.trackingId || m.id) + '): Drive folder returned no files - private link, expired share, or Drive page markup changed; open the link and download manually');
+        continue;
+      }
       const pick = pickRowFile(m, listing);
       if (pick.status === 'ok') {
         m.resolvedFile = pick.file.name;
