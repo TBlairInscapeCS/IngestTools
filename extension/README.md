@@ -208,7 +208,10 @@ to the newest dated unclaimed row. Review this set before finding files.
 ## Request: review requested IDs
 
 - **Match** pairs explicit row references, IDs, filenames, and fallback clues
-  with the loaded sheet. Review IDs, titles, links, and ticker flags. A
+  with the loaded sheet. Review IDs, titles, links, and ticker flags.
+  **Match sheet selection** matches the rows selected in the open Sheets
+  tab - the manual path for emails that cite no IDs at all. The Requested
+  IDs box also accepts `rows N-M` citations. A
   background records check then flags matched IDs that already exist in the
   realm (INGESTED chip) — skip them or confirm an intentional re-ingest.
 - In email-only mode the button becomes **Identify email IDs**. Email-derived

@@ -52,6 +52,7 @@ let pendingRows = [];      // sheet rows with empty fill-back columns
 let pendingIdxArr = [];    // their data-row indices (for real row numbers)
 let emailPairs = [];       // code+title pairs from the email (Chief Media)
 let emailSpots = [];       // row#/title/code/link blocks from the email (AMC)
+let manualRows = null;     // rows grabbed off the open Sheets selection
 let yangaroo = null;       // {spots, orderName, orderId} from delivery email
 let deliveryWatch = null;  // setInterval id while polling for a delivery
 let watchCtx = null;       // {why, clientId, codes} the watch verifies against
@@ -2839,7 +2840,10 @@ async function doMatch() {
   const emailCodes = [...new Set(refs.codes.concat(refs.fileIds || []))];
   const reqCodes = [...new Set(emailCodes.length ? emailCodes
     : idsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))];
-  const reqRows = refs.rowRefs;
+  // IDs box accepts row citations too ('rows 5-12') - the manual match
+  // path for emails that name no IDs at all.
+  const reqRows = [...new Set(refs.rowRefs
+    .concat(extractRowRefs(idsEl.value)).concat(manualRows || []))];
   const scores = await sheetTabScores(reqCodes, reqRows);
   if (scores) {
     const cur = scores.find(s => s.name === sheetTabName) ||
@@ -3620,6 +3624,34 @@ function spViewUrl(ref) {
   } catch (e) { /* odd URL - no view */ }
   return '';
 }
+// Match sheet selection: emails that cite no IDs ("additional creatives
+// for ingestion") can't be code-matched - but the tracker on screen can
+// be. Reads Sheets' name box for the selected range ('D12', 'A3:C7'),
+// feeds the row numbers through the normal match path so fills, the
+// manifest, Jira and the reply all behave exactly like a cited request.
+function sheetSelectionRows() {
+  const nb = document.getElementById('t-name-box') ||
+    document.querySelector('input[aria-label*="name box" i], .t-name-box');
+  const v = nb && (nb.value || nb.textContent || '');
+  const m = String(v).match(/([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?/);
+  if (!m) return '';
+  const a = parseInt(m[2], 10), b = m[4] ? parseInt(m[4], 10) : a;
+  const rows = [];
+  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) rows.push(i);
+  return rows;
+}
+bindUiAction('matchSelRows', async () => {
+  const tabs = await chrome.tabs.query({ url: 'https://docs.google.com/spreadsheets/*' });
+  const tab = (lastSheetRef && tabs.find(t => (t.url || '').includes(lastSheetRef.id))) || tabs[0];
+  if (!tab) { toast('No Sheets tab open - select the request rows on the tracker first.'); setStage('sdMatch', 'warn', 'no Sheets tab to read a selection from'); return; }
+  const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: sheetSelectionRows });
+  const rows = (res && res.result) || [];
+  if (!rows.length) { toast('Could not read a selection - click a row or range on the tracker first.'); return; }
+  manualRows = rows;
+  const r = await doMatch();
+  manualRows = null;
+  if (r && r !== 'guess') toast('Matched ' + rows.length + ' selected row(s).');
+});
 function sheetTabGid(tabName) {
   const t = tabName || sheetTabName;
   const g = (sheetGids || {})[t] ??
@@ -6428,7 +6460,7 @@ function renderJourneyUI() {
   const ACTION_STAGE = {
     grabEmail: 'sdEmail', checkInbox: 'sdEmail', findSource: 'sdEmail',
     grabSheet: 'sdSheet',
-    match: 'sdMatch',
+    match: 'sdMatch', matchSelRows: 'sdMatch',
     grabAndDl: 'sdDl', download: 'sdDl', downloadMedia: 'sdDl',
     alreadyHaveFiles: 'sdDl', pickPortal: 'sdDl',
     feedPortal: 'sdIngest', feedTicker: 'sdIngest', ingestCheck: 'sdIngest',
@@ -6483,7 +6515,7 @@ async function runUiAction(id, action, event) {
   const locked = [];
   const context = workflowContext();
   uiBusy = { id, context, label: button ? button.textContent.trim() : 'Working' };
-  ['runAll', 'clearAll', 'clientSel', 'findSource', 'trackerMode', 'fillProfile', 'saveClientRules', 'grabEmail', 'checkInbox', 'grabSheet', 'match', 'grabAndDl', 'download', 'downloadMedia', 'feedPortal', 'feedTicker', 'pickPortal', 'ingestCheck', 'ingestPush', 'verifyIngest', 'postJira', 'alreadyHaveFiles', 'alreadyIngested'].forEach(key => {
+  ['runAll', 'clearAll', 'clientSel', 'findSource', 'trackerMode', 'fillProfile', 'saveClientRules', 'grabEmail', 'checkInbox', 'grabSheet', 'match', 'matchSelRows', 'grabAndDl', 'download', 'downloadMedia', 'feedPortal', 'feedTicker', 'pickPortal', 'ingestCheck', 'ingestPush', 'verifyIngest', 'postJira', 'alreadyHaveFiles', 'alreadyIngested'].forEach(key => {
     const el = $(key); if (el && !el.disabled) { el.disabled = true; locked.push(el); }
   });
   $('operationNotice').classList.remove('error');
