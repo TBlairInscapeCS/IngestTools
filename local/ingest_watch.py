@@ -614,6 +614,56 @@ def job_screenshots(job_dir: Path) -> list[str]:
     return sorted(p.name for p in job_dir.glob("*-screenshot.jpg")) if job_dir.exists() else []
 
 
+# Finished jobs fold under Ingest/_archive/<job>/: media is already in
+# Customer Content by then, so the dir is just manifest/report/state,
+# screenshots and leftover zips - one archive shelf instead of a growing
+# row of job dirs at the root. Depth-2 placement also drops the job out
+# of the manifest glob, so terminal jobs stop costing scan cycles.
+ARCHIVE_DIR = WATCH_DIR / "_archive"
+ARCHIVE_KEEP_DAYS = 45
+
+
+def sweep_archived_job(job_dir: Path):
+    dest = uniquified(ARCHIVE_DIR / job_dir.name)
+    try:
+        ARCHIVE_DIR.mkdir(exist_ok=True)
+        job_dir.rename(dest)
+        log(f"swept finished job {job_dir.name} -> _archive/")
+    except Exception as e:
+        log(f"sweep failed for {job_dir.name}: {e}")
+
+
+def prune_archive():
+    cutoff = time.time() - ARCHIVE_KEEP_DAYS * 86400
+    try:
+        for d in ARCHIVE_DIR.iterdir():
+            if not d.is_dir():
+                continue
+            try:
+                newest = max([f.stat().st_mtime for f in d.rglob("*")]
+                             + [d.stat().st_mtime])
+                if newest < cutoff:
+                    shutil.rmtree(d, ignore_errors=True)
+                    log(f"pruned _archive/{d.name} (older than {ARCHIVE_KEEP_DAYS}d)")
+            except Exception:
+                pass
+    except FileNotFoundError:
+        pass
+
+
+def rotate_logs():
+    """Cap the two growing logs at ~2MB - keep one backup each."""
+    for lf in ("watch.log", "ingest-tools-log.txt"):
+        p = LOG_DIR / lf
+        try:
+            if p.stat().st_size > 2 * 1024 ** 2:
+                (LOG_DIR / (lf + ".1")).write_bytes(p.read_bytes()[-256 * 1024:])
+                p.write_text("")
+                log(f"rotated {lf}")
+        except FileNotFoundError:
+            pass
+
+
 def client_folder(client_name: str):
     """Map a playbook name to its Customer Content folder. Prefix match
     either way: 'Horizon Next' -> Horizon, 'ITN' -> ITN Networks. No folder
@@ -1107,6 +1157,8 @@ def process_job(manifest_path: Path):
                         f"Move the job's media to Customer Content/{dest.name if dest else '?'}?"):
                     if archive_done(job_dir, manifest, state, report, client):
                         state["archived_all"] = True
+                        save_state(manifest_path, state)
+                        sweep_archived_job(job_dir)
                 else:
                     state["archive_snoozed"] = time.time()
                     report["archive"] = "archive declined - files stay in Ingest/ (re-asks in ~30m)"
@@ -1560,6 +1612,7 @@ def main():
     if not ESPN_SCRIPT.exists():
         log(f"warning: {ESPN_SCRIPT} not found - conversions will fail")
     start_log_server()
+    rotate_logs()
     if "--once" in sys.argv:
         run_once()
         return
@@ -1568,7 +1621,11 @@ def main():
         (WATCH_DIR / "_tickerize").mkdir(exist_ok=True)
     except OSError as e:
         log(f"tickerize dir: {e}")
+    last_prune = 0.0
     while True:
+        if time.time() - last_prune > 3600:
+            prune_archive()
+            last_prune = time.time()
         try:
             run_once()
         except Exception as e:

@@ -138,6 +138,9 @@ You can jump to any step; the suggestion is guidance, not a mandatory sequence.
    email IDs/filenames. An acknowledgment is not ingest proof. Copy/send the
    reply yourself or create an Outlook draft for review. Both draft fields have
    **Clear**. Proof files land in `Ingest/_previous jobs/` (newest 3 jobs kept).
+   Fully-archived job dirs fold under `Ingest/_archive/` (pruned after ~45 days)
+   so finished work stops accumulating at the root, and the watcher logs
+   (`watch.log`, `ingest-tools-log.txt`) rotate at ~2 MB with one backup each.
 
 Busy operations disable repeated/competing starts and show their current work.
 **New request** clears per-job evidence, download totals, and fill-preview state;
