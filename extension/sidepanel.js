@@ -2974,7 +2974,23 @@ async function doMatch() {
 
   // Guess-only result -> confirm before committing. The user picks which
   // pending rows the vague email actually meant.
-  if (fresh.every(m => m.matchType === 'GUESS')) { setStage('sdMatch', 'warn', 'confirm the guessed rows below'); presentGuessPicker(fresh); return 'guess'; }
+  if (fresh.every(m => m.matchType === 'GUESS')) {
+    // No cited refs + a small pending pool: the batch IS the request
+    // ("additional creatives for ingestion" emails carry no IDs at all).
+    // Committing beats a picker that reads as "nothing matched" - the
+    // warn dot + toast keep it reviewable, exclusion fixes a wrong row.
+    if (!reqCodes.length && !reqRows.length && fresh.length <= 5) {
+      matched = mergeMatches(fresh);
+      presentMatches();
+      modStatDone('stMatch', fresh.length + ' pending row(s) auto-matched - no IDs were cited');
+      setStage('sdMatch', 'warn', 'auto-matched ' + fresh.length + ' pending row(s) - review and exclude any that are wrong');
+      toast('No IDs were cited - matched all ' + fresh.length + ' pending row(s). Exclude any that are wrong.');
+      return true;
+    }
+    setStage('sdMatch', 'warn', 'confirm the guessed rows below');
+    presentGuessPicker(fresh);
+    return 'guess';
+  }
   matched = mergeMatches(fresh);
   presentMatches();
   modStatDone('stMatch', fresh.length + ' row(s) matched' +
