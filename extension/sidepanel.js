@@ -582,6 +582,7 @@ function clearAll() {
   $('erSender').value = ''; $('erDays').value = '14';
   ['watchInfo', 'tickerInfo'].forEach(id => { const el = $(id); if (el) el.innerHTML = ''; });
   ['feedTicker', 'ingestPush'].forEach(id => { const el = $(id); if (el) el.classList.add('hidden'); });
+  tickerAutoFeed = false; tickerReadyToast = ''; tickerAutoFed = '';
   const pp = $('portalPick'); if (pp) pp.value = '';
   // Collapse to the fresh-load layout: sec1 open, every module and mini
   // toggle shut - the progressive unlocks re-apply from the cleared dots.
@@ -5874,6 +5875,16 @@ bindUiAction('ingestPush', async () => {
   }
   dbg('ingest push', { rows: plan.rows.length, queued: n, filled: fillResult.filled || 0,
     unmatched: fillResult.unmatched || [] });
+  // Batch 1 is pushed - arm the ticker auto-feed so the watcher's _ticker
+  // builds feed themselves as batch 2 the moment they report ready.
+  const nEspn = (matched || [])
+    .filter(m => !m.excluded && m.matchType !== 'ROW (out of range)' && (m.trackingId || m.id))
+    .filter(m => m.espn || tickerAlways()).length;
+  if (nEspn) {
+    tickerAutoFeed = true;
+    $('ingestInfo').textContent += ' · ' + nEspn + ' ticker version(s) build in the background' +
+      ' and feed automatically once ready (batch 2: video-only)';
+  }
   refreshTickerStatus();
 });
 
@@ -6017,6 +6028,11 @@ bindUiAction('feedTicker', async () => {
   refreshTickerStatus();
 });
 
+// Ticker batch-2 automation: arming happens when the standard ingest
+// push runs - once the watcher's _ticker builds report ready, the 15s
+// status tick fires a ready notification once per request and feeds
+// them through the same feed+fill path as the button.
+let tickerAutoFeed = false, tickerReadyToast = '', tickerAutoFed = '';
 // Ticker build status for the module's status line + the feed button's
 // visibility. Expected count mirrors the manifest's needs_espn rule
 // (row flag OR client's ticker-always playbook).
@@ -6045,6 +6061,19 @@ async function refreshTickerStatus() {
       (filed ? ' · ' + filed + ' already built &amp; filed' : '') +
       (failed ? ' · <span style="color:#ec9a9a">' + failed + ' failed - see watcher log</span>' : '') +
       (ready ? ' - feed them as the second, video-only batch' : '');
+    const ctxKey = workflowContext();
+    if (ready) {
+      if (tickerReadyToast !== ctxKey) {
+        tickerReadyToast = ctxKey;
+        toast(ready + ' ticker version(s) ready' + (tickerAutoFeed
+          ? ' - feeding them into the portal now (batch 2)'
+          : ' - feed them as the second, video-only batch'));
+      }
+      if (tickerAutoFeed && tickerAutoFed !== ctxKey && !uiBusy) {
+        tickerAutoFed = ctxKey;
+        $('feedTicker').click();   // runUiAction guards against re-entry
+      }
+    }
   } catch (e) {
     box.textContent = nEspn + ' ticker version(s) expected - watcher unreachable';
     btn.classList.add('hidden');

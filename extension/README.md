@@ -102,7 +102,9 @@ You can navigate to any step at any time.
   per-spot Download links attached to matched rows (or an open Yangaroo page) so
   Download files pulls only requested spots. When files arrive manually (Pick &
   feed, local discovery), the extension writes the job manifest first so
-  sheet-flagged ticker versions still auto-build in the job folder.
+  sheet-flagged ticker versions still auto-build in the job folder. Once the
+  standard ingest push runs, ready ticker builds feed themselves as batch 2
+  (video-only) - a "ticker versions ready" notification fires as they finish.
   **I already have the files** searches local media. **Use portal file picker**
   activates the portal and points you at its picker; select/drop files there
   yourself without needing a manifest. Detailed tools and the manifest action
