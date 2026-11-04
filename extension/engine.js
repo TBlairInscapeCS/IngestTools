@@ -619,7 +619,7 @@ function recordEvidenceStage(record) {
   if (/FAILED/i.test(record.status || '') || (record.detection_result && record.detection_result !== 'pass')) return 'failed';
   return record.status === 'DETECTION_COMPLETED' ? 'complete' : 'processing';
 }
-function buildWorkflowReply(rows, sender) {
+function buildWorkflowReply(rows, sender, opts = {}) {
   if (!rows.some(r => r.stage)) return null;
   const at = s => rows.filter(r => (r.stage || '') === s);
   const done = at('complete'), proc = at('processing'), located = at('located'),
@@ -651,8 +651,8 @@ function buildWorkflowReply(rows, sender) {
     pending.forEach(r => lines.push('  - ' + r.id));
     lines.push('');
   }
-  lines.push('Happy to resend or check anything that looks off - just let me know.',
-    '', 'Thanks!');
+  if (!opts.sheetless) lines.push(pick(CONF_SHEET, seed >> 5), '');
+  lines.push('Thanks!');
   return lines.join('\n');
 }
 function buildAckReply(ids, sender) {

@@ -3980,7 +3980,7 @@ function workflowReplyText() {
     const rejected = (specFails || []).find(r => normalizeName(r.id) === normalizeName(id));
     if (rejected && (!evidence || evidence.stage !== 'complete')) return { id, stage: 'failed', status: 'media spec check failed' };
     return { id, stage: evidence ? evidence.stage : found ? 'located' : '', status: evidence && evidence.status };
-  }), emailSender);
+  }), emailSender, replyOptions());
 }
 function replyOptions() {
   return { sheetless: emailOnly() || !sheet, tickerSuffix: ((client && client.ingest) || {}).tickerSuffix };
