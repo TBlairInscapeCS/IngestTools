@@ -223,10 +223,10 @@ document.getElementById('ver').textContent = 'v' + chrome.runtime.getManifest().
 const DEPS = [
   { id:'watcher', name:'Download watcher', req:true, grp:'install',
     for:'downloads, _ticker builds, portal feed, job archive',
-    fix:'Double-click <b>watcher/install.command</b> in the full package. It installs to ~/Library/Application Support/IngestTools and starts itself at login - that is the whole setup.',
+    fix:'Double-click <b>2-Watcher/INSTALL.command</b> in the full package. It installs to ~/Library/Application Support/IngestTools and starts itself at login - that is the whole setup.',
     help:'<ol>' +
-      '<li>Unzip the <b>full package</b> (ingest-streamlined-v*-full.zip). Inside is a <b>watcher/</b> folder.</li>' +
-      '<li>Double-click <b>watcher/install.command</b>.</li>' +
+      '<li>Unzip the <b>full package</b> (ingest-streamlined-v*-full.zip). Inside is a <b>2-Watcher</b> folder.</li>' +
+      '<li>Double-click <b>2-Watcher/INSTALL.command</b>.</li>' +
       '<li>If macOS says it can\'t be opened: right-click it → <b>Open</b> → Open anyway (or System Settings → Privacy &amp; Security → Open Anyway).</li>' +
       '<li>It copies the watcher to <code>~/Library/Application Support/IngestTools/</code> and registers it to start at every login - no other setup, no terminal needed.</li>' +
       '<li>This row flips green within a few seconds. Done.</li>' +

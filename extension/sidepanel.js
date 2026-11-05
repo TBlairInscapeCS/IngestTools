@@ -6333,7 +6333,7 @@ async function gateCheck() {
   const okProbe = !!(h && h.ffprobe);
   const rows = [
     { ok: okWatch, label: 'download watcher', fix: okWatch ? 'listening on 127.0.0.1:8770'
-      : 'run watcher/install.command from the full package (double-click)' },
+      : 'run 2-Watcher/INSTALL.command from the full package (double-click)' },
     { ok: okProbe, label: 'ffprobe - spec checks + ticker builds', fix: !okWatch ? 'needs the watcher running first'
       : okProbe ? 'found' : 'brew install ffmpeg' },
   ];
@@ -6378,7 +6378,7 @@ async function checkConns() {
   jobs.push(watcherHealth().then(h => credDot('sdWatch',
     h ? (h.ffprobe ? 'ok' : 'warn') : 'fail',
     h ? (h.ffprobe ? 'watcher running - all deps present' : 'watcher running, but ffprobe missing')
-      : 'watcher unreachable - run watcher/install.command')));
+      : 'watcher unreachable - run 2-Watcher/INSTALL.command')));
 
   jobs.push(msLoad().then(async () => {
     if (!MS.refreshToken) return credDot('sdMs', '', 'not signed in');

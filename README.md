@@ -14,10 +14,10 @@ fills, BEGIN INGEST, Jira posts, and replies are always your click.
 1. **Unzip the package somewhere permanent.** Chrome loads the extension
    live from the folder, so pick a spot that won't be cleaned or moved.
 2. **Load the extension.** `chrome://extensions` → enable **Developer mode**
-   → **Load unpacked** → select the `extension/` folder → pin the toolbar
+   → **Load unpacked** → select the `1-Extension` folder → pin the toolbar
    icon.
 3. **Install the watcher** (macOS — does the file work). Double-click
-   `watcher/install.command`. That's the whole install: it copies itself
+   `2-Watcher/INSTALL.command`. That's the whole install: it copies itself
    to `~/Library/Application Support/IngestTools/` and starts at login.
 4. **Finish on the welcome page.** It opens on first install and turns
    each requirement green as it's detected — watcher, ffmpeg, signed-in
@@ -56,7 +56,7 @@ jobs, and trackerless requests can jump straight to the step they need.
 | Package | Contents | For |
 |---|---|---|
 | `dist/ingest-streamlined-v*.zip` | the extension alone | matching + analysis without the file pipeline |
-| `dist/ingest-streamlined-v*-full.zip` | unpacked extension + `watcher/` + `install.command` | the complete setup, one machine |
+| `dist/ingest-streamlined-v*-full.zip` | `README.md` + `1-Extension/` + `2-Watcher/` installer — folders numbered in install order | the complete setup, one machine |
 | `dist/ingest-streamlined-v*-portable.zip` | extension with scrubbed `clients.js` template | sharing outside the org — no sheet IDs or playbooks |
 
 ## What each feature needs
@@ -184,7 +184,7 @@ What the audit verified — the extension is purely local:
 ## Troubleshooting
 
 - **"download watcher not running"** (red strip in the panel): install
-  via `watcher/install.command` or check
+  via `2-Watcher/INSTALL.command` or check
   `launchctl print gui/$(id -u)/dev.ingest-watch` and
   `local/logs/watch.log` (dev install: `~/Library/Application
   Support/IngestTools/logs/`).

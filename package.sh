@@ -24,35 +24,40 @@ rm -f "$OUT"
 echo "Built $OUT"
 
 # Full package: everything a new install needs - the unpacked extension
-# plus the watcher and its double-click installer.
+# plus the watcher and its double-click installer. Folders are numbered
+# in install order so an unpacked zip (or GitHub repo download) is
+# self-explanatory, and README.md renders on GitHub.
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKGDIR="$STAGE/ingest-streamlined-v$VER"
-mkdir -p "$PKGDIR/extension" "$PKGDIR/watcher"
-(cd "$EXT" && cp "${FILES[@]}" "$PKGDIR/extension/")
-cp local/ingest_watch.py local/espn_ticker.sh local/ticker.png local/install.command "$PKGDIR/watcher/"
-chmod +x "$PKGDIR/watcher/install.command"
-cat > "$PKGDIR/README first.txt" <<EOF
-INGEST STREAMLINED v$VER — setup in 3 steps (~5 min)
+mkdir -p "$PKGDIR/1-Extension" "$PKGDIR/2-Watcher"
+(cd "$EXT" && cp "${FILES[@]}" "$PKGDIR/1-Extension/")
+cp local/ingest_watch.py local/espn_ticker.sh local/ticker.png "$PKGDIR/2-Watcher/"
+cp local/install.command "$PKGDIR/2-Watcher/INSTALL.command"
+chmod +x "$PKGDIR/2-Watcher/INSTALL.command"
+cat > "$PKGDIR/README.md" <<EOF
+# Ingest Streamlined v$VER
 
-1. MOVE this folder somewhere permanent (not Downloads-as-temp) —
-   Chrome loads the extension live from it.
+**Setup: 3 steps, about 5 minutes.**
 
-2. EXTENSION: chrome://extensions -> enable "Developer mode" ->
-   "Load unpacked" -> pick this folder's "extension" directory.
-   Pin the toolbar icon. A welcome page opens with a live checklist.
+1. **Move this folder somewhere permanent** — Chrome loads the extension
+   live from it, so not a temp or auto-cleaned spot.
+2. **Load the extension** — open \`chrome://extensions\`, enable
+   **Developer mode**, click **Load unpacked**, select the
+   \`1-Extension\` folder, then pin the toolbar icon. A welcome page
+   opens with a live setup checklist that turns each requirement green.
+3. **Install the watcher** — open \`2-Watcher\` and double-click
+   **INSTALL.command** (right-click → Open if macOS blocks it). It
+   installs itself and starts at login — nothing else to configure.
+   Then run \`brew install ffmpeg\` once if the checklist flags it.
 
-3. WATCHER: double-click watcher/install.command (right-click -> Open
-   if macOS blocks it). It installs itself and starts at login —
-   nothing else to configure. Then run "brew install ffmpeg" once if
-   the checklist flags it.
+**Done.** Open a request email in Outlook and press **Run all**.
 
-That's it. Open a request email in Outlook and press Run all.
-
-Without the watcher the extension still does matching, sheets, Jira
-drafts, and replies — only downloads/spec checks/ticker builds/portal
-feeding need it.
+No watcher? The extension still does matching, sheets, Jira drafts, and
+replies — only downloads, spec checks, ticker builds, and portal feeding
+need it. macOS + python3 required for the watcher.
 EOF
+rm -f "dist/ingest-streamlined-v$VER-full.zip"
 (cd "$STAGE" && zip -q -r "$OLDPWD/dist/ingest-streamlined-v$VER-full.zip" \
   "ingest-streamlined-v$VER" -x '*.DS_Store')
 echo "Built dist/ingest-streamlined-v$VER-full.zip"
