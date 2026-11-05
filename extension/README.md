@@ -262,8 +262,9 @@ keeps only requested IDs; keep the original HTML delivery email open.
 **Downloads / Ingest** checks recent, stable media in the top level of
 `~/Downloads/` and `~/Downloads/Ingest/`, by code-shaped request ID. It does not
 move or rename files. Unrelated files, symlinks, partials, files older than
-14 days, and ambiguous duplicates are not fed automatically. Unzip archives
-first; **Use portal file picker** lets you select ambiguous/differently named
+14 days, and ambiguous duplicates are not fed automatically. ZIPs landing in
+the job folder are unpacked and paired automatically;
+**Use portal file picker** lets you select ambiguous/differently named
 media in the portal itself. The advanced **Pick & feed** upload path requires
 an existing job manifest.
 **Feed files** also runs this discovery, even when no manifest exists. Local

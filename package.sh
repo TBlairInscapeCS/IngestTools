@@ -33,21 +33,25 @@ mkdir -p "$PKGDIR/extension" "$PKGDIR/watcher"
 cp local/ingest_watch.py local/espn_ticker.sh local/ticker.png local/install.command "$PKGDIR/watcher/"
 chmod +x "$PKGDIR/watcher/install.command"
 cat > "$PKGDIR/README first.txt" <<EOF
-INGEST STREAMLINED v$VER
+INGEST STREAMLINED v$VER — setup in 3 steps (~5 min)
 
-1. THE EXTENSION
-   chrome://extensions -> Developer mode -> Load unpacked ->
-   pick this folder's "extension" directory.
-   On first install a welcome page walks you through setup.
+1. MOVE this folder somewhere permanent (not Downloads-as-temp) —
+   Chrome loads the extension live from it.
 
-2. THE WATCHER (recommended - does the file work)
-   Double-click watcher/install.command. It installs to
-   ~/Library/Application Support/IngestTools/ and starts at login.
-   Needs: macOS, python3, and ffmpeg/ffprobe (brew install ffmpeg)
-   for spec checks and _ticker builds.
+2. EXTENSION: chrome://extensions -> enable "Developer mode" ->
+   "Load unpacked" -> pick this folder's "extension" directory.
+   Pin the toolbar icon. A welcome page opens with a live checklist.
 
-   Extension-only (no watcher): email matching, sheet highlighting,
-   Jira drafts. The download/ticker/portal-feed pipeline needs it.
+3. WATCHER: double-click watcher/install.command (right-click -> Open
+   if macOS blocks it). It installs itself and starts at login —
+   nothing else to configure. Then run "brew install ffmpeg" once if
+   the checklist flags it.
+
+That's it. Open a request email in Outlook and press Run all.
+
+Without the watcher the extension still does matching, sheets, Jira
+drafts, and replies — only downloads/spec checks/ticker builds/portal
+feeding need it.
 EOF
 (cd "$STAGE" && zip -q -r "$OLDPWD/dist/ingest-streamlined-v$VER-full.zip" \
   "ingest-streamlined-v$VER" -x '*.DS_Store')

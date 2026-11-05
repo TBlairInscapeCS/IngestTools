@@ -129,11 +129,10 @@
 
   <section class="pitch">
     <p class="hook">Remember when ingest requests used to eat your afternoon?</p>
-    <p>Start with a request email: identify its client, load the correct tracker
-      or use email-only IDs, review matches, and find files before downloading.
-      Then preview portal fills, verify records, and review the Jira and reply
-      drafts. Downloading, accepting fills, beginning ingest, posting to Jira,
-      and sending a reply remain separate decisions.</p>
+    <p>One side panel runs the whole job: email in, IDs matched, files found,
+      portal filled, records verified, reply drafted. You approve each
+      irreversible step - downloads, fills, ingest, Jira, replies are always
+      your click.</p>
   </section>
 
   <div id="warnBanner">Checking your setup&hellip;</div>
@@ -151,132 +150,59 @@
   </section>
 
   <section>
-    <h2>How a job flows</h2>
+    <h2>Your first job (5 clicks)</h2>
     <div class="flow">
       <div class="fstep"><span class="fchip c1">Request</span>
-        <div>Load the email, confirm the client, and review requested IDs here.
-          Outlook folder rules and recognized sender domains guide detection;
-          manual selection wins. Trackerless clients hide the tracker and use
-          <b>Identify email IDs</b>. Otherwise verify <b>Document</b>, worksheet,
-          ID, and owner before matching. Override Match source under
-          <b>Advanced request options</b>. Keep original delivery HTML for links.</div></div>
+        <div>Open the request email in Outlook, press <b>Run all</b>. It reads
+          the email, picks the client and tracker tab, and matches the IDs.
+          Check the <b>Document</b> title - wrong tracker is the #1 mistake.</div></div>
       <div class="farrow">↓</div>
       <div class="fstep"><span class="fchip c4">Files</span>
-        <div><b>Find files</b> discovers direct links, ER deliveries, or open-page
-          candidates without downloading. Review, then press <b>Download files</b>.
-          ER auto-search expands 2 → 7 → configured days (default 14) as needed.
-          <b>Yangaroo</b> search uses the delivery email's per-spot Download
-          links or an open Yangaroo page - review matches before downloading.
-          <b>Stop</b> halts queueing and cancels tracked in-flight downloads;
-          completed files remain.</div></div>
+        <div>Review what <b>Run all</b> found, then press <b>Download files</b>.
+          The watcher specs them and builds ticker versions in the background.</div></div>
       <div class="farrow">↓</div>
       <div class="fstep"><span class="fchip c5">Ingest</span>
-        <div><b>Feed files</b> handles the standard batch; <b>Feed ticker files</b>
-          handles the separate video-only batch. Feeding or picking files also
-          writes the job manifest when needed so sheet-flagged tickers still
-          auto-build. <b>Check &amp; preview</b> shows
-          Reporting ID and Portal Title separately, including ticker suffixes.
-          Title defaults to ID unless rules say otherwise. Review the fill
-          profile under <b>more → fill</b> before <b>Accept fills</b>.
-          Tracker filenames can identify files whose ID/title differs. Ambiguous
-          matches stay unfilled. Check filled/queued counts and review metadata
-          differences, including Advertiser, Brand, and Vertical.
-          BEGIN INGEST stays your click.</div></div>
+        <div><b>Feed files</b> → <b>Check &amp; preview</b> → <b>Accept fills</b>
+          → <b>BEGIN INGEST</b> on the portal. Ready tickers feed themselves
+          as batch 2.</div></div>
       <div class="farrow">↓</div>
       <div class="fstep"><span class="fchip c6">Confirm</span>
-        <div><b>Verify &amp; draft</b> prepares Jira content; review gaps and proof
-          before approving a post. Email sign-offs stay in the request copy,
-          not as creative titles in the Ingest list.
-          Copy and send the reply yourself. Both
-          editable draft fields have <b>Clear</b>. Trackerless email matches
-          automatically draft an acknowledgment from IDs or filenames; no sheet
-          is needed. <b>Redraft</b> also works before Match. Choose <b>Ingested +
-          IDs</b> only after actual ingest; trackerless confirmations omit sheet
-          updates and use client ticker suffixes. An acknowledgment is not
-          proof that files have been ingested.</div></div>
+        <div><b>Verify &amp; draft</b> checks records and drafts the Jira ticket
+          and reply. Both post only when you say so.</div></div>
     </div>
+    <p class="fine" style="margin-top:10px">Stuck? The sticky job summary and the suggested
+      next-action button always show what's missing. Jump to any step at any
+      time - every module works on its own.</p>
   </section>
 
-  <section>
-    <h2>First run</h2>
-    <p>The panel shows four color-coded folder tabs, left to right:
-      Request, Files, Ingest, and Confirm. Each page uses its tab's color. The sticky job summary separates
-      identified IDs, located files, downloads completed this run, and verified
-      reporting IDs (including tickers). Follow the suggested next-action button,
-      or jump to any step. It never approves fills, posts Jira, sends replies,
-      or begins ingest for you.</p>
-    <p><b>I already have the files</b> searches local media. <b>Use portal file
-      picker</b> takes you to the portal to select/drop files yourself, without
-      needing a manifest. <b>I already ingested them</b> checks actual records.
-      <b>Stop downloads</b> stays in the header during queueing and active
-      downloads, even while viewing another step.</p>
-    <p class="fine">Client guidance/rules and advanced controls stay collapsed.
-      Advanced settings → <b>Show all steps (advanced)</b> restores the expanded
-      view and remembers your preference. <b>Clear all</b> clears the request,
-      evidence, counters, previews, visible errors, and notifications after
-      downloads finish or are stopped. Selecting a different request also
-      dismisses old alerts and collapses <b>Log</b>. Saved diagnostic logs,
-      sign-ins, and settings are kept; media and portal records are not deleted.</p>
-    <ol class="steps">
-      <li>Load the request and confirm the selected client.</li>
-      <li>Check the tracker's <b>Document</b> title, or select <b>No tracking
-        sheet — email IDs only</b>. ComScore and SimulMedia are trackerless.</li>
-      <li>Press <b>Run all</b> to prepare matches and discover files, or work
-        module by module. Run all does not automatically download media.</li>
-      <li>Review the candidates, then press <b>Download files</b>. Watch the
-        module status lines and progress bars instead of repeatedly clicking.</li>
-      <li>Preview and accept portal fills, begin ingest yourself, then verify
-        and review Jira/reply drafts.</li>
-    </ol>
-    <p class="fine">Before an email arrives, a tracker-backed request can start
-      from <b>N pending row(s) — use as requested IDs</b>. Review the pending set
-      and recent-date filter before discovery.</p>
-    <p class="fine">Optional connections sit collapsed above - the panel also
-      names the one it needs, in place, when you use a feature that's missing it.</p>
-  </section>
-
-  <section>
-    <h2>Continue after manual work</h2>
-    <p>Every module can be used independently. SimulMedia defaults to no tracker
-      and mixed Comcast/Extreme Reach delivery. Choose <b>Search → Comcast
-      email</b> to read matching Spot/Download links from open Outlook messages,
-      or <b>Downloads / Ingest</b> to find recent media by request ID.</p>
-    <p><b>Feed files</b> can find unique matches in Downloads or Ingest without
-      a manifest and without moving the files. Ambiguous duplicates need
-      <b>Use portal file picker</b>. Discovery alone does not build missing tickers.</p>
-    <p>After a manual upload/ingest, go straight to <b>Verify &amp; draft</b>.
-      Later file/record evidence overrides earlier misses for the active request.
-      The auto-reply distinguishes completed, processing, failed, and still
-      missing IDs. Edited drafts are kept; use <b>Auto draft → Redraft</b> to
-      replace them. Client rules can exclude discovery from <b>Run all</b>.</p>
-  </section>
-
-  <section>
-    <h2>Client rules and naming</h2>
-    <p>Under <b>Edit selected client rules</b>, press <b>Load selected client</b>,
-      edit tracker requirement, sender domains, ingest realm, Jira epic, ER
-      sender filter, or ticker settings, then <b>Save rules locally</b>.
-      These overrides stay in this Chrome profile; they do not edit the shared
-      customer reference sheet.</p>
-    <p>The portal's <b>fill</b> dropdown offers <b>auto (playbook)</b>,
-      <b>ID as title</b>, <b>ID + title</b>, and <b>ID + title + advertiser</b>.
-      A profile change refreshes the preview. ComScore ticker Reporting IDs
-      and Titles use lowercase <code>_t</code>. SimulMedia has no special suffix
-      and uses Jira epic <code>DD-597</code>. Internal <b>Vizio</b> requests
-      ingest each file into both <code>geniusdigital</code> and
-      <code>vizio</code> silos; verification checks both realms and the reply
-      lists each file's commercial ID per realm (with pending IDs called out).</p>
-    <p>InMarket fills <b>Advertiser, Brand, and Vertical</b> from each tracker's
-      <b>InMarket Campaign Name (column D)</b>, not the client name. Blank
-      campaigns leave existing fields untouched. Review each campaign in
-      <b>Check &amp; preview</b> before accepting fills. Tracker-context ranges
-      such as <code>campaign (1878-1883)</code> are recognized; filename typos
-      remain possible matches for your review.</p>
-    <p class="fine">If the wrong tracker appears, check the client and document
-      identity before matching. Unknown ownership or missing document titles
-      require your review. Reload the extension after an update to activate
-      the latest UI and reference-cleanup protections.</p>
-  </section>
+  <details class="optbox">
+    <summary>Beyond the basics <span class="fine">- manual paths, trackerless clients, client rules</span></summary>
+    <div style="margin-top:8px">
+    <p><b>No IDs in the email?</b> Small pending pools auto-commit; otherwise
+      highlight the request rows on the tracker and press <b>Match sheet
+      selection</b>. Trackerless clients (ComScore, SimulMedia) hide the
+      tracker - use <b>Identify email IDs</b>.</p>
+    <p><b>Manual file handling:</b> <b>I already have the files</b> searches
+      Downloads/Ingest; <b>Use portal file picker</b> selects files on the
+      portal without a manifest; ZIPs in the job folder unpack themselves.
+      <b>I already ingested them</b> jumps to Confirm and checks records.</p>
+    <p><b>Delivery sources:</b> the <b>Search</b> selector covers Extreme Reach
+      (auto-expands 2 → 7 → 14 days), Comcast email, Yangaroo download links,
+      open pages, and local discovery.</p>
+    <p><b>Client rules:</b> <b>Edit selected client rules</b> overrides tracker
+      requirement, sender domains, ingest realm, Jira epic, ER filter, and
+      ticker settings - saved locally in this Chrome profile only.</p>
+    <p><b>Naming:</b> portal Title defaults to Reporting ID unless the client's
+      rules say otherwise; ComScore tickers use lowercase <code>_t</code>.
+      InMarket fills Advertiser/Brand/Vertical from each row's <b>InMarket
+      Campaign Name (column D)</b>. Internal <b>Vizio</b> requests ingest into
+      both <code>geniusdigital</code> and <code>vizio</code> silos.</p>
+    <p class="fine"><b>Housekeeping:</b> <b>Stop downloads</b> stays in the header
+      while a job downloads. <b>Clear all</b> resets the request without touching
+      logs, sign-ins, settings, media, or portal records. Advanced settings →
+      <b>Show all steps (advanced)</b> restores the expanded view.</p>
+    </div>
+  </details>
 
   <div class="cta">
     <div id="warnBanner2" class="banner2">Checking your setup&hellip;</div>

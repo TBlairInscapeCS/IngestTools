@@ -1,8 +1,17 @@
 # Ingest watcher (local component)
 
 Watches `~/Downloads/Ingest/*/manifest.json` written by the Chrome
-extension and post-processes downloads — most importantly, running
+extension and post-processes downloads — spec checks, ZIP unpacking,
+portal file serving, Jira proof files, job archival, and running
 `espn_ticker.sh` on files the tracking sheet flagged for an ESPN version.
+
+## Install (the easy way)
+
+Double-click **`install.command`**. It copies everything to
+`~/Library/Application Support/IngestTools/`, registers a launchd agent
+that starts at login, and prints any missing requirements (python3,
+ffmpeg). That's the whole setup — everything below is for running it by
+hand or developing it.
 
 ## Setup
 
@@ -47,7 +56,8 @@ manifest. Discovery matches code-shaped request IDs with token boundaries and
 registers only unique matches for that job. It does not move or rename files.
 Files must be at least two seconds old and no more than 14 days old. Symlinks,
 partials, unrelated media, and ambiguous duplicates are excluded; use **Pick &
-feed** when a manual choice is required. Unzip downloaded archives first.
+feed** when a manual choice is required. `.zip` archives in a job folder are
+unpacked and paired automatically — no manual unzipping needed.
 
 The loopback `POST /ingest-discover` accepts a job and explicit requested IDs.
 The feed endpoints may serve only registered matching media or manifest entries;
