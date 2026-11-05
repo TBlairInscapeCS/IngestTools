@@ -227,7 +227,7 @@ const DEPS = [
     help:'<ol>' +
       '<li>Unzip the <b>full package</b> (ingest-streamlined-v*-full.zip). Inside is a <b>2-Watcher</b> folder.</li>' +
       '<li>Double-click <b>2-Watcher/INSTALL.command</b>.</li>' +
-      '<li>If macOS says "Apple could not verify": <b>System Settings → Privacy &amp; Security</b> → scroll down → <b>Open Anyway</b>, then double-click it again. (Or run <code>xattr -dr com.apple.quarantine .</code> in Terminal from inside the package folder.) It\'s unsigned - that warning is expected.</li>' +
+      '<li>If macOS says "Apple could not verify": open <b>Terminal</b>, <code>cd</code> into the package folder, run <code>xattr -dr com.apple.quarantine .</code> — no admin password needed — then double-click it again. (Privacy &amp; Security → Open Anyway also works, but it asks for an <b>administrator\'s</b> login, so it rejects your password on standard/managed accounts.)</li>' +
       '<li>It copies the watcher to <code>~/Library/Application Support/IngestTools/</code> and registers it to start at every login - no other setup, no terminal needed.</li>' +
       '<li>This row flips green within a few seconds. Done.</li>' +
       '</ol>' },

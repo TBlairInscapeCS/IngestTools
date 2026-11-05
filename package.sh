@@ -52,10 +52,11 @@ cat > "$PKGDIR/README.md" <<EOF
    if the checklist flags it.
 
 **"Apple could not verify INSTALL.command"?** Normal — it's unsigned.
-Either: **System Settings → Privacy & Security** → scroll down →
-**Open Anyway** → double-click INSTALL.command again. Or paste this in
-Terminal once (from inside this folder):
-\`xattr -dr com.apple.quarantine .\`
+Easiest fix, no admin password needed: open Terminal, \`cd\` into this
+folder, run \`xattr -dr com.apple.quarantine .\`, then double-click
+INSTALL.command. (Alternative: System Settings → Privacy & Security →
+Open Anyway — but that prompt asks for an *administrator's* login, so
+it won't accept your password on managed/standard accounts.)
 
 **Done.** Open a request email in Outlook and press **Run all**.
 
