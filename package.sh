@@ -47,9 +47,15 @@ cat > "$PKGDIR/README.md" <<EOF
    \`1-Extension\` folder, then pin the toolbar icon. A welcome page
    opens with a live setup checklist that turns each requirement green.
 3. **Install the watcher** — open \`2-Watcher\` and double-click
-   **INSTALL.command** (right-click → Open if macOS blocks it). It
-   installs itself and starts at login — nothing else to configure.
-   Then run \`brew install ffmpeg\` once if the checklist flags it.
+   **INSTALL.command**. It installs itself and starts at login —
+   nothing else to configure. Then run \`brew install ffmpeg\` once
+   if the checklist flags it.
+
+**"Apple could not verify INSTALL.command"?** Normal — it's unsigned.
+Either: **System Settings → Privacy & Security** → scroll down →
+**Open Anyway** → double-click INSTALL.command again. Or paste this in
+Terminal once (from inside this folder):
+\`xattr -dr com.apple.quarantine .\`
 
 **Done.** Open a request email in Outlook and press **Run all**.
 

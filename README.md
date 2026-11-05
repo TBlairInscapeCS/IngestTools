@@ -19,6 +19,9 @@ fills, BEGIN INGEST, Jira posts, and replies are always your click.
 3. **Install the watcher** (macOS — does the file work). Double-click
    `2-Watcher/INSTALL.command`. That's the whole install: it copies itself
    to `~/Library/Application Support/IngestTools/` and starts at login.
+   If macOS says "Apple could not verify": **System Settings → Privacy &
+   Security → Open Anyway**, then double-click again — the file is
+   unsigned, so that warning is expected.
 4. **Finish on the welcome page.** It opens on first install and turns
    each requirement green as it's detected — watcher, ffmpeg, signed-in
    tabs, optional connections. Reopen it anytime via the panel's **help**
