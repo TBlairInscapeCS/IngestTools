@@ -14,7 +14,10 @@ browser session or optional credentials configured in Settings.
 4. Follow the welcome page's setup checklist. Reopen it using the panel's
    **help** link. Watcher installation instructions are in `../local/README.md`.
 5. For batches, disable Chrome Downloads → **Ask where to save each file**.
-6. After updating extension files, reload the extension in `chrome://extensions`.
+6. **Updates**: the panel checks GitHub releases on open and offers a
+   blue **Update** strip when a newer version exists — one click swaps the
+   files via the watcher and reloads the panel. Manual path: re-download
+   the release zip and reload in `chrome://extensions`.
 
 ## InMarket matching and portal metadata
 

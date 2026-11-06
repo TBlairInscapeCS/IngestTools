@@ -34,6 +34,12 @@ spec checks and ticker builds. Without the watcher the extension still
 does email matching, tracker work, Jira drafts, and replies — only the
 download/spec/ticker/portal-feed pipeline needs it.
 
+**Updates**: the panel checks GitHub releases on open. When a newer
+version exists, a blue strip offers **Update** — the watcher swaps the
+extension files in place and the panel reloads; no re-download needed.
+(Updating needs the watcher; without it the strip links to the release
+page instead.)
+
 ## Using it
 
 Four color-coded folder tabs, left to right: **Request → Files → Ingest →

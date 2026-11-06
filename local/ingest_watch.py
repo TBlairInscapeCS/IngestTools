@@ -23,6 +23,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -240,6 +241,22 @@ def start_log_server():
                 self._send(200, json.dumps(
                     {"saved": saved, "paired": saved != picked}).encode(),
                     "application/json")
+                return
+            # One-click self-update: the panel asks us to swap the unpacked
+            # extension dir for the newest GitHub release package (the
+            # extension can't write its own files; we can).
+            if u.path == "/update-extension":
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if not 0 < size <= 8192:
+                        raise ValueError("invalid request size")
+                    data = json.loads(self.rfile.read(size))
+                    result = update_extension(str(data.get("ext_id", "")),
+                                              str(data.get("url", "")))
+                    self._send(200, json.dumps(result).encode(), "application/json")
+                except Exception as e:
+                    self._send(400, json.dumps({"error": str(e)[:200]}).encode(),
+                               "application/json")
                 return
             self._cors(404)
 
@@ -1275,6 +1292,89 @@ def local_media_files(slug, kind="standard"):
             if (kind == "all" or entry["kind"] == kind) and resolve_local_file(slug, name)]
 SCOOP_WINDOW = 6 * 3600
 _seen_dl = set()
+
+
+# Only release packages from this exact repo may be swapped in - the
+# loopback server is reachable from any page's fetch, so the URL prefix
+# is the security boundary, not who asked.
+EXT_UPDATE_PREFIX = "https://github.com/TBlairInscapeCS/IngestTools/releases/download/"
+
+
+def find_extension_dir(ext_id: str):
+    """Locate the unpacked extension's source dir. Chromium browsers record
+    it per-profile in Preferences under extensions.settings.<id>.path -
+    scan every Preferences file under Application Support (Chrome, Arc,
+    Edge, Brave all use the same layout). install.command also writes a
+    hint file at install time for setups Preferences doesn't cover."""
+    hint = LOG_DIR.parent / "extension_dir.txt"
+    try:
+        p = Path(hint.read_text().strip())
+        if (p / "manifest.json").exists():
+            return p
+    except Exception:
+        pass
+    base = Path.home() / "Library" / "Application Support"
+    for depth in ("*/Preferences", "*/*/Preferences", "*/*/*/Preferences"):
+        for prefs in base.glob(depth):
+            try:
+                settings = (json.loads(prefs.read_text())
+                            .get("extensions", {}).get("settings", {}))
+                path = (settings.get(ext_id) or {}).get("path")
+            except Exception:
+                continue
+            if path:
+                p = Path(path)
+                if (p / "manifest.json").exists():
+                    return p
+    return None
+
+
+def update_extension(ext_id: str, url: str) -> dict:
+    """Swap the unpacked extension dir for the newest release package.
+    The extension can't write its own files; the watcher can. The panel
+    reloads itself once we report the swap."""
+    if not url.startswith(EXT_UPDATE_PREFIX):
+        raise ValueError("refusing non-release download URL")
+    ext_dir = find_extension_dir(ext_id)
+    if not ext_dir:
+        raise ValueError("extension folder not found - reinstall from the release zip")
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        zpath = tdp / "pkg.zip"
+        req = urllib.request.Request(url, headers={"User-Agent": "ingest-watch"})
+        with urllib.request.urlopen(req, timeout=90) as r, open(zpath, "wb") as f:
+            remaining = 64 * 1024 * 1024
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                if remaining < 0:
+                    raise ValueError("package too large")
+                f.write(chunk)
+        with zipfile.ZipFile(zpath) as z:
+            for member in z.namelist():
+                if member.startswith("/") or ".." in Path(member).parts:
+                    raise ValueError("unsafe package member")
+            z.extractall(tdp)
+        cands = (sorted(tdp.glob("*/1-Extension")) +
+                 sorted(tdp.glob("*/extension")) + [tdp])
+        src = next((c for c in cands if (c / "manifest.json").exists()), None)
+        if not src:
+            raise ValueError("package has no extension folder")
+        name = json.loads((src / "manifest.json").read_text()).get("name", "")
+        if "ingest" not in name.lower():
+            raise ValueError("package is not Ingest Streamlined")
+        bak = ext_dir.with_name(ext_dir.name + ".bak-" + time.strftime("%Y%m%d-%H%M%S"))
+        ext_dir.rename(bak)
+        try:
+            shutil.copytree(src, ext_dir)
+        except Exception:
+            shutil.rmtree(ext_dir, ignore_errors=True)
+            bak.rename(ext_dir)
+            raise
+        shutil.rmtree(bak, ignore_errors=True)
+    return {"ok": True, "ext_dir": str(ext_dir)}
 
 
 def all_manifests():

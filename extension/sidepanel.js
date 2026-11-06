@@ -6326,6 +6326,57 @@ async function depWarnCheck() {
     ? 'ffprobe not found - spec checks and _ticker builds are off (brew install ffmpeg).'
     : 'download watcher not running - downloads, tickers and portal feed are offline.');
 }
+
+// --- Self-update: poll the public GitHub repo's latest release; the
+// watcher swaps the unpacked dir (the extension can't write its own
+// files) and the panel reloads itself. Silent on any failure.
+const GH_LATEST = 'https://api.github.com/repos/TBlairInscapeCS/IngestTools/releases/latest';
+function verNewer(a, b) {
+  const pa = a.split('.').map(x => parseInt(x, 10) || 0);
+  const pb = b.split('.').map(x => parseInt(x, 10) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  }
+  return false;
+}
+async function checkForUpdate() {
+  try {
+    const r = await fetch(GH_LATEST, { headers: { Accept: 'application/vnd.github+json' },
+                                       signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return;
+    const rel = await r.json();
+    const tag = (rel.tag_name || '').replace(/^v/, '');
+    if (!tag || !verNewer(tag, chrome.runtime.getManifest().version)) return;
+    const asset = (rel.assets || []).find(a => /-full\.zip$/.test(a.name)) || (rel.assets || [])[0];
+    showUpdate(tag, rel.html_url, asset && asset.browser_download_url);
+  } catch (e) { /* offline or rate-limited - stay quiet */ }
+}
+function showUpdate(ver, notesUrl, zipUrl) {
+  const el = $('updWarn');
+  if (!el || !zipUrl) return;
+  el.innerHTML = 'v' + esc(ver) + ' available - you have v' + esc(chrome.runtime.getManifest().version) +
+    ' · <a href="' + esc(notesUrl) + '" target="_blank">what\'s new</a>' +
+    ' <button id="updGo" class="ghost">Update</button>';
+  el.classList.remove('hidden');
+  $('updGo').addEventListener('click', async () => {
+    const btn = $('updGo');
+    btn.disabled = true; btn.textContent = 'updating…';
+    try {
+      const r = await fetch('http://127.0.0.1:8770/update-extension', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ext_id: chrome.runtime.id, url: zipUrl }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || ('watcher ' + r.status));
+      toast('Updated to v' + ver + ' - reloading the panel…');
+      setTimeout(() => chrome.runtime.reload(), 900);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Update';
+      toast('Update needs the watcher - opening the release page instead');
+      chrome.tabs.create({ url: notesUrl });
+    }
+  });
+}
+setTimeout(checkForUpdate, 4000);
 let gateTimer = null;
 async function gateCheck() {
   const h = await watcherHealth();
@@ -7318,6 +7369,16 @@ async function jiraFetch(path, opts) {
   if (!r.ok) throw new Error('Jira ' + r.status + ': ' + (await r.text()).slice(0, 160));
   return r.status === 204 ? null : r.json();
 }
+// Cached accountId of the signed-in Jira user - weekly tickets are
+// assigned to whoever posts them.
+let jiraMe;
+async function jiraAccountId() {
+  if (jiraMe === undefined) {
+    try { jiraMe = (await jiraFetch('/rest/api/3/myself')).accountId || null; }
+    catch (e) { jiraMe = null; }
+  }
+  return jiraMe;
+}
 function jiraEpicFor() {
   if (client && epicOverrides[client.id]) return epicOverrides[client.id];
   const ing = (client && client.ingest) || {};
@@ -7550,14 +7611,17 @@ $('jiraApprove').addEventListener('click', async () => {
   try {
     if (p.issue) return await postJiraComment(p.issue, p.wanted, st, p.proof);
     st.textContent = 'Creating weekly ticket…';
+    const fields = {
+      project: { key: p.epic.split('-')[0] },
+      summary: p.createName,
+      issuetype: { name: 'Task' },
+      parent: { key: p.epic },
+    };
+    const me = await jiraAccountId();
+    if (me) fields.assignee = { accountId: me };
     const created = await jiraFetch('/rest/api/3/issue', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: {
-        project: { key: p.epic.split('-')[0] },
-        summary: p.createName,
-        issuetype: { name: 'Task' },
-        parent: { key: p.epic },
-      } }),
+      body: JSON.stringify({ fields }),
     });
     await postJiraComment({ key: created.key }, p.wanted, st, p.proof);
   } catch (e) {

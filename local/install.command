@@ -38,6 +38,15 @@ cat > "$PLIST" <<EOF
 </plist>
 EOF
 
+# Hint for one-click updates: the watcher swaps this dir when the panel
+# asks it to apply a new release package.
+for d in "$SRC/../1-Extension" "$SRC/../extension" "$SRC"; do
+  if [ -f "$d/manifest.json" ]; then
+    (cd "$d" && pwd) > "$DEST/extension_dir.txt"
+    break
+  fi
+done
+
 launchctl bootout "gui/$(id -u)/dev.ingest-watch" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 
