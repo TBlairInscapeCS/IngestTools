@@ -1,13 +1,44 @@
 {
   "manifest_version": 3,
   "name": "Ingest Streamlined",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Match request emails to tracking sheets, pull delivered files (Extreme Reach, share lists), and flag what's missing or already ingested.",
   "minimum_chrome_version": "116",
-  "permissions": ["sidePanel", "contextMenus", "storage", "scripting", "downloads", "cookies", "clipboardRead", "alarms", "notifications", "offscreen", "tts"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
-  "side_panel": { "default_path": "sidepanel.html" },
-  "icons": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" },
-  "action": { "default_title": "Ingest Reconcile", "default_icon": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" } }
+  "permissions": [
+    "sidePanel",
+    "contextMenus",
+    "storage",
+    "scripting",
+    "downloads",
+    "cookies",
+    "clipboardRead",
+    "alarms",
+    "notifications",
+    "offscreen",
+    "tts"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "Ingest Reconcile",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  }
 }

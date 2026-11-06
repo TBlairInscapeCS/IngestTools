@@ -254,6 +254,13 @@ def start_log_server():
                     result = update_extension(str(data.get("ext_id", "")),
                                               str(data.get("url", "")))
                     self._send(200, json.dumps(result).encode(), "application/json")
+                    if result.get("watcher_updated"):
+                        # Reply first, then restart ourselves into the new
+                        # code - kickstart kills this process.
+                        threading.Timer(2.0, subprocess.run,
+                                        args=(["launchctl", "kickstart", "-k",
+                                               f"gui/{os.getuid()}/dev.ingest-watch"],),
+                                        kwargs={"capture_output": True}).start()
                 except Exception as e:
                     self._send(400, json.dumps({"error": str(e)[:200]}).encode(),
                                "application/json")
@@ -1374,7 +1381,24 @@ def update_extension(ext_id: str, url: str) -> dict:
             bak.rename(ext_dir)
             raise
         shutil.rmtree(bak, ignore_errors=True)
-    return {"ok": True, "ext_dir": str(ext_dir)}
+        # Same release ships the watcher - copy it over our own install so
+        # one click updates both halves. Only when we're actually running
+        # from an install dir (a dev checkout never gets clobbered).
+        watcher_updated = False
+        install_dir = Path.home() / "Library" / "Application Support" / "IngestTools"
+        if LOG_DIR.parent == install_dir and (install_dir / "ingest_watch.py").exists():
+            wsrc = next((c for c in (src.parent / "2-Watcher", src.parent / "watcher")
+                         if (c / "ingest_watch.py").exists()), None)
+            if wsrc:
+                for f in ("ingest_watch.py", "espn_ticker.sh", "ticker.png",
+                          "INSTALL.command", "install.command"):
+                    if (wsrc / f).exists():
+                        shutil.copy2(wsrc / f, install_dir / f)
+                watcher_updated = True
+    out = {"ok": True, "ext_dir": str(ext_dir)}
+    if watcher_updated:
+        out["watcher_updated"] = True
+    return out
 
 
 def all_manifests():
@@ -1448,10 +1472,29 @@ def job_media_files(slug: str, kind: str = "standard") -> list[str]:
     # manifest name alone must not qualify it for the portal feed.
     rejected = set(load_state(mp).get("rejected") or [])
     suffix = (m.get("client") or {}).get("tickerSuffix") or "_ticker"
-    media = [e["file"] for e in m.get("files", [])
-             if e.get("file") and e["file"] not in rejected
-             and Path(e["file"]).suffix.lower() in MEDIA_EXTS
-             and (mp.parent / e["file"]).exists()]
+    on_disk = {p.name: p for p in mp.parent.iterdir()
+               if p.is_file() and p.suffix.lower() in MEDIA_EXTS}
+
+    def resolve(e):
+        """Manifest name first; fall back to a unique on-disk file whose
+        stem starts with the tracking ID or the expected stem (delivered
+        names pick up extra ' Gifting 15s'-style suffixes, Chrome ' (1)'
+        dedupes, etc.). Ambiguity never feeds."""
+        name = e.get("file")
+        if not name or name in rejected:
+            return None
+        if Path(name).suffix.lower() not in MEDIA_EXTS:
+            return None
+        if name in on_disk:
+            return name
+        stems = {s.lower() for s in
+                 (e.get("tracking_id"), Path(name).stem) if s}
+        cands = [n for n in on_disk if n not in rejected
+                 and any(Path(n).stem.lower().startswith(s) or
+                         s.startswith(Path(n).stem.lower()) for s in stems)]
+        return cands[0] if len(cands) == 1 else None
+
+    media = [n for n in (resolve(e) for e in m.get("files", [])) if n]
     derived = sorted(n for n in ticker_names_for(m.get("files", []), suffix)
                      if (mp.parent / n).exists() and n not in media)
     if kind == "ticker":
