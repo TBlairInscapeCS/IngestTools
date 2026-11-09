@@ -84,6 +84,12 @@ itself stays intact:
   the run flags it. Reporting IDs are matched to `content_id`s before any
   write, and each record's before/after snapshot lands in
   `logs/metadata-fix-<timestamp>.jsonl`.
+- The ingest record is asserted field-by-field: `reportingId`,
+  `content_id`, `retention` (default 17520h = 2 years from ingest),
+  `deleted`, `detection_result`, `fingerprint`, `contentType`, and every
+  ingest/detection timestamp must match their pre-write values or the
+  run reports a protected-field violation. The customer's record of
+  origin survives a metadata edit intact.
 - `status` flipping to `METADATA_UPDATED` is the API's audit trail —
   detection results, commercial cids, and ingest timestamps are
   preserved.

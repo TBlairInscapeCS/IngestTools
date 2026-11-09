@@ -59,6 +59,15 @@ FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
 # PUT aborts the run - the ingest record (cid, detection, ingest
 # timestamps) must survive a metadata edit byte-for-byte.
 EDITABLE = ("advertiser", "brand", "vertical", "contentTitle")
+# The record of ingestion must persist untouched for the ad's life
+# (default retention 17520h = 2 years from ingest): the fingerprint's
+# detection verdict, the delete flag, retention clock, content identity,
+# and every ingest/detection timestamp. These are asserted individually
+# after each write, on top of the generic "nothing else changed" diff.
+PROTECTED = ("reportingId", "content_id", "retention", "deleted",
+             "detection_result", "status_history", "fingerprint",
+             "contentType", "create_datetime", "ingestDatetime",
+             "ingestTimestamp", "external_content")
 # Server-side effects of a metadata write: audit status + touch time.
 EXPECTED_SERVER_CHANGES = {"status", "datetime"}
 
@@ -228,8 +237,10 @@ def main():
         diff = diff_record(before, after)
         unexpected = {k: v for k, v in diff.items()
                       if k not in EDITABLE and k not in EXPECTED_SERVER_CHANGES}
+        violated = {k: (before.get(k), after.get(k)) for k in PROTECTED
+                    if before.get(k) != after.get(k)}
         missed = {k: v for k, v in edits.items() if after.get(k) != v}
-        ok = not unexpected and not missed
+        ok = not unexpected and not missed and not violated
         audit({"at": datetime.now(timezone.utc).isoformat(), "realm": realm,
                "reportingId": rid, "content_id": cid, "edits": edits,
                "before": {k: before.get(k) for k in EDITABLE},
@@ -237,12 +248,14 @@ def main():
                "server_changes": {k: after.get(k)
                                   for k in EXPECTED_SERVER_CHANGES
                                   if k in diff},
-               "unexpected_diff": unexpected, "ok": ok})
+               "unexpected_diff": unexpected,
+               "protected_violations": violated, "ok": ok})
         if missed:
             print(f"  {rid} {cid}: FAILED - fields not applied: {missed}")
-        elif unexpected:
-            print(f"  {rid} {cid}: APPLIED BUT UNEXPECTED CHANGES: "
-                  f"{json.dumps(unexpected)} - investigate before continuing")
+        elif violated or unexpected:
+            print(f"  {rid} {cid}: APPLIED BUT INGEST-RECORD FIELDS CHANGED: "
+                  f"{json.dumps({**violated, **unexpected})} - "
+                  f"investigate before continuing")
         else:
             kept = f"cid preserved, detection={after.get('detection_result')}"
             print(f"  {rid} {cid}: OK ({kept})")
