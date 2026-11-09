@@ -246,15 +246,19 @@ function senderFirstName(text) {
     return tok ? tok[0].toUpperCase() + tok.slice(1) : '';
   };
   let s = String(text || '');
+  const displayName = value => {
+    let name = value.replace(/^(?:mail from|sender|from)\s*[:.\-]?\s*/i, '')
+      .replace(/<[^>]*>/g, '').replace(/"/g, '').replace(/\s*\(.*?\)\s*/g, ' ').trim();
+    if (/@/.test(name)) return '';
+    if (name.includes(',')) name = name.split(',')[1].trim(); // "Cruz, Anthony"
+    return first(name);
+  };
   const m = s.match(/^from:\s*(.+)$/im);
   if (m) {
-    s = m[1].replace(/<[^>]*>/g, '').replace(/"/g, '')
-      .replace(/\s*\(.*?\)\s*/g, ' ').trim();
-    if (s.includes(',')) s = s.split(',')[1]; // "Cruz, Anthony"
-    const n = first(s);
-    if (n && !/^[^\s]+@/.test(s)) return n;
-  } else if (s.length <= 60 && !/\r?\n/.test(s) && /[A-ZÀ-Þ]/.test(s)) {
-    return first(s); // bare display name passed directly
+    const n = displayName(m[1]);
+    if (n) return n;
+  } else if (s.length <= 160 && !/\r?\n/.test(s) && /[A-ZÀ-Þ]/.test(s)) {
+    return displayName(s); // bare display name passed directly
   }
   // Signature: the sender's sign-off sits at the tail of the FIRST message
   // segment (earlier replies are quoted below it and aren't the sender).
@@ -347,22 +351,22 @@ function buildExceptionEmail(results, sender) {
   ];
   if (missing.length) {
     lines.push('The following tracking IDs have no matching file:');
-    missing.forEach(id => lines.push('  - ' + id));
+    missing.forEach(id => lines.push(id));
     lines.push('');
   }
   if (possible.length) {
     lines.push('I could not match these IDs to a filename - please confirm which files they correspond to (or rename the files to include the ID):');
-    possible.forEach(p => lines.push('  - ' + p));
+    possible.forEach(p => lines.push(p));
     lines.push('');
   }
   if (ambiguous.length) {
     lines.push('Multiple files matched these IDs - please let me know which to use:');
-    ambiguous.forEach(id => lines.push('  - ' + id));
+    ambiguous.forEach(id => lines.push(id));
     lines.push('');
   }
   if (dupes.length) {
     lines.push('These IDs were listed more than once (I\'ll process each once unless you tell me otherwise):');
-    dupes.forEach(d => lines.push('  - ' + d));
+    dupes.forEach(d => lines.push(d));
     lines.push('');
   }
   lines.push('Thanks!');
@@ -588,10 +592,10 @@ function buildConfirmationEmail(results, sender) {
     greet(sender), '',
     'Confirming receipt - we have the files and are processing the following tracking IDs:', '',
   ];
-  found.forEach(r => lines.push('  - ' + r.id));
+  found.forEach(r => lines.push(r.id));
   if (reviewed.length) {
     lines.push('', 'Also matched (flagged for verification):');
-    reviewed.forEach(r => lines.push('  - ' + r.id + ' -> ' + r.matched.split(' | ')[0]));
+    reviewed.forEach(r => lines.push(r.id + ' -> ' + r.matched.split(' | ')[0]));
   }
   lines.push('', 'Thanks!');
   return lines.join('\n');
@@ -628,27 +632,27 @@ function buildWorkflowReply(rows, sender, opts = {}) {
   const lines = [greet(sender), ''];
   if (done.length) {
     lines.push(pick(CONF_INTRO[done.length === 1 ? 'single' : 'none'], seed));
-    done.forEach(r => lines.push('  - ' + r.id));
+    done.forEach(r => lines.push(r.id));
     lines.push('');
   }
   if (failed.length) {
     lines.push('One thing to flag - the ingest reported a failure for:');
-    failed.forEach(r => lines.push('  - ' + r.id + (r.status ? ' (' + r.status + ')' : '')));
+    failed.forEach(r => lines.push(r.id + (r.status ? ' (' + r.status + ')' : '')));
     lines.push('');
   }
   if (proc.length) {
     lines.push('Records are in and still finishing up for:');
-    proc.forEach(r => lines.push('  - ' + r.id));
+    proc.forEach(r => lines.push(r.id));
     lines.push('');
   }
   if (located.length) {
     lines.push('Files located - ingest is still pending on:');
-    located.forEach(r => lines.push('  - ' + r.id));
+    located.forEach(r => lines.push(r.id));
     lines.push('');
   }
   if (pending.length) {
     lines.push('Still tracking down the remaining items:');
-    pending.forEach(r => lines.push('  - ' + r.id));
+    pending.forEach(r => lines.push(r.id));
     lines.push('');
   }
   if (!opts.sheetless) lines.push(pick(CONF_SHEET, seed >> 5), '');
@@ -659,7 +663,7 @@ function buildAckReply(ids, sender) {
   if (!ids || !ids.length) return null;
   return [greet(sender), '',
     'Confirming receipt - getting the following IDs into the ingest queue:', '',
-    ...ids.slice(0, 20).map(i => '  - ' + i), '', 'Thanks!'].join('\n');
+    ...ids.slice(0, 20), '', 'Thanks!'].join('\n');
 }
 
 // ---------- Request-email extraction ----------

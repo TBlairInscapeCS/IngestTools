@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const engine = fs.readFileSync(__dirname + '/engine.js', 'utf8');
-const names = ['buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'computeSheetModel', 'pendingFor', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab', 'requestRefs', 'checkAlreadyIngested'];
+const names = ['grabEmailText', 'buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'computeSheetModel', 'pendingFor', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab', 'requestRefs', 'checkAlreadyIngested'];
 const functions = names.map(name => {
   const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
   assert(start >= 0, name);
@@ -55,6 +55,39 @@ function setup(id = 'comscore') {
 }
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log('PASS ' + name); }
+test('draft entries use plain lines across workflow and receipt replies', () => {
+  const { ctx } = setup();
+  const replies = [
+    ctx.buildAckReply(['ABC12345H'], 'Alex'),
+    ctx.buildConfirmationEmail([{ id: 'ABC12345H', status: 'FOUND' }, { id: 'DEF12345H', status: 'POSSIBLE MATCH', matched: 'DEF12345H | title' }], 'Alex'),
+    ctx.buildWorkflowReply(['complete', 'processing', 'located', 'failed', ''].map((stage, i) => ({ id: 'ABC1234' + i + 'H', stage })), 'Alex'),
+  ];
+  replies.forEach(reply => {
+    assert.match(reply, /ABC1234/);
+    assert.doesNotMatch(reply, /^\s*-\s+/m);
+  });
+});
+test('Outlook capture retains visible sender name when tooltip contains only an address', () => {
+  const { ctx } = setup();
+  const body = { innerText: 'Please ingest these creatives ABC12345H', innerHTML: '', contains: () => false };
+  const sender = { innerText: 'Cruz, Anthony', getAttribute: key => key === 'title' ? 'anthony@example.com' : '' };
+  ctx.document = {
+    querySelector: selector => selector.includes('sender') ? sender : null,
+    querySelectorAll: selector => selector.includes('message body') ? [body] : [],
+  };
+  const captured = ctx.grabEmailText();
+  assert.match(captured.sender, /anthony@example.com/);
+  assert.equal(ctx.senderFirstName(captured.sender), 'Anthony');
+});
+test('sender names normalize Outlook labels, comma names and punctuation in signatures', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.senderFirstName('Sender: Cruz, Anthony <anthony@example.com>'), 'Anthony');
+  assert.equal(ctx.senderFirstName('Cruz, Anthony'), 'Anthony');
+  assert.equal(ctx.senderFirstName('Anthony@example.com'), '');
+  ['Thanks!', 'Thank you.', 'Best,', 'Thanks —'].forEach(signoff => {
+    assert.equal(ctx.senderFirstName('Please ingest ABC12345H\n\n' + signoff + '\nAmanda Smith'), 'Amanda');
+  });
+});
 test('Jira creative list excludes the email farewell while the request copy retains it', () => {
   const { ctx } = setup('simulmedia');
   ctx.emailDate = '';
@@ -219,8 +252,8 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     ctx.doEmailMatch();
     ctx.fetchRealmRecords = async () => [{ reportingId: 'QYPS0437000H', status: 'DETECTION_COMPLETED' }];
     await ctx.runVerify([{ reporting: 'QYPS0437000H' }, { reporting: 'QYPS0438000H' }]);
-    assert.match(element('replyPreview').value, /following IDs?:\n  - QYPS0437000H/);
-    assert.match(element('replyPreview').value, /Still tracking down the remaining items:\n  - QYPS0438000H/);
+    assert.match(element('replyPreview').value, /following IDs?:\nQYPS0437000H/);
+    assert.match(element('replyPreview').value, /Still tracking down the remaining items:\nQYPS0438000H/);
   });
   await asyncTest('late verification from another request is discarded', async () => {
     const { ctx } = setup('simulmedia');
@@ -245,6 +278,42 @@ async function asyncTest(name, fn) { await fn(); passed++; console.log('PASS ' +
     assert.equal(Object.keys(ctx.capturedByName).length, 2);
     assert(ctx.lastResults.every(r => r.status === 'FOUND'));
     assert(ctx.matched.every(m => /comcastaddelivery/.test(m.link)));
+  });
+  await asyncTest('mailbox delivery search includes read mail and uses requested IDs across folders', async () => {
+    const graph = fs.readFileSync(__dirname + '/graph.js', 'utf8');
+    const start = graph.indexOf('async function graphDeliveryMessages(');
+    const paths = [];
+    const ctx = vm.createContext({ MS: { refreshToken: 'test' }, msLoad: async () => {},
+      graphFetch: async path => { paths.push(decodeURIComponent(path)); return { value: [{ id: 'delivery', isRead: true }] }; } });
+    vm.runInContext(graph.slice(start, graph.indexOf('\n}', start) + 2), ctx);
+    const result = await ctx.graphDeliveryMessages(['QYPS0437000H', 'QYPS0438000H']);
+    assert.equal(result.length, 1);
+    assert.match(paths[0], /\/me\/messages\?/);
+    assert.match(paths[0], /QYPS0437000H OR QYPS0438000H/);
+    assert.doesNotMatch(paths[0], /isRead|mailFolders/);
+  });
+  await asyncTest('Comcast discovery searches mailbox deliveries without an open delivery tab', async () => {
+    const { ctx } = setup('simulmedia');
+    ctx.emailEl.value = 'Please ingest QYPS0437000H';
+    ctx.doEmailMatch();
+    ctx.graphDeliveryMessages = async ids => {
+      assert.deepEqual(Array.from(ids), ['QYPS0437000H']);
+      return [{ subject: 'Delivery notification', body: { content: '<tr><td>QYPS0437000H</td><td><a href="https://cad-api.comcastaddelivery.com/asset">Spot</a></td></tr>' } }];
+    };
+    assert.equal(await ctx.captureDeliveryEmails([]), true);
+    assert.match(ctx.matched[0].link, /cad-api/);
+    assert.equal(ctx.emailEl.value, 'Please ingest QYPS0437000H');
+  });
+  await asyncTest('mailbox delivery results are discarded after a request change', async () => {
+    const { ctx } = setup('simulmedia');
+    ctx.emailEl.value = 'Please ingest QYPS0437000H';
+    ctx.doEmailMatch();
+    ctx.graphDeliveryMessages = async () => {
+      ctx.emailEl.value = 'Please ingest OTHER1234000H';
+      return [{ subject: 'Comcast AdDelivery', body: { content: '<tr><td>QYPS0437000H</td><td><a href="https://cad-api.comcastaddelivery.com/asset">Spot</a></td></tr>' } }];
+    };
+    assert.equal(await ctx.captureDeliveryEmails([]), false);
+    assert.equal(Object.keys(ctx.capturedByName).length, 0);
   });
   await asyncTest('local Downloads discovery works without a manifest and promotes availability', async () => {
     const { ctx, element } = setup('simulmedia');

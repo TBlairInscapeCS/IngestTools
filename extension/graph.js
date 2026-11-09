@@ -145,6 +145,20 @@ async function msAccessToken() {
   return MS.accessToken;
 }
 
+async function graphDeliveryMessages(ids) {
+  await msLoad();
+  if (!MS.refreshToken) return null;
+  const wanted = [...new Set(ids.map(id => String(id).trim()).filter(id => /^[A-Za-z0-9_.-]{4,100}$/.test(id)))];
+  const messages = new Map();
+  for (let i = 0; i < wanted.length; i += 10) {
+    const query = wanted.slice(i, i + 10).join(' OR ');
+    const result = await graphFetch('/me/messages?$search=' + encodeURIComponent('"' + query + '"') +
+      '&$top=100&$select=id,subject,body,receivedDateTime,from');
+    (result.value || []).forEach(m => messages.set(m.id, m));
+  }
+  return [...messages.values()].sort((a, b) => String(b.receivedDateTime).localeCompare(String(a.receivedDateTime)));
+}
+
 // Unread messages across ALL mail folders, newest first, with bodies.
 // Outlook rules file customer requests into Customers/* and delivery
 // folders before they reach the inbox - an inbox-only scan misses the

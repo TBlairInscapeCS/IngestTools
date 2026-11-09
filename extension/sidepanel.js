@@ -1065,7 +1065,11 @@ function grabEmailText() {
         date = t;
     });
   }
-  const senderAddress = sndEl && (sndEl.getAttribute('title') || sndEl.getAttribute('aria-label') || sndEl.textContent || '');
+  let senderAddress = sndEl && (sndEl.getAttribute('title') || sndEl.getAttribute('aria-label') || sndEl.textContent || '');
+  const visibleSender = sndEl && (sndEl.innerText || '').trim();
+  if (senderAddress && /^[^\s<>]+@[^\s<>]+$/.test(senderAddress.trim()) &&
+      visibleSender && visibleSender.length <= 60 && !/[\r\n@<>]/.test(visibleSender))
+    senderAddress = visibleSender + ' <' + senderAddress.trim() + '>';
   return { text: text.slice(0, 80000), subject, sender: senderAddress || sender, html: containers.map(el => el.innerHTML).join('\n'), date: date.slice(0, 90) };
 }
 
@@ -5545,11 +5549,29 @@ async function captureDeliveryEmails(tabs) {
   const wanted = new Set(replyRequestIds().map(id => normalizeName(id).replace(/ /g, '')));
   if (!wanted.size) return false;
   let added = 0;
+  const mails = [];
+  if (typeof graphDeliveryMessages === 'function') {
+    try {
+      const messages = await graphDeliveryMessages(replyRequestIds());
+      if (context !== workflowContext()) return false;
+      if (messages === null) modStatDone('stDl', 'Mailbox search needs Microsoft sign-in in Settings; scanning open Outlook messages only');
+      (messages || []).forEach(m => mails.push({ subject: m.subject, html: (m.body || {}).content || '', text: '', source: 'mailbox' }));
+      dbg('Comcast mailbox search', { messages: (messages || []).length, signedIn: messages !== null });
+    } catch (e) {
+      dbg('Comcast mailbox search failed', { error: e.message });
+      toast('Mailbox search failed: ' + e.message + '. Scanning open Outlook messages instead.');
+    }
+  }
   for (const tab of tabs) {
     try {
       const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: grabEmailText });
       if (context !== workflowContext()) return false;
-      const mail = (res && res.result) || {};
+      mails.push({ ...((res && res.result) || {}), source: 'open Outlook tab ' + tab.id });
+    } catch (e) { dbg('delivery email scan failed', { tab: tab.id, error: e.message }); }
+  }
+  if (context !== workflowContext()) return false;
+  for (const mail of mails) {
+    try {
       const spots = comcastDeliverySpots(mail.subject || '', mail.text || '', mail.html || '');
       spots.filter(s => wanted.has(normalizeName(s.id).replace(/ /g, ''))).forEach(s => {
         const name = s.id + '.mp4';
@@ -5558,8 +5580,8 @@ async function captureDeliveryEmails(tabs) {
         filesEl.value = [...new Set(filesEl.value.split(/\r?\n/).filter(Boolean).concat(name))].join('\n');
         added++;
       });
-      dbg('Comcast email discovery', { tab: tab.id, deliverySpots: spots.length, matched: added });
-    } catch (e) { dbg('delivery email scan failed', { tab: tab.id, error: e.message }); }
+      dbg('Comcast email discovery', { source: mail.source, deliverySpots: spots.length, matched: added });
+    } catch (e) { dbg('delivery email scan failed', { source: mail.source, error: e.message }); }
   }
   if (added) { runReconcile(); modStatDone('stDl', added + ' Comcast file link(s) found — review, then Download files'); }
   return added > 0;
@@ -5571,7 +5593,7 @@ async function autoDownload() {
   if (source === 'local') { if (!await discoverLocalFiles()) toast('No unique recent local matches — use Pick & feed.'); return; }
   const cls = await stageTabs();
   if (source !== 'extreme-reach' && source !== 'pages' && source !== 'yangaroo') await captureDeliveryEmails(cls.outlook);
-  if (source === 'comcast') { if (!selectedMatches().some(m => m.link)) toast('No matching Comcast Spot/Download links in open Outlook emails.'); return; }
+  if (source === 'comcast') { if (!selectedMatches().some(m => m.link)) toast('No matching Comcast Spot/Download links found. Mailbox search requires Microsoft sign-in in Settings; otherwise open the delivery email in Outlook.'); return; }
   if (source === 'yangaroo') {
     // Email Delivery links already parsed into m.yangarooUrl; a page
     // fallback reads any open Yangaroo/download pages the user brought up.

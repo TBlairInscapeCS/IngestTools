@@ -77,7 +77,10 @@ replaces previous sheet matches rather than carrying unrelated creatives and
 ticker flags into the reply or fill plan. Check the match list before drafting. Standalone email sign-offs such as
 “Thanks!” or “Best,” stop creative-title extraction. Jira retains the sign-off
 in the request copy, not as a title under **Ingest:**; a missing title remains
-blank instead of borrowing signature text.
+blank instead of borrowing signature text. Reply entries use plain lines without dash
+bullets. Greetings use the sender display name (including “Last, First” names)
+or the request signature; an address alone is not treated as a name. Reload the
+request and use **Redraft** to refresh a saved greeting or existing draft.
 
 Portal matching checks Reporting ID, Title, and exact **File Name** aliases from
 the tracker (ignoring common media extensions and punctuation). Ambiguous aliases
@@ -258,9 +261,13 @@ ambiguous matches need review. HTML viewer pages are rejected as media.
 SimulMedia defaults to **no tracker** and a mixed Comcast/Extreme Reach delivery
 search. The module's **Search** selector can use client rules, all sources,
 **Comcast email**, **Extreme Reach**, **Downloads / Ingest**, or open pages.
-Comcast discovery reads open Outlook web delivery messages without replacing
-the request email. It pairs Spot/Download links to the IDs on the same row and
-keeps only requested IDs; keep the original HTML delivery email open.
+Comcast discovery searches the signed-in Microsoft mailbox by requested IDs,
+including read messages across mail folders (up to 100 results per ten-ID
+batch), and also reads open Outlook web delivery messages. It does not replace
+the request email. Only recognized Comcast notices with requested IDs and
+paired Spot/Download links are used. Without Microsoft sign-in in Settings,
+open the original HTML delivery email in Outlook; the request alone is not
+sufficient to locate a separate delivery notice.
 
 **Downloads / Ingest** checks recent, stable media in the top level of
 `~/Downloads/` and `~/Downloads/Ingest/`, by code-shaped request ID. It does not
