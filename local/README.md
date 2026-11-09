@@ -68,6 +68,42 @@ those tasks.
 
 Verify with `cd local && python3 -m unittest test_local_discovery.py`.
 
+## Fixing metadata on already-ingested records
+
+`fix_metadata.py` corrects `advertiser` / `brand` / `vertical` /
+`contentTitle` on records already in the portal's cidmap backend — e.g. a
+batch ingested before the fill profile supplied brand data. It writes via
+`PUT /v1/{realm}/content/{content_id}` and is built so the ingest record
+itself stays intact:
+
+- **Dry-run by default** — prints the before/after table, writes nothing;
+  `--apply` performs the edits one record at a time.
+- Only `advertiser`, `brand`, `vertical`, `contentTitle` are writable.
+  After every PUT it re-GETs the record and diffs: if anything else
+  changed (besides the server's own `status`/`datetime` audit fields),
+  the run flags it. Reporting IDs are matched to `content_id`s before any
+  write, and each record's before/after snapshot lands in
+  `logs/metadata-fix-<timestamp>.jsonl`.
+- `status` flipping to `METADATA_UPDATED` is the API's audit trail —
+  detection results, commercial cids, and ingest timestamps are
+  preserved.
+
+```bash
+# Preview a brand fix on specific IDs
+python3 fix_metadata.py horizonmedia --brand CARE --ids ID1 ID2 ID3
+
+# Titles + brand from a tracker CSV, scoped to specific IDs
+python3 fix_metadata.py horizonmedia --brand CARE --csv tracker.csv \
+    --id-col "Tracking ID" --title-col "Spot Title" --ids ID1 ID2
+
+# Apply
+python3 fix_metadata.py horizonmedia --brand CARE --ids ID1 ID2 --apply
+```
+
+Realm names take the same aliases as the extension (`horizon` →
+`horizonmedia`, `in-market` → `inmarket`, …). IDs not found in the
+realm's recent records are reported, never guessed.
+
 ## What it does per manifest entry
 
 1. Finds the downloaded file (tolerates Chrome's ` (1)` rename suffix and

@@ -164,7 +164,9 @@ discovery in Run all**.
   and draft the reply listing each file's commercial ID per realm.
 - **ComScore and SimulMedia** are trackerless. ComScore ticker IDs use
   lowercase `_t`; SimulMedia uses Jira epic `DD-597` and its delivery
-  search supports both Comcast and Extreme Reach.
+  search supports both Comcast and Extreme Reach. Comcast mailbox search
+  requires Microsoft sign-in in Settings and includes read mail across folders;
+  without sign-in, open the actual delivery email in Outlook for capture.
 
 ## Security & privacy
 
@@ -207,6 +209,10 @@ What the audit verified — the extension is purely local:
   worksheet, workbook ID, owner, and client before using row references.
   For trackerless requests, choose email-only mode instead of loading a
   sheet.
+- **Wrong brand/title on an already-ingested record**: use
+  `local/fix_metadata.py` — dry-run first, then `--apply`; it verifies the
+  ingest record (cid, detection, ingest timestamps) survives the edit.
+  See `local/README.md`.
 - **Extension changes**: run `cd extension && osascript -l JavaScript test_fixtures.js`
   and `node test_tracker_selection.js` from `extension/`. See `AGENTS.md` for
   verification, the watcher restart rule, and the requirement to update README,
@@ -220,7 +226,7 @@ What the audit verified — the extension is purely local:
 - `local/` — `ingest_watch.py` (watcher), `espn_ticker.sh` + `ticker.png`
   (ticker assets), `install.command` (launchd installer),
   `dev.ingest-watch.plist` (dev plist), `fi_status_watch.py` (standalone
-  status probe).
+  status probe), `fix_metadata.py` (post-ingest metadata repair).
 - `package.sh` — builds the dist zips (whitelist packaging; tests and
   docs never ship).
 - `Code.gs` — legacy Google Apps Script version. Writes to sheets;
