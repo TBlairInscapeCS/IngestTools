@@ -70,22 +70,26 @@ Verify with `cd local && python3 -m unittest test_local_discovery.py`.
 
 ## Fixing metadata on already-ingested records
 
-`fix_metadata.py` corrects `advertiser` / `brand` / `vertical` /
-`contentTitle` on records already in the portal's cidmap backend — e.g. a
-batch ingested before the fill profile supplied brand data. It writes via
+`fix_metadata.py` corrects a record's identifying fields
+(`reportingId`, `contentTitle`) and commercial metadata (`advertiser` /
+`brand` / `vertical`) on records already in the portal's cidmap backend —
+e.g. a batch ingested before the fill profile supplied brand data. Those
+five fields are the only ones the tool can write; everything else about
+the ingest record is protected. It writes via
 `PUT /v1/{realm}/content/{content_id}` and is built so the ingest record
 itself stays intact:
 
 - **Dry-run by default** — prints the before/after table, writes nothing;
   `--apply` performs the edits one record at a time.
-- Only `advertiser`, `brand`, `vertical`, `contentTitle` are writable.
-  After every PUT it re-GETs the record and diffs: if anything else
+- Only `reportingId`, `contentTitle`, `advertiser`, `brand`, `vertical`
+  are writable. After every PUT it re-GETs the record and diffs: if
+  anything else
   changed (besides the server's own `status`/`datetime` audit fields),
   the run flags it. Reporting IDs are matched to `content_id`s before any
   write, and each record's before/after snapshot lands in
   `logs/metadata-fix-<timestamp>.jsonl`.
-- The ingest record is asserted field-by-field: `reportingId`,
-  `content_id`, `retention` (default 17520h = 2 years from ingest),
+- The ingest record is asserted field-by-field: `content_id`,
+  `retention` (default 17520h = 2 years from ingest),
   `deleted`, `detection_result`, `fingerprint`, `contentType`, and every
   ingest/detection timestamp must match their pre-write values or the
   run reports a protected-field violation. The customer's record of

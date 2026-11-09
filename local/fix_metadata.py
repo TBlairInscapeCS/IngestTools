@@ -37,6 +37,12 @@ Usage:
   python3 fix_metadata.py horizonmedia --csv tracker.csv \
       --id-col "Tracking ID" --title-col "Spot Title" --apply
 
+  # Correct a miskeyed reporting ID
+  python3 fix_metadata.py horizonmedia --ids OLDID --rid NEWID --apply
+
+Editable fields are reportingId, contentTitle, advertiser, brand and
+vertical - nothing else can be written by this tool.
+
 Realm aliases (horizon -> horizonmedia etc.) match the extension's table.
 """
 import argparse
@@ -55,16 +61,17 @@ FI_AUTH = "Basic Y3Jvb21pYW46c1pJUiNVWmVkNVVNZzQ4Sg=="
 FI_ALIASES = {"horizon": "horizonmedia", "in-market": "inmarket",
               "itn": "itnnetworks", "chief": "chiefmedia"}
 
-# Fields this tool is allowed to write. Anything else changing after a
-# PUT aborts the run - the ingest record (cid, detection, ingest
-# timestamps) must survive a metadata edit byte-for-byte.
-EDITABLE = ("advertiser", "brand", "vertical", "contentTitle")
+# Fields this tool is allowed to write - the record's identifying fields
+# plus the commercial metadata. Anything else changing after a PUT aborts
+# the run: the ingest record (content_id, cid, detection verdict,
+# retention clock, ingest timestamps) must survive byte-for-byte.
+EDITABLE = ("reportingId", "contentTitle", "advertiser", "brand", "vertical")
 # The record of ingestion must persist untouched for the ad's life
 # (default retention 17520h = 2 years from ingest): the fingerprint's
 # detection verdict, the delete flag, retention clock, content identity,
 # and every ingest/detection timestamp. These are asserted individually
 # after each write, on top of the generic "nothing else changed" diff.
-PROTECTED = ("reportingId", "content_id", "retention", "deleted",
+PROTECTED = ("content_id", "retention", "deleted",
              "detection_result", "status_history", "fingerprint",
              "contentType", "create_datetime", "ingestDatetime",
              "ingestTimestamp", "external_content")
@@ -121,6 +128,8 @@ def collect_changes(args):
                   "vertical": args.brand}
     if args.title is not None:
         fields["contentTitle"] = portal_clean(args.title)
+    if args.rid is not None:
+        fields["reportingId"] = portal_clean(args.rid)
 
     if args.ids and not args.csv:
         if not fields:
@@ -177,6 +186,8 @@ def main():
                     help="CSV column holding the spot title")
     ap.add_argument("--brand", help="value for advertiser+brand+vertical")
     ap.add_argument("--title", help="contentTitle for --ids (single value)")
+    ap.add_argument("--rid", help="correct a miskeyed reportingId "
+                                  "(single value, use with --ids OLD_ID)")
     ap.add_argument("--apply", action="store_true",
                     help="perform the writes (default is dry-run)")
     args = ap.parse_args()
