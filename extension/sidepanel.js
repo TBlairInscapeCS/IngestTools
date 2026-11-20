@@ -2163,10 +2163,27 @@ async function sheetRowHasContent(id, gid, n) {
   return /[^,\s"]/.test(t);
 }
 
-// Binary-search the bottom edge: exponential probe to an empty row, then
-// halve back to the last populated one. Cheap one-row requests.
+// Bottom edge via one gviz count query (max populated cells across the
+// first columns estimates the last row - blank cells undercount, never
+// overcount), then a couple of confirm probes to pin it. ~4 requests
+// total instead of a full export or a probe sweep.
 async function sheetLastRow(id, gid) {
-  let lo = 1, probe = 1024;
+  let lo = 1;
+  try {
+    const q = encodeURIComponent(
+      'select count(A),count(B),count(C),count(D),count(E),count(F),count(G),count(H)');
+    const r = await fetch('https://docs.google.com/spreadsheets/d/' + id +
+      '/gviz/tq?gid=' + (gid || 0) + '&tqx=out:json&tq=' + q, { credentials: 'include' });
+    if (r.ok) {
+      const raw = await r.text();
+      const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      const cells = (j.table.rows[0] && j.table.rows[0].c) || [];
+      lo = Math.max(lo, ...cells.map(c => (c && c.v) || 0));
+    }
+  } catch (e) { /* count unavailable - probe from scratch */ }
+  // Refine: probe just past the estimate, doubling on misses, then binary
+  // between the last known-populated and first empty row.
+  let probe = lo > 1 ? lo + 1 : 1024;
   while (probe <= 200000 && await sheetRowHasContent(id, gid, probe)) { lo = probe; probe *= 2; }
   let hi = probe;
   while (hi - lo > 1) {
@@ -2265,7 +2282,12 @@ async function loadSheetDoc(id, gid, tabName, sourceLabel, forceFull) {
     chrome.storage.local.set({ msLastSheet: lastSheetRef });
     rememberSheet();
     return true;
-  } catch (e2) { toast('Could not export sheet: ' + e2); setStage('sdSheet', 'fail', 'sheet export failed (auth?)'); return false; }
+  } catch (e2) {
+    const auth = /HTTP (401|403)/.test(String(e2));
+    toast('Could not export sheet: ' + e2 + (auth ? ' - access denied; confirm you can open/download the doc, or reload the tab after signing in' : ''));
+    setStage('sdSheet', 'fail', 'sheet export failed' + (auth ? ' (access denied)' : ''));
+    return false;
+  }
 }
 
 // Re-export the last doc-loaded sheet. The tab is irrelevant - refresh,

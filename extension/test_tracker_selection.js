@@ -34,6 +34,8 @@ function setup() {
     // Mock sheet grid: rows 1-12 populated, everything beyond reads empty -
     // lean probes converge to last row 12; range pulls get span-sized rows.
     fetch: async url => { calls++;
+      if (/gviz\/tq/.test(String(url)))
+        return { ok: true, text: async () => 'google.visualization.Query.setResponse({"table":{"rows":[{"c":[{"v":12}]}]}})' };
       const m = String(url).match(/range=A(\d+)%3AZZ(\d+)/);
       const has = !m || +m[1] <= 12;
       const span = m ? Math.max(1, +m[2] - +m[1] + 1) : 1;
