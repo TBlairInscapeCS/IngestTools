@@ -648,6 +648,11 @@ ARCHIVE_KEEP_DAYS = 45
 
 
 def sweep_archived_job(job_dir: Path):
+    if job_dir == WATCH_DIR:
+        # Flat layout: job_dir IS the watch root - renaming it would bury
+        # all of Ingest/ under _archive. The manifest family is folded by
+        # prune_loose instead.
+        return
     dest = uniquified(ARCHIVE_DIR / job_dir.name)
     try:
         ARCHIVE_DIR.mkdir(exist_ok=True)
@@ -673,6 +678,93 @@ def prune_archive():
                 pass
     except FileNotFoundError:
         pass
+
+
+# Ingest/ root collects strays fast: flat-layout manifests and reports,
+# media from the inbox "dl" links that never had a manifest, screenshots,
+# zips. Nothing is hard-deleted here - files fold under _archive and
+# leave with the 45d prune.
+LOOSE_KEEP_DAYS = 7       # unreferenced loose files -> _archive/_loose
+STALE_MANIFEST_DAYS = 14  # dead manifests fold under _archive/<slug>
+
+
+def _manifest_slug(mp: Path) -> str:
+    """<slug>-manifest.json -> <slug>; legacy manifest.json -> manifest."""
+    return mp.stem[:-len("-manifest")] if mp.stem.endswith("-manifest") else mp.stem
+
+
+def _manifest_family(mp: Path) -> list:
+    """manifest + its report + watcher state dotfile, for folding under
+    _archive together."""
+    stem = mp.stem
+    if stem == "manifest":
+        return [mp, mp.parent / "report.json", mp.parent / ".watcher_state.json"]
+    return [mp, mp.parent / f"{stem}-report.json", mp.parent / f".{stem}-state.json"]
+
+
+def prune_loose():
+    """Sweep stale top-level files out of Ingest/: dead manifests fold to
+    _archive/<slug>/; unreferenced files (media, json, images, zips) older
+    than LOOSE_KEEP_DAYS fold to _archive/_loose/. Files any manifest
+    still names - exact or by tracking-ID stem - stay put."""
+    now = time.time()
+    try:
+        entries = [p for p in WATCH_DIR.iterdir() if p.is_file()]
+    except FileNotFoundError:
+        return
+    expected, stems = set(), []
+    for mp in all_manifests():
+        if not MANIFEST_RE.match(mp.name):
+            continue
+        try:
+            m = json.loads(mp.read_text())
+        except Exception:
+            continue
+        for e in m.get("files", []):
+            if e.get("file"):
+                expected.add(e["file"])
+                stems.append(Path(e["file"]).stem.lower())
+            if e.get("tracking_id"):
+                stems.append(str(e["tracking_id"]).lower())
+    loose_dir = ARCHIVE_DIR / "_loose"
+    for p in entries:
+        name = p.name
+        if name.startswith(".") or MANIFEST_RE.match(name) or name.endswith("-report.json"):
+            continue
+        if name in expected:
+            continue
+        stem_l = p.stem.lower()
+        if any(stem_l.startswith(s) or s.startswith(stem_l) for s in stems if s):
+            continue
+        try:
+            if now - p.stat().st_mtime < LOOSE_KEEP_DAYS * 86400:
+                continue
+        except OSError:
+            continue
+        try:
+            loose_dir.mkdir(parents=True, exist_ok=True)
+            p.replace(uniquified(loose_dir / name))
+            log(f"loose sweep: {name} -> _archive/_loose/")
+        except Exception as e:
+            log(f"loose sweep failed {name}: {e}")
+    for mp in WATCH_DIR.glob("*.json"):
+        if not MANIFEST_RE.match(mp.name):
+            continue
+        try:
+            if now - mp.stat().st_mtime < STALE_MANIFEST_DAYS * 86400:
+                continue
+        except OSError:
+            continue
+        dest_dir = uniquified(ARCHIVE_DIR / _manifest_slug(mp))
+        try:
+            for f in _manifest_family(mp):
+                if not f.exists():
+                    continue
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                f.replace(dest_dir / f.name)
+            log(f"stale manifest {mp.name} -> _archive/{dest_dir.name}/")
+        except Exception as e:
+            log(f"stale manifest sweep failed {mp.name}: {e}")
 
 
 def rotate_logs():
@@ -1768,6 +1860,7 @@ def main():
     while True:
         if time.time() - last_prune > 3600:
             prune_archive()
+            prune_loose()
             last_prune = time.time()
         try:
             run_once()

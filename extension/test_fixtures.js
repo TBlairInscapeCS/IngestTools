@@ -33,6 +33,10 @@ eq('SimulMedia sender', detectClient({ sender: 'buyer@simulmedia.com', emailText
 eq('Vizio internal request detects as dual-silo', detectClient({ sender: 'Sarah Henschel <sarah.henschel@vizio.com>', subject: 'Sony Clip for Ingestion', emailText: 'ingest as Commercial Video + Audio' }).id, 'vizio-request');
 eq('Vizio own-address excluded from requests', (detectClient({ sender: 'Tim Blair <tim.blair@vizio.com>', subject: 'RE: clip for ingestion', emailText: 'ingest' }) || {}).id !== 'vizio-request', true);
 eq('Vizio partner excluded from requests', (detectClient({ sender: 'Chris Roomian <chris.roomian@vizio.com>', subject: 'RE: clip for ingestion', emailText: 'ingest' }) || {}).id !== 'vizio-request', true);
+// Addressed TO vizio, not FROM: recipient/quoted vizio.com never claims the
+// internal request; generic ingest vocabulary alone no longer defaults there.
+eq('vizio addressee is not a vizio request', (detectClient({ sender: 'Buyer <buyer@comscore.com>', subject: 'Ingest request', emailText: 'To: tim.blair@vizio.com\ningest these spots' }) || {}).id, 'comscore');
+eq('generic ingest vocabulary does not default to vizio', (detectClient({ sender: 'Alex <alex@agency-x.com>', subject: 'New spots', emailText: 'please ingest this clip' }) || {}).id !== 'vizio-request', true);
 eq('SimulMedia has no tracker', CLIENTS.find(c => c.id === 'simulmedia').sheetless, true);
 eq('Comscore ticker suffix', CLIENTS.find(c => c.id === 'comscore').ingest.tickerSuffix, '_t');
 eq('Comcast styled spot links', comcastDlLinks("<a href='https://example.com/asset'><span>Spot</span></a>"), ['https://example.com/asset']);
@@ -357,6 +361,10 @@ eq('detect wb-theatrical', detect('[EXTERNAL] RE: WB Theatrical Spots for Inscap
 eq('detect wbd-usn', detect('[EXTERNAL] WBD USN X INSCAPE GRID | 10/13 REVIEW | CNN', 'From: jasmine.bocanegra@publicismedia.com To: Katie.Morrissey@wbdcontractor.com'), 'wbd-usn');
 eq('detect icon', detect('[EXTERNAL] Vizio - Ingestion', 'From: nikon@iconmediadirect.com'), 'icon-media');
 eq('detect sheet->umbrella', (() => { const h = detectClient({ sheetId: '1zPD9LkK_SzWYDhGYRKAwR-eWLIkS-SENRkNvWFdZugQ' }); return h ? h.id : null; })(), 'horizon-next');
+// NFL and AMCN keep their own trackers - the open docs must identify
+// their brand profiles, never the Horizon master.
+eq('detect nfl sheet', (() => { const h = detectClient({ sheetId: '1e45xwzvGsRz3dWQF41F6xoH1ZXHX7iRcL6a_bO5TlZw' }); return h ? h.id : null; })(), 'nfl');
+eq('detect amcn sheet', (() => { const h = detectClient({ sheetId: '1AL1exfzsvrqGhh09qHWPxEJako7XNxY4ZtnAie839pA' }); return h ? h.id : null; })(), 'amcn');
 // "Kohl's Inscape POD" used to land on horizon-next - its generic /inscape
 // pod/ subject pattern ran before kohls' keywords were ever consulted.
 eq('detect kohls pod', detect("[EXTERNAL] Kohl's Inscape POD 10/14/2026", ''), 'horizon-kohls');

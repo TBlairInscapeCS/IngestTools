@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const clients = fs.readFileSync(__dirname + '/clients.js', 'utf8');
-const names = ['trackerDocId', 'pickTrackerTab', 'docOwner', 'foreignDoc', 'trackerAllowed', 'cleanTrackerReferences', 'trackerDocumentTitle', 'clearSheetIndex', 'bufSig', 'loadSheetDoc', 'refreshSheet', 'rememberSheet'];
+const names = ['trackerDocId', 'pickTrackerTab', 'docOwner', 'foreignDoc', 'trackerAllowed', 'cleanTrackerReferences', 'trackerDocumentTitle', 'clearSheetIndex', 'bufSig', 'sheetCsvRange', 'sheetRowHasContent', 'sheetLastRow', 'loadSheetLean', 'loadSheetDoc', 'refreshSheet', 'rememberSheet'];
 const functions = names.map(name => {
   const re = new RegExp('(?:async )?function ' + name + '\\(');
   const start = source.search(re);
@@ -22,14 +22,24 @@ function setup() {
     client: null, lastSheetRef: null, docBrandsCache: {}, sheetSourceTab: null,
     sheet: null, sheetBuf: null, sheetBufSig: '', sheetTabs: [], sheetTabName: '', scoreCache: {},
     request: 1,
+    LEAN_BAND: 8, LEAN_TAIL: 4, FULL_DOC_IDS: new Set(),
     trackerContext() { return ctx.request + ':' + (ctx.client && ctx.client.id); },
     topName(c) { return c.name.split(' / ')[0].replace(/ *\(.*/, '').trim(); },
     sheetIdsFor(c) { return c && c.detect && c.detect.sheetIds || []; },
     emailSheetRefs() { return []; },
+    parseInput(t) { return { rows: String(t).split('\n').filter(l => l.trim()).map(l => l.split(',')), isTable: true }; },
     dbg(...args) { logs.push(args); }, toast() {}, modStat() {}, setStage() {}, mineDocBrands() {},
-    loadSheetRows(wb) { commits.push({ client: ctx.client.id, doc: ctx.lastSheetRef.id, wb }); },
+    loadSheetRows(wb) { ctx.sheet = wb; commits.push({ client: ctx.client.id, doc: ctx.lastSheetRef.id, wb }); },
     loadSheetText(text) { commits.push({ client: ctx.client.id, doc: ctx.lastSheetRef.id, text }); },
-    fetch: async () => { calls++; return { ok: true, arrayBuffer: async () => new ArrayBuffer(0), text: async () => 'ID\nABC123' }; },
+    // Mock sheet grid: rows 1-12 populated, everything beyond reads empty -
+    // lean probes converge to last row 12; range pulls get span-sized rows.
+    fetch: async url => { calls++;
+      const m = String(url).match(/range=A(\d+)%3AZZ(\d+)/);
+      const has = !m || +m[1] <= 12;
+      const span = m ? Math.max(1, +m[2] - +m[1] + 1) : 1;
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(0),
+        text: async () => has ? 'ID,ABC123\n'.repeat(span) : '' };
+    },
     readXlsx: async () => ({ sheetName: 'Campaign Tracker', sheetNames: ['Campaign Tracker'], rows: [] }),
     chrome: { tabs: { query: async () => [] }, storage: { local: {
       get(keys, cb) { cb(store); },
@@ -74,17 +84,38 @@ async function test(name, fn) {
     assert.equal(commits.length, 1);
     assert.equal(ctx.lastSheetRef.id, own);
   });
-  await test('request changed during workbook parsing discards late result', async () => {
+  await test('request changed during tracker fetch discards late result', async () => {
     const { ctx, own, commits } = setup();
-    ctx.readXlsx = async () => { ctx.request++; return { sheetName: 'old', rows: [] }; };
+    const orig = ctx.fetch;
+    ctx.fetch = async u => { ctx.request++; return orig(u); };
     assert.equal(await ctx.loadSheetDoc(own, 0, '', 'late load'), false);
     assert.equal(commits.length, 0);
   });
   await test('client changed during fetch discards late result', async () => {
     const { ctx, own, commits } = setup();
-    ctx.readXlsx = async () => { ctx.client = ctx.clients.find(c => c.id === 'comscore'); return { rows: [] }; };
+    const orig = ctx.fetch;
+    ctx.fetch = async u => { ctx.client = ctx.clients.find(c => c.id === 'comscore'); return orig(u); };
     assert.equal(await ctx.loadSheetDoc(own, 0, '', 'late client'), false);
     assert.equal(commits.length, 0);
+  });
+  await test('lean read pulls header band + tail window, preserving row numbers', async () => {
+    const { ctx, own, commits } = setup();
+    assert.equal(await ctx.loadSheetDoc(own, 0, '', 'lean'), true);
+    const wb = commits[0].wb;
+    assert.equal(wb.lean.hi, 12);
+    assert.equal(wb.lean.lo, 9);               // tail window = rows 9-12
+    assert.equal(wb.rows.length, 12);          // absolute indexing kept
+    assert.equal(wb.rows[0][0], 'ID');         // header band row
+    assert.equal(wb.rows[10][0], 'ID');        // tail row lands at row 11
+    assert.equal(ctx.sheet.lean.hi, 12);
+  });
+  await test('Horizon master always takes the full export', async () => {
+    const { ctx, foreign, commits, calls } = setup();
+    const horizon = ctx.clients.find(c => /Horizon/.test(c.name));
+    ctx.FULL_DOC_IDS = new Set([foreign]);
+    ctx.client = horizon;   // own doc - not foreign - so the load proceeds
+    assert.equal(await ctx.loadSheetDoc(foreign, 0, '', 'master'), true);
+    assert.equal(commits[0].wb.lean, undefined);   // full export, no lean window
   });
   await test('cleanup removes foreign memories and cache without deleting valid refs', async () => {
     const { ctx, store, own, foreign } = setup();
@@ -165,7 +196,7 @@ async function test(name, fn) {
       { title: 'Horizon Next / Inscape Creative Request Tracker - Google Sheets', url: 'https://docs.google.com/spreadsheets/d/' + foreign },
       { title: 'InMarket Creative Request Tracker - Google Sheets', url: 'https://docs.google.com/spreadsheets/d/' + own },
     ];
-    assert.equal(await ctx.loadSheetDoc(own, 0, '', 'InMarket tracker'), true);
+    assert.equal(await ctx.loadSheetDoc(own, 0, 'Campaign Tracker', 'InMarket tracker'), true);
     assert.equal(ctx.lastSheetRef.documentTitle, 'InMarket Creative Request Tracker');
     assert.equal(ctx.lastSheetRef.tabName, 'Campaign Tracker');
   });

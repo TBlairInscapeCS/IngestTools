@@ -39,7 +39,9 @@ match; review the possible match rather than assuming the extension is wrong.
 - **Auto-verify:** after files are fed (or after a manual `Verify & draft`),
   records are polled every 60 s until every wanted ID reaches a terminal
   state, then *"Ingest finished — review the drafted reply"* pops and the
-  draft refreshes. No manual re-check needed.
+  draft refreshes. No manual re-check needed. The status line keeps to a
+  `N/M reporting ID(s)` summary per realm - per-record lines collapse into
+  a *record line(s)* dropdown (highlighted rows, scrollable).
 - **Reply sanity gate:** the reply module shows a `Before sending:` warning
   whenever the draft would claim more than records prove — fuzzy-matched
   files, still-processing/failed IDs, or flagged ticker versions with no
@@ -79,8 +81,18 @@ ticker flags into the reply or fill plan. Check the match list before drafting. 
 in the request copy, not as a title under **Ingest:**; a missing title remains
 blank instead of borrowing signature text. Reply entries use plain lines without dash
 bullets. Greetings use the sender display name (including “Last, First” names)
-or the request signature; an address alone is not treated as a name. Reload the
+or the request signature; an address alone is not treated as a name, and a
+`From:` line inside a quoted reply is never the sender. Reload the
 request and use **Redraft** to refresh a saved greeting or existing draft.
+
+Client detection treats the sender's domain as evidence, never the addressee:
+mail *to* `@vizio.com` is not a Vizio request — only mail *from* `@vizio.com`
+is (Vizio-internal is sender-domain only). Subject and body keywords still
+identify brand clients.
+
+Match results carry a bulk-edit bar: **select all**, **deselect all**,
+**keep ID-matched only** (excludes TITLE/BRAND/GUESS hits — for floods of
+false positives), and **delete excluded** removes them from the list.
 
 Portal matching checks Reporting ID, Title, and exact **File Name** aliases from
 the tracker (ignoring common media extensions and punctuation). Ambiguous aliases
@@ -193,6 +205,14 @@ for a non-Horizon client. Unregistered workbook ownership still needs review.
 Check the header row and field mappings under **columns**. A row-number request
 is meaningful only against the correct workbook; a matching row number alone
 does not prove the tracker is right.
+
+Tracker loads are **lean by default**: the header band plus the bottom
+~60 rows arrive via small range pulls instead of the whole workbook —
+append-style trackers put new requests at the bottom. The Horizon master
+is the exception (it inserts mid-sheet) and always gets the full export.
+A cited code or row outside the lean window upgrades to the full load
+automatically at match time, and **Download files** pulls the full export
+first when hyperlinks are needed (CSV ranges carry no links).
 
 Multi-tab workbooks are indexed once on load (rows, detected header, column
 map, pending count, and newest date per tab). **Match** scores every tab on

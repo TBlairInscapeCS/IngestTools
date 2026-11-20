@@ -222,13 +222,20 @@ function detectHeaderRow(rows) {
 // wrote; quoted history below doesn't count as signal.
 function firstSegment(text) {
   const all = String(text || '').split(/\r?\n/);
-  const QUOTE = /^(?:from:|sent:|to:|cc:|subject:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i;
+  const HDR = /^(from|sent|to|cc|bcc|subject|date):\s/i;
+  const QUOTE = /^(?:from:|sent:|to:|cc:|bcc:|subject:|date:|on .{0,60}wrote:|-{2,}\s*original|\s*>)/i;
+  // Pasted/Graph text can carry real headers at the top - they are
+  // content, not a quote boundary. Header runs deeper in the message do
+  // mark the quoted thread boundary.
+  let h = 0;
+  while (h < all.length && (HDR.test(all[h].trim()) || !all[h].trim())) h++;
+  const headStart = h;
   // Outlook-grabbed threads carry no quote markers - a greeting line right
   // after a signature-ish line (email/url/contact label/phone/address) is
   // where the quoted reply really begins.
   const SIG = /@|www\.|https?:|^[a-z]\s*:|p\.?o\.?\s*box|sent from|get outlook|\b\d{3}[.\-]\d{3}[.\-]\d{4}\b/i;
   const GREET = /^(hi|hello|hey|dear|good (morning|afternoon|evening))\b/i;
-  for (let i = 1; i < all.length; i++) {
+  for (let i = headStart + 1; i < all.length; i++) {
     const l = all[i].trim();
     if (QUOTE.test(l)) return all.slice(0, i).join('\n');
     if (GREET.test(l)) {
@@ -237,7 +244,8 @@ function firstSegment(text) {
       if (j >= 0 && SIG.test(all[j].trim())) return all.slice(0, i).join('\n');
     }
   }
-  return String(text || '');
+  const out = all.slice(headStart).join('\n').trim();
+  return out || String(text || '');
 }
 
 function senderFirstName(text) {
@@ -253,7 +261,13 @@ function senderFirstName(text) {
     if (name.includes(',')) name = name.split(',')[1].trim(); // "Cruz, Anthony"
     return first(name);
   };
-  const m = s.match(/^from:\s*(.+)$/im);
+  // A From: line is only the sender when it leads the message (top header
+  // block). A From: deep in the body marks a QUOTED reply header - reading
+  // it would name the addressee's colleague, e.g. "From: Tim Blair".
+  const firstBodyLine = s.split(/\r?\n/).findIndex(l => l.trim() && !/^(from|sent|to|cc|bcc|subject|date):\s/i.test(l.trim()));
+  const hdrEnd = firstBodyLine < 0 ? 3 : firstBodyLine;
+  const m = s.slice(0, hdrEnd >= 0 ? s.split(/\r?\n/).slice(0, hdrEnd).join('\n').length : s.length)
+    .match(/^from:\s*(.+)$/im);
   if (m) {
     const n = displayName(m[1]);
     if (n) return n;

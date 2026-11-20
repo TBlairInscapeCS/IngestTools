@@ -1,15 +1,15 @@
 /**
  * Client playbooks — detection + delivery + ingest requirements.
  *
- * Detection priority:
- *   1. tracking-sheet document id (strongest - one tracker per client)
- *   2. keyword in the email subject/body
- *   3. sender/cc domain anywhere in the email text
+ * Detection priority: a mapped Outlook folder, then sender domain,
+ * tracking-sheet document id, subject patterns, then keywords. Client
+ * domains are tested against the sender address only - a @vizio.com
+ * recipient or quoted header is never evidence for Vizio.
  *
  * detect: { sheetIds, subjects, keywords, domains }  - regexes
  *   subjects are tested against the email subject only (most precise,
- *   e.g. 'Kantar/Vizio Fingerprinting Request:'); keywords/domains run
- *   over subject+body.
+ *   e.g. 'Kantar/Vizio Fingerprinting Request:'); keywords run over
+ *   subject+body; domains run over the sender address only.
  * delivery: 'links' | 'yangaroo' | 'extreme-reach' | 'sharepoint' |
  *           'dropbox' | 'other'  + note = the playbook step shown in-panel
  * ingest (optional) - what the downstream ingest needs, carried into
@@ -178,6 +178,7 @@ var CLIENTS = [
     id: 'amcn',
     name: 'Horizon / AMC Networks',
     detect: {
+      sheetIds: ['1AL1exfzsvrqGhh09qHWPxEJako7XNxY4ZtnAie839pA'],
       subjects: [/amcn.*(inscape|fingerprint)/i],
       keywords: [/\bamcn\b/i],
       domains: [/amcnetworks\.com/i],
@@ -256,6 +257,7 @@ var CLIENTS = [
     id: 'nfl',
     name: 'Horizon / NFL',
     detect: {
+      sheetIds: ['1e45xwzvGsRz3dWQF41F6xoH1ZXHX7iRcL6a_bO5TlZw'],
       subjects: [/inscape fingerprinting.*nfl|nfl.*inscape/i],
       keywords: [/\bnfl\b/i],
       domains: [/nfl\.com/i],
@@ -531,12 +533,11 @@ var CLIENTS = [
     id: 'vizio-request',
     name: 'Vizio (internal request)',
     detect: {
-      // Vizio-internal requests follow a pattern: vizio.com sender + a
-      // clip/share link + "ingest"/"ingestion" ask. All three must hit -
-      // a bare @vizio.com sender alone can't claim the request (Icon
-      // Media, LWD and other client requests get forwarded from Vizio).
-      subjects: [/\b(ingest|ingestion)\b/i],
-      keywords: [/\b(ingest|ingestion|clip|spot)\b/i],
+      // Vizio-internal requests are identified by the sender's @vizio.com
+      // address ONLY. Generic ingest vocabulary used to be an independent
+      // keyword gate, so almost any request with no better client match
+      // defaulted here; and recipient/quoted vizio.com addresses must
+      // never count - only mail actually FROM Vizio is an internal ask.
       domains: [/vizio\.com/i],
       // Tim/Chris send the ingest CONFIRMATIONS - their own vizio.com mail
       // is a response, never a request to process.
@@ -884,6 +885,9 @@ function detectClient(sig) {
   if (folder) return refineEmail(folder);
   const domain = (from.match(/@([a-z0-9.-]+)/i) || [])[1];
   if (domain) {
+    // Sender-domain ownership: tested against the actual sender address
+    // only. Recipient (@vizio.com addressees) or quoted-header addresses
+    // in the body must not claim a client.
     const owner = POOL.find(c => (d(c).domains || []).some(re => re.test(domain)));
     if (owner) return refineEmail(owner);
   }
@@ -918,12 +922,6 @@ function detectClient(sig) {
   if (text.trim()) {
     for (const c of POOL) {
       if ((d(c).keywords || []).some(re => re.test(text))) return c;
-    }
-  }
-  // 5. sender/cc domains - weakest signal, shared across advertisers
-  if (text.trim()) {
-    for (const c of POOL) {
-      if ((d(c).domains || []).some(re => re.test(text))) return c;
     }
   }
   return null;

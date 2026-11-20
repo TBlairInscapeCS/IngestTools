@@ -231,7 +231,7 @@ async function stageTabs() {
   const cls = { outlook: [], sheet: [], sharepoint: [], airtable: [], er: [], portal: [] };
   tabs.forEach(t => {
     const u = t.url || '';
-    if (/outlook\.(office|office365|live)\.com/i.test(u)) cls.outlook.push(t);
+    if (/outlook\.(office|office365|live)\.com|outlook\.cloud\.microsoft/i.test(u)) cls.outlook.push(t);
     if (/docs\.google\.com\/spreadsheets/i.test(u)) cls.sheet.push(t);
     else if (/\.sharepoint\.com|\.sharepoint-df\.com/i.test(u)) cls.sharepoint.push(t);
     else if (/airtable\.com/i.test(u)) cls.airtable.push(t);
@@ -1008,10 +1008,18 @@ function grabEmailText() {
 
   const sels = [
     '[aria-label*="message body" i]', '[id*="UniqueMessageBody"]',
-    '[id*="Item.Message"]', '.ReadingPaneContent', '[role="document"]',
+    '[id*="Item.Message"]', '[id*="Item.MessageBody" i]',
+    '[data-testid*="messagebody" i]', '[data-testid*="message-body" i]',
+    '[class*="MessageBody" i]', '[class*="BodyFragment" i]',
+    '.ReadingPaneContent', '[role="document"]',
   ];
   let containers = [];
-  for (const s of sels) containers = containers.concat([...document.querySelectorAll(s)]);
+  const selHits = {};
+  for (const s of sels) {
+    const found = [...document.querySelectorAll(s)];
+    if (found.length) selHits[s] = found.length;
+    containers = containers.concat(found);
+  }
   containers = containers.filter((el, i, arr) =>
     arr.indexOf(el) === i &&
     !arr.some(o => o !== el && o.contains(el)) &&
@@ -1019,21 +1027,36 @@ function grabEmailText() {
   let text = containers.map(el => el.innerText).join('\n\n').trim();
 
   if (text.length <= 20) {
+    // Last resort: prefer an email/article-shaped region. The previous
+    // "largest div" could swallow the mailbox chrome as well as the
+    // message, corrupting sender/signature detection.
     let best = '';
-    document.querySelectorAll('div').forEach(d => {
-      const t = d.innerText || '';
-      if (t.length > best.length && t.length < 80000) best = t;
-    });
+    for (const s of ['[role="article"]', '[role="main"]', 'main']) {
+      for (const d of document.querySelectorAll(s)) {
+        const t = (d.innerText || '').trim();
+        if (t.length > best.length && t.length < 80000) best = t;
+      }
+      if (best.length > 20) break;
+    }
+    if (!best) {
+      document.querySelectorAll('div').forEach(d => {
+        const t = d.innerText || '';
+        if (t.length > best.length && t.length < 80000 && t.length < 20000) best = t;
+      });
+    }
     text = best;
   }
   // Sender display name off the reading-pane header - best effort; the
   // reply greeting falls back to a bare "Hi," when it's unreadable.
+  const header = containers[0] && (containers[0].closest('[role="article"]') ||
+    containers[0].closest('[class*="Message" i]') || containers[0].parentElement);
+  const q = s => header && header.querySelector(s);
   let sender = '';
-  const sndEl = document.querySelector(
-    '[aria-label*="sender" i], [data-testid*="sender" i], ' +
-    '[class*="PersonaDetails" i] [class*="primaryText" i], ' +
-    '[role="article"] [title*="@"]'
-  );
+  const sndEl = q('[aria-label*="sender" i]') || q('[data-testid*="sender" i]') ||
+    q('[class*="PersonaDetails" i] [class*="primaryText" i]') ||
+    q('[title*="@"]') ||
+    document.querySelector('[aria-label*="sender" i]') ||
+    document.querySelector('[data-testid*="sender" i]');
   if (sndEl) {
     // Attributes first - a matched [title] node's innerText can be the
     // whole message body. Then strip role words and any address so only
@@ -1070,7 +1093,10 @@ function grabEmailText() {
   if (senderAddress && /^[^\s<>]+@[^\s<>]+$/.test(senderAddress.trim()) &&
       visibleSender && visibleSender.length <= 60 && !/[\r\n@<>]/.test(visibleSender))
     senderAddress = visibleSender + ' <' + senderAddress.trim() + '>';
-  return { text: text.slice(0, 80000), subject, sender: senderAddress || sender, html: containers.map(el => el.innerHTML).join('\n'), date: date.slice(0, 90) };
+  return { text: text.slice(0, 80000), subject, sender: senderAddress || sender,
+    html: containers.map(el => el.innerHTML).join('\n'), date: date.slice(0, 90),
+    diag: { containers: containers.length, selHits,
+      url: (typeof location !== 'undefined' ? location.href : '').slice(0, 120) } };
 }
 
 // Inside Outlook: Yangaroo "ADVERTISING DELIVERY" notifications carry a
@@ -1325,17 +1351,29 @@ function airtableCopyAll(doCopy) {
 
 // Read the request email (+ Yangaroo delivery links) off an Outlook tab.
 // Takes a Tab object so callers pick the source tab, not focus.
-async function grabEmailFrom(tab) {
+async function grabEmailFrom(tab, allTabs) {
   modStat('stEmail', 'Grabbing email…');
-  let res;
-  try {
-    [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: grabEmailText });
-  } catch (e) { dbg('email grab fail', { tab: tab.id, err: String(e) }); return false; }
-  const text = (res.result && res.result.text || '').trim();
-  if (!text) { setStage('sdEmail', 'fail', 'Outlook tab had no readable email'); return false; }
+  // Try the preferred tab first, then every other Outlook tab: an inbox-
+  // list tab sorted before the open message used to dead-end the grab.
+  const cands = [tab].concat((allTabs || []).filter(t => t !== tab)).filter(Boolean);
+  let res = null, usedTab = null, lastDiag = null, lastErr = '';
+  for (const t of cands) {
+    try {
+      const [r] = await chrome.scripting.executeScript({ target: { tabId: t.id }, func: grabEmailText });
+      const out = (r && r.result) || {};
+      if ((out.text || '').trim()) { res = { result: out }; usedTab = t; break; }
+      lastDiag = out.diag || null;
+    } catch (e) { lastErr = String(e); dbg('email grab fail', { tab: t.id, err: lastErr }); }
+  }
+  if (!res) {
+    dbg('email grab empty', { tab: usedTab && usedTab.id, diag: lastDiag, err: lastErr });
+    setStage('sdEmail', 'fail', 'Outlook tab had no readable email');
+    return false;
+  }
+  const text = (res.result.text || '').trim();
   let yr = {};
   try {
-    const [yres] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: grabYangarooDelivery });
+    const [yres] = await chrome.scripting.executeScript({ target: { tabId: usedTab.id }, func: grabYangarooDelivery });
     yr = yres.result || {};
   } catch (e) { /* delivery-link scrape is optional */ }
   yangaroo = (yr.spots && yr.spots.length) ? yr : null;
@@ -1374,7 +1412,7 @@ bindUiAction('grabEmail', async () => {
   const cls = await stageTabs();
   const tab = pickTab(cls.outlook, ((await activeTab()) || {}).id);
   if (!tab) return toast('Open the request email in an Outlook web tab (or paste it).');
-  if (!await grabEmailFrom(tab)) return toast('Could not read an email on that tab - paste the body instead.');
+  if (!await grabEmailFrom(tab, cls.outlook)) return toast('Could not read an email on any Outlook tab - open the message itself, use Check inbox, or paste the body.');
   toast('Email captured' + (yangaroo ? ' - Yangaroo delivery: ' + yangaroo.spots.length + ' spot(s) with download links' : '') + '.');
 });
 
@@ -2102,12 +2140,85 @@ async function trackerDocumentTitle(id, wb) {
   } catch (e) { dbg('tracker title unavailable', { id }); }
   return '';
 }
-async function loadSheetDoc(id, gid, tabName, sourceLabel) {
+// Lean sheet read: append-style trackers get the header band plus the
+// bottom rows via small CSV range pulls instead of the whole workbook
+// export. The Horizon master is the exception - it inserts rows
+// mid-sheet, so it always takes the full export. Anything the lean grid
+// can't satisfy (a cited code/row outside the window, hyperlinks for the
+// download step) upgrades to the full load on demand.
+const LEAN_BAND = 8, LEAN_TAIL = 60;
+const FULL_DOC_IDS = new Set(
+  (CLIENTS.find(c => c.id === 'horizon-next') || {}).detect?.sheetIds || []);
+
+async function sheetCsvRange(id, gid, range) {
+  const r = await fetch('https://docs.google.com/spreadsheets/d/' + id +
+    '/export?format=csv&gid=' + (gid || '0') + '&range=' + encodeURIComponent(range),
+    { credentials: 'include' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.text();
+}
+
+async function sheetRowHasContent(id, gid, n) {
+  const t = await sheetCsvRange(id, gid, 'A' + n + ':ZZ' + n);
+  return /[^,\s"]/.test(t);
+}
+
+// Binary-search the bottom edge: exponential probe to an empty row, then
+// halve back to the last populated one. Cheap one-row requests.
+async function sheetLastRow(id, gid) {
+  let lo = 1, probe = 1024;
+  while (probe <= 200000 && await sheetRowHasContent(id, gid, probe)) { lo = probe; probe *= 2; }
+  let hi = probe;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (await sheetRowHasContent(id, gid, mid)) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+async function loadSheetLean(id, gid, tabName, sourceLabel, context) {
+  if (FULL_DOC_IDS.has(id)) return false;
+  gid = gid || 0;
+  try {
+    const last = await sheetLastRow(id, gid);
+    if (context !== trackerContext()) return 'discarded';
+    const tailLo = Math.max(1, Math.min(last, last - LEAN_TAIL + 1));
+    const bandHi = Math.min(LEAN_BAND, tailLo - 1);
+    const band = bandHi >= 1 ? parseInput(await sheetCsvRange(id, gid, 'A1:ZZ' + bandHi)).rows : [];
+    const tail = parseInput(await sheetCsvRange(id, gid, 'A' + tailLo + ':ZZ' + last)).rows;
+    if (!band.length && !tail.length) return false;
+    // Filler rows keep absolute numbering - allRows[i] is still sheet
+    // row i+1 so row links and fill-back land on the right cells.
+    const rows = band.slice();
+    while (rows.length < tailLo - 1) rows.push([]);
+    const wb = { rows: rows.concat(tail), links: {}, sheetName: tabName || '',
+      lean: { lo: tailLo, hi: last } };
+    if (context !== trackerContext() || !trackerAllowed(id, sourceLabel)) return 'discarded';
+    const documentTitle = await trackerDocumentTitle(id);
+    sheetBuf = null; sheetBufSig = ''; sheetTabs = []; sheetTabName = wb.sheetName;
+    clearSheetIndex();
+    lastSheetRef = { id, gid, tabName: wb.sheetName, documentTitle, clientId: client && client.id };
+    loadSheetRows(wb, (sourceLabel || 'tracker') +
+      ' (lean: header + rows ' + tailLo + '-' + last + ')');
+    if (sheet) sheet.lean = wb.lean;
+    chrome.storage.local.set({ msLastSheet: lastSheetRef });
+    rememberSheet();
+    dbg('lean sheet read', { id: id.slice(0, 12), lastRow: last, window: tailLo + '-' + last });
+    return true;
+  } catch (e) { dbg('lean load failed - using full export', { id: id.slice(0, 12), err: String(e) }); return false; }
+}
+
+async function loadSheetDoc(id, gid, tabName, sourceLabel, forceFull) {
   if (!trackerAllowed(id, sourceLabel)) { await cleanTrackerReferences(); return false; }
   const context = trackerContext();
   modStat('stSheet', 'Loading ' + (sourceLabel || 'tracker') + '…');
   sheetSourceTab = null; // cleared here; tab-grabs re-set it on success
   clearSheetIndex(); // new workbook = new tab map
+  if (!forceFull) {
+    const lean = await loadSheetLean(id, gid, tabName, sourceLabel, context);
+    if (lean === 'discarded') return false;
+    if (lean) return true;
+  }
   try {
     const r = await fetch(
       `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`,
@@ -2848,6 +2959,20 @@ async function doMatch() {
   // path for emails that name no IDs at all.
   const reqRows = [...new Set(refs.rowRefs
     .concat(extractRowRefs(idsEl.value)).concat(manualRows || []))];
+  // Lean-read upgrade: a cited code or row outside the loaded window
+  // means the request isn't in the tail - pull the full export now.
+  if (sheet.lean && lastSheetRef && lastSheetRef.id) {
+    const leanHay = normalizeName(sheet.allRows.map(r => r.join(' ')).join('\n')).replace(/[\s:_-]+/g, '');
+    const miss = reqCodes.some(c =>
+        !leanHay.includes(normalizeName(c).replace(/[\s:_-]+/g, ''))) ||
+      reqRows.some(n => n > LEAN_BAND && n < sheet.lean.lo || n > sheet.lean.hi);
+    if (miss) {
+      dbg('lean read insufficient - upgrading to full export', { window: sheet.lean });
+      toast('Request rows are outside the tail window - pulling the full sheet…');
+      await loadSheetDoc(lastSheetRef.id, lastSheetRef.gid, lastSheetRef.tabName, 'full sheet (lean upgrade)', true);
+      cols = currentCols();
+    }
+  }
   const scores = await sheetTabScores(reqCodes, reqRows);
   if (scores) {
     const cur = scores.find(s => s.name === sheetTabName) ||
@@ -3105,7 +3230,25 @@ bindUiAction('match', async () => {
 // Row exclusion toggle: the flag lives on the match object; re-presenting
 // re-derives every downstream surface (ids box, download button, reply,
 // portal feed) from the still-selected rows.
+// Bulk match controls: select/deselect all, drop fuzzy (TITLE/BRAND/GUESS)
+// hits, delete excluded rows outright (Kantar's 2-in-20 matches).
+function matchBulk(a) {
+  if (!matched) return;
+  if (a === 'all') matched.forEach(m => { m.excluded = false; });
+  else if (a === 'none') matched.forEach(m => { m.excluded = true; });
+  else if (a === 'idonly') matched.forEach(m => {
+    if (/^(TITLE|BRAND|GUESS)/.test(m.matchType || '')) m.excluded = true;
+  });
+  else if (a === 'drop') {
+    const n = matched.filter(m => m.excluded).length;
+    matched = matched.filter(m => !m.excluded);
+    if (n) toast(n + ' excluded row(s) deleted.');
+  }
+  presentMatches(true);
+}
 $('matchResults').addEventListener('click', e => {
+  const act = e.target.closest('[data-mact]');
+  if (act) { e.preventDefault(); matchBulk(act.dataset.mact); return; }
   // Row number -> highlight that row on the tracker (opens it in a
   // background tab when it isn't open).
   const rl = e.target.closest('a.rowlink');
@@ -3251,6 +3394,10 @@ function presentMatches(quiet) {
       ? '<div class="hint" id="missedNote"><b>not found on this tab:</b> ' + esc(missed.join(', ')) +
         ' - loaded: ' + esc(sheetSource || '?') + ' · checking other tabs…</div>'
       : '') +
+    '<div class="hint matchbar"><a href="#" data-mact="all">select all</a> · ' +
+      '<a href="#" data-mact="none">deselect all</a> · ' +
+      '<a href="#" data-mact="idonly" title="exclude TITLE, BRAND and GUESS matches - keep only rows proven by ID, row number or sheet selection">keep ID-matched only</a> · ' +
+      '<a href="#" data-mact="drop" title="remove every excluded row from the list entirely">delete excluded</a></div>' +
     '<table><thead><tr><th></th><th>Row</th><th>ID</th><th>Title</th><th>Match</th><th>ESPN/Access</th><th>Date</th><th>Link</th></tr></thead><tbody>' +
     rows + '</tbody></table>';
   if (missed.length) findCodeTabs(missed).then(tabHits => {
@@ -4323,6 +4470,13 @@ async function downloadLinked() {
   const sel = selectedMatches();
   if (!sel.length) { toast('Every matched row is excluded - nothing to send.'); setStage('sdDl', 'warn', 'all rows excluded'); return false; }
   warnStale();
+  // A lean-read sheet has no hyperlinks (CSV ranges carry text only) -
+  // the full xlsx is what resolves download URLs.
+  if (sheet && sheet.lean && lastSheetRef && lastSheetRef.id) {
+    toast('Pulling the full sheet for download links…');
+    if (await loadSheetDoc(lastSheetRef.id, lastSheetRef.gid, lastSheetRef.tabName, 'full sheet for links', true))
+      presentMatches(true);   // re-join hyperlinks onto the matched rows
+  }
   const job = jobSlug();
   const withLinks = sel.filter(m => m.link || m.yangarooUrl);
   // No links at all isn't fatal anymore: every matched row becomes a
@@ -5566,7 +5720,9 @@ async function captureDeliveryEmails(tabs) {
     try {
       const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: grabEmailText });
       if (context !== workflowContext()) return false;
-      mails.push({ ...((res && res.result) || {}), source: 'open Outlook tab ' + tab.id });
+      const mail = (res && res.result) || {};
+      mail.source = 'open Outlook tab ' + tab.id;
+      mails.push(mail);
     } catch (e) { dbg('delivery email scan failed', { tab: tab.id, error: e.message }); }
   }
   if (context !== workflowContext()) return false;
@@ -5657,7 +5813,7 @@ bindUiAction('runAll', async () => {
   // 1 · Email: an open Outlook tab supplies it; already-pasted text is
   // kept when no Outlook tab is open.
   const ot = pickTab(cls.outlook, active);
-  if (ot) await grabEmailFrom(ot);
+  if (ot) await grabEmailFrom(ot, cls.outlook);
   if (!emailEl.value.trim()) return toast('No request email - open it in Outlook or paste it.');
 
   // 2 · Sheet: the email's own tracker link is request-scoped - it
@@ -7214,8 +7370,13 @@ async function runVerify(wanted) {
     $('verifyInfo').innerHTML =
       realms.map(realm => '<b>' + byRealm[realm].length + '/' + wanted.length + '</b> reporting ID(s) in ' + esc(realm)).join(' · ') +
       (missed.length ? ' - <span style="color:#ec9a9a">not in all realms: ' + missed.slice(0, 8).map(m => esc(m.reporting)).join(', ') + (missed.length > 8 ? ' +' + (missed.length - 8) : '') + '</span>' : '') +
-      (lastIngestRecords.length ? '<br>' + lastIngestRecords.slice(0, 10).map(r =>
-        esc(r.reportingId) + ' · ' + esc(r.realm || realms[0]) + ' · ' + esc(r.status || '?') + ' · ' + esc(String(r.datetime || '').slice(0, 19).replace('T', ' '))).join('<br>') : '');
+      (lastIngestRecords.length ? ' <details class="mini"><summary>' +
+        lastIngestRecords.length + ' record line(s)</summary><div class="scrollbox" style="max-height:120px">' +
+        lastIngestRecords.map(r =>
+          '<div style="background:#1d2b1d;border-radius:3px;padding:1px 4px;margin:1px 0">' +
+          esc(r.reportingId) + ' · ' + esc(r.realm || realms[0]) + ' · ' + esc(r.status || '?') +
+          ' · ' + esc(String(r.datetime || '').slice(0, 19).replace('T', ' ')) + '</div>').join('') +
+        '</div></details>' : '');
     $('saveRecords').classList.toggle('hidden', !lastIngestRecords.length);
     // Evidence only counts when the ID reached that stage in EVERY realm
     // the playbook ingests into - a geniusdigital hit alone can't claim

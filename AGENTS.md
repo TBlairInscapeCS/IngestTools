@@ -43,7 +43,7 @@ syntax and any changed setup-check behavior before finishing.
   (expect 146/146, including InMarket mixed row ranges, unmarked old
   confirmations, and per-row campaign metadata from column D).
 - Tracker-selection integration tests: `cd extension && node test_tracker_selection.js`
-  (14 tests; executes production selection, loader, storage cleanup, and Run all
+  (16 tests; executes production selection, loader, lean window reads, storage cleanup, and Run all
   code against browser/network mocks, including asynchronous request changes).
 - Trackerless reply integration tests: `cd extension && node test_trackerless_reply.js`
   (29 tests; executes Jira sign-off exclusion, Yangaroo link attachment,
@@ -52,8 +52,9 @@ syntax and any changed setup-check behavior before finishing.
   discovery, cross-tab index scoring/deref/tab-switch, already-ingested records
   pre-check, and resumed verification together, including ComScore/SimulMedia logs).
 - Local media discovery tests: `cd local && python3 -m unittest test_local_discovery.py`
-  (9 tests; fixed-root request-ID matching, duplicates, symlinks, changed files,
-  batch separation, and serving without a manifest).
+  (13 tests; fixed-root request-ID matching, duplicates, symlinks, changed files,
+  batch separation, serving without a manifest, and the loose-file/manifest
+  sweep into `_archive/`).
 - Four-step journey UI tests: `cd extension && node test_journey_ui.js`
   (51 tests; filename aliases, live fill plan replacement, metadata verification,
   delayed portal cells, fill counts, model decisions, real markup/controller, manual shortcuts,

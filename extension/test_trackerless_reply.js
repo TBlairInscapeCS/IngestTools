@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sidepanel.js', 'utf8');
 const engine = fs.readFileSync(__dirname + '/engine.js', 'utf8');
-const names = ['grabEmailText', 'buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'computeSheetModel', 'pendingFor', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab', 'requestRefs', 'checkAlreadyIngested'];
+const names = ['grabEmailText', 'matchBulk', 'buildJiraTicket', 'ingestPlan', 'ingestReportIds', 'ingestRealm', 'ingestRealms', 'mergeMatches', 'doEmailMatch', 'presentMatches', 'refreshReply', 'manualReply', 'replyOptions', 'replyRequestIds', 'updateReplyCheck', 'workflowContext', 'rememberWorkflowEvidence', 'workflowReplyText', 'persistJobEvidence', 'hydrateJobEvidence', 'runVerify', 'runReconcile', 'moniker', 'captureDeliveryEmails', 'discoverLocalFiles', 'autoDownload', 'esc', 'guessedCols', 'computeSheetModel', 'pendingFor', 'sheetIndexEntry', 'ensureSheetIndex', 'indexHay', 'sheetTabScores', 'matchTab', 'tabGrid', 'matchGridRow', 'switchSheetTab', 'requestRefs', 'checkAlreadyIngested'];
 const functions = names.map(name => {
   const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
   assert(start >= 0, name);
@@ -69,7 +69,8 @@ test('draft entries use plain lines across workflow and receipt replies', () => 
 });
 test('Outlook capture retains visible sender name when tooltip contains only an address', () => {
   const { ctx } = setup();
-  const body = { innerText: 'Please ingest these creatives ABC12345H', innerHTML: '', contains: () => false };
+  const body = { innerText: 'Please ingest these creatives ABC12345H', innerHTML: '',
+    contains: () => false, closest: () => null, querySelector: () => null };
   const sender = { innerText: 'Cruz, Anthony', getAttribute: key => key === 'title' ? 'anthony@example.com' : '' };
   ctx.document = {
     querySelector: selector => selector.includes('sender') ? sender : null,
@@ -78,6 +79,33 @@ test('Outlook capture retains visible sender name when tooltip contains only an 
   const captured = ctx.grabEmailText();
   assert.match(captured.sender, /anthony@example.com/);
   assert.equal(ctx.senderFirstName(captured.sender), 'Anthony');
+});
+test('match list bulk controls select, filter and delete in bulk', () => {
+  const { ctx, element } = setup();
+  ctx.matched = [
+    { row: 2, id: 'ID1', matchType: 'ID', title: '', trackingId: 'ID1' },
+    { row: 3, id: 'T1', matchType: 'TITLE', title: '', trackingId: 'T1' },
+    { row: 4, id: 'G1', matchType: 'GUESS', title: '', trackingId: 'G1' },
+    { row: 5, id: 'B1', matchType: 'BRAND', title: '', trackingId: 'B1' },
+  ];
+  ctx.matchBulk('idonly');
+  assert.deepEqual(ctx.matched.map(m => !!m.excluded), [false, true, true, true]);
+  ctx.matchBulk('drop');
+  assert.deepEqual(ctx.matched.map(m => m.id), ['ID1']);
+  ctx.matched.push({ row: 6, id: 'ID2', matchType: 'ID', title: '', trackingId: 'ID2' });
+  ctx.matchBulk('none');
+  assert(ctx.matched.every(m => m.excluded));
+  ctx.matchBulk('all');
+  assert(ctx.matched.every(m => !m.excluded));
+  assert.match(element('matchResults').innerHTML, /data-mact="drop"/);
+});
+test('addressee and quoted headers are not treated as the sender', () => {
+  const { ctx } = setup();
+  const thread = 'To: Tim Blair <tim.blair@vizio.com>\nSubject: New spots\n\nHi Tim,\nPlease ingest ABC12345H\n\nThanks,\nAmanda Smith\n\nFrom: Tim Blair <tim.blair@vizio.com>\nSent: Friday\nSubject: Re: req';
+  assert.equal(ctx.senderFirstName(thread), 'Amanda');
+  // Top headers are request content; quoted headers below still bound the segment.
+  assert.match(ctx.firstSegment(thread), /ABC12345H/);
+  assert.doesNotMatch(ctx.firstSegment(thread), /Re: req/);
 });
 test('sender names normalize Outlook labels, comma names and punctuation in signatures', () => {
   const { ctx } = setup();

@@ -137,8 +137,11 @@ covers every `Horizon / <brand>` child.
    if needed, and post only on approval. Trackerless requests can draft
    acknowledgments from email IDs/filenames. Proof files land in
    `Ingest/_previous jobs/` (newest 3 jobs kept). Fully-archived job
-   dirs fold under `Ingest/_archive/` (pruned after ~45 days), and the
-   watcher logs rotate at ~2 MB with one backup each.
+   dirs fold under `Ingest/_archive/` (pruned after ~45 days). Loose
+   strays (media, JSON, screenshots with no manifest claim) move to
+   `_archive/_loose/` after ~7 days and stale manifests fold to
+   `_archive/<slug>/` after ~14 — recoverable until the same 45-day
+   prune. Watcher logs rotate at ~2 MB with one backup each.
 
 Busy operations disable repeated/competing starts and show their current
 work. **New request** / **Clear all** clears per-job evidence, download
